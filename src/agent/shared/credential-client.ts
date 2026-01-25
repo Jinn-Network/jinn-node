@@ -72,11 +72,21 @@ export async function getCredential(provider: string): Promise<string> {
 
   const privateKey = getPrivateKey();
 
-  // Build request body
-  const body = {
+  // Build request body (include requestId for job-bound credentials)
+  const body: {
+    timestamp: number;
+    nonce: string;
+    requestId?: string;
+  } = {
     timestamp: Math.floor(Date.now() / 1000),
     nonce: crypto.randomUUID(),
   };
+
+  // Include job context if available (JINN_JOB_ID set by worker)
+  const jobId = process.env.JINN_JOB_ID;
+  if (jobId) {
+    body.requestId = jobId;
+  }
 
   // Sign the request body
   const message = JSON.stringify(body);
