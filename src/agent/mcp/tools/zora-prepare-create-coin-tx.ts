@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { createPublicClient, http, createWalletClient, WalletClient, PublicClient } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { base, baseSepolia } from 'viem/chains';
-import { createCoin, setApiKey, ValidMetadataURI, createCoinCall, ContentCoinCurrency } from '@zoralabs/coins-sdk';
+import { createCoin, setApiKey, createCoinCall, ContentCoinCurrency } from '@zoralabs/coins-sdk';
 
 // Zod schemas for input validation
 export const prepareCreateCoinTxParams = z.object({
@@ -117,7 +117,7 @@ export async function prepareCreateCoinTx(params: PrepareCreateCoinTxParams) {
       symbol,
       metadata: {
         type: 'RAW_URI' as const,
-        uri: uri as ValidMetadataURI,
+        uri: uri as any,
       },
       currency: currency as ContentCoinCurrency,
       chainId,

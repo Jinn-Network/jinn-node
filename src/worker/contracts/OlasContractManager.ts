@@ -7,7 +7,7 @@
  * Part of JINN-150 Slice 2: Service Creation and Registration Refactoring
  */
 
-import { Contract, JsonRpcProvider, keccak256, toUtf8Bytes } from 'ethers';
+import { Contract, JsonRpcProvider, keccak256, toUtf8Bytes, TransactionReceipt } from 'ethers';
 import { TransactionRequest, TransactionPayload } from '../queue/types.js';
 import { 
   AGENT_REGISTRY_ABI, 

@@ -1,5 +1,5 @@
 import pino from 'pino';
-import SonicBoom from 'sonic-boom';
+import { SonicBoom } from 'sonic-boom';
 import { getLoggingConfig, LoggingConfig } from './config.js';
 
 export type LoggerBundle = {
