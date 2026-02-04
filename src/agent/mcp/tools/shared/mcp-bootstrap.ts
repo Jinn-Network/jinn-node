@@ -1,4 +1,9 @@
 import { execa } from 'execa';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 let mcpProcess: any = null;
 
@@ -10,7 +15,9 @@ export async function loadMcpServer(): Promise<void> {
   }
 
   const env = { ...process.env };
-  mcpProcess = execa('yarn', ['tsx', 'jinn-node/src/agent/mcp/server.ts'], {
+  // Use path relative to this module for standalone compatibility
+  const serverPath = join(__dirname, '../../server.ts');
+  mcpProcess = execa('yarn', ['tsx', serverPath], {
     cwd: process.cwd(),
     stdio: 'pipe',
     env,
