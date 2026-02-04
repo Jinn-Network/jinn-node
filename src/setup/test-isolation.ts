@@ -20,6 +20,9 @@ export interface IsolatedEnvironment {
 
 /**
  * Resolve the middleware path - checks env var, Poetry, then fallback
+ *
+ * For Poetry git dependencies, the middleware is installed in site-packages.
+ * We use Python to find the actual package location for copying.
  */
 async function resolveMiddlewarePath(): Promise<string> {
   // 1. Explicit env override
@@ -27,20 +30,30 @@ async function resolveMiddlewarePath(): Promise<string> {
     return process.env.OLAS_MIDDLEWARE_PATH;
   }
 
-  // 2. Find Poetry-installed package location
+  const jinnNodeRoot = path.resolve(__dirname, '..', '..');
+
+  // 2. Find Poetry-installed package location using Python
   try {
-    const jinnNodeRoot = path.resolve(__dirname, '..', '..');
-    const poetryShow = execSync('poetry show olas-operate-middleware --path', {
-      cwd: jinnNodeRoot,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
-    }).trim();
-    if (poetryShow) {
-      scriptLogger.info({ poetryPath: poetryShow }, 'Found middleware via Poetry');
-      return poetryShow;
+    // Use Python to find where the operate package is installed
+    const operatePath = execSync(
+      'poetry run python -c "import operate; import os; print(os.path.dirname(operate.__file__))"',
+      {
+        cwd: jinnNodeRoot,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe']
+      }
+    ).trim();
+
+    if (operatePath) {
+      // The operate module is in site-packages/operate
+      // We need the parent directory for the full middleware
+      const middlewarePath = path.dirname(operatePath);
+      scriptLogger.info({ operatePath, middlewarePath }, 'Found middleware via Poetry Python');
+      return middlewarePath;
     }
-  } catch {
+  } catch (error) {
     // Poetry not available or package not installed
+    scriptLogger.debug({ error }, 'Poetry middleware lookup failed');
   }
 
   // 3. Fallback to sibling directory (monorepo compatibility)

@@ -159,10 +159,16 @@ export class OlasOperateWrapper {
   }
 
   /**
-   * Resolve middleware path - checks config, env var, Poetry, then fallback
+   * Resolve middleware path - checks config, env var, Poetry package, then fallback
+   *
+   * With Poetry git dependencies, the middleware is installed in the venv's site-packages,
+   * not as a standalone directory. This method returns either:
+   * - An explicit path (config or env var) for local development
+   * - The jinn-node root (for Poetry mode - commands run via `poetry run python`)
+   * - A fallback sibling directory (monorepo compatibility)
    */
   private static async _resolveMiddlewarePath(configPath?: string): Promise<string> {
-    // 1. Explicit config path
+    // 1. Explicit config path (e.g., for E2E tests with copied middleware)
     if (configPath) {
       operateLogger.debug({ configPath }, "Using config-provided middleware path");
       return resolve(configPath);
@@ -174,25 +180,27 @@ export class OlasOperateWrapper {
       return resolve(process.env.OLAS_MIDDLEWARE_PATH);
     }
 
-    // 3. Try to find Poetry-installed package
+    const jinnNodeRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+    // 3. Check if Poetry has the middleware installed (via git dependency in pyproject.toml)
     try {
       const { execSync } = await import('child_process');
-      const jinnNodeRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-      const poetryShow = execSync('poetry show olas-operate-middleware --path', {
+      // Use Python to check if the operate module is importable
+      execSync('poetry run python -c "import operate"', {
         cwd: jinnNodeRoot,
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe']
-      }).trim();
-      if (poetryShow) {
-        operateLogger.info({ poetryPath: poetryShow }, "Found middleware via Poetry");
-        return poetryShow;
-      }
+      });
+      // Middleware is installed via Poetry - return jinn-node root
+      // Commands will be executed via `poetry run python -m operate.cli`
+      operateLogger.info({ jinnNodeRoot }, "Middleware available via Poetry - using jinn-node root");
+      return jinnNodeRoot;
     } catch {
-      // Poetry not available or package not installed - continue to fallback
-      operateLogger.debug("Poetry middleware lookup failed, trying fallback paths");
+      // Poetry not available or middleware not installed - continue to fallback
+      operateLogger.debug("Poetry middleware not available, trying fallback paths");
     }
 
-    // 4. Fallback: sibling directory (monorepo compatibility)
+    // 4. Fallback: sibling directory (monorepo compatibility or local development)
     const currentFile = fileURLToPath(import.meta.url);
     const workerDir = dirname(currentFile);
     const projectRoot = resolve(workerDir, '..');
@@ -218,54 +226,57 @@ export class OlasOperateWrapper {
   }
 
   /**
-   * Resolve Python binary, preferring Poetry virtual environment
+   * Resolve Python binary, preferring Poetry for managed environments
    *
-   * For E2E tests with copied middleware, we use 'poetry run python' to ensure
-   * Poetry correctly resolves the venv even from a different directory context.
+   * For standalone jinn-node with Poetry git dependencies, we use 'poetry run python'
+   * which ensures the correct virtualenv with all dependencies is used.
    */
   private static async _resolvePythonBinary(middlewarePath: string, configBinary?: string): Promise<string> {
-    try {
-      // Check if Poetry is available and can resolve the venv
-      const poetryResult = await OlasOperateWrapper._executePoetryEnvInfo(middlewarePath);
+    // If explicit binary configured, use it
+    if (configBinary) {
+      operateLogger.info({ configBinary }, "Using configured Python binary");
+      return configBinary;
+    }
 
+    const fs = await import('fs');
+
+    // Check if pyproject.toml exists (indicating Poetry project)
+    const pyprojectPath = join(middlewarePath, 'pyproject.toml');
+    if (fs.existsSync(pyprojectPath)) {
+      // Verify Poetry is available
+      try {
+        const { execSync } = await import('child_process');
+        execSync('poetry --version', { stdio: 'pipe' });
+
+        operateLogger.info({
+          middlewarePath,
+          pyprojectPath
+        }, "Found pyproject.toml - will use 'poetry run python'");
+        return 'poetry';
+      } catch {
+        operateLogger.warn("Poetry not available but pyproject.toml exists - falling back to python3");
+      }
+    }
+
+    // Try to find a Poetry venv Python directly (for copied middleware with .venv)
+    try {
+      const poetryResult = await OlasOperateWrapper._executePoetryEnvInfo(middlewarePath);
       if (poetryResult.success && poetryResult.stdout.trim()) {
         const venvPath = poetryResult.stdout.trim();
         const venvPython = join(venvPath, 'bin', 'python');
 
-        operateLogger.info({
-          venvPath,
-          venvPython
-        }, "Resolved Poetry virtual environment Python");
-
-        return venvPython;
+        if (fs.existsSync(venvPython)) {
+          operateLogger.info({ venvPython }, "Resolved Poetry virtual environment Python");
+          return venvPython;
+        }
       }
     } catch (error) {
-      operateLogger.warn({ error }, "Failed to resolve Poetry virtual environment");
+      operateLogger.debug({ error }, "Could not resolve Poetry venv directly");
     }
 
-    // If Poetry resolution failed but pyproject.toml exists, use 'poetry run python'
-    // This handles E2E tests with copied middleware where Poetry can't resolve the venv by absolute path
-    try {
-      const fs = await import('fs');
-      const pyprojectPath = join(middlewarePath, 'pyproject.toml');
-      if (fs.existsSync(pyprojectPath)) {
-        operateLogger.info({
-          middlewarePath,
-          pyprojectPath
-        }, "Found pyproject.toml but Poetry venv resolution failed - will use 'poetry run python'");
-        return 'poetry';
-      }
-    } catch (error) {
-      operateLogger.warn({ error }, "Failed to check for pyproject.toml");
-    }
-
-    // Fall back to configured or default Python
-    const fallbackPython = configBinary || 'python3';
-    operateLogger.info({
-      fallbackPython
-    }, "Using fallback Python binary");
-
-    return fallbackPython;
+    // Fall back to python3
+    operateLogger.info("Using fallback Python binary: python3");
+    return 'python3';
   }
 
   /**
@@ -575,19 +586,40 @@ export class OlasOperateWrapper {
   }
 
   /**
-   * Validate middleware path and CLI file existence
+   * Validate middleware availability
+   *
+   * For Poetry-installed middleware, we can't check for a file path since it's in site-packages.
+   * Instead, we verify the operate module is importable.
    */
   private async _validateMiddlewarePath(): Promise<string[]> {
     const issues: string[] = [];
-    
+
+    // If using Poetry mode, verify the module is importable
+    if (this.pythonBinary === 'poetry') {
+      try {
+        const result = await OlasOperateWrapper._spawnChildProcess(
+          'poetry',
+          ['run', 'python', '-c', 'import operate; print(operate.__version__)'],
+          { cwd: this.middlewarePath, timeout: 10000 }
+        );
+        if (!result.success) {
+          issues.push(`Middleware not installed via Poetry. Run: cd ${this.middlewarePath} && poetry install`);
+        }
+      } catch {
+        issues.push(`Failed to verify Poetry middleware installation at ${this.middlewarePath}`);
+      }
+      return issues;
+    }
+
+    // For direct Python mode, check for cli.py file
     try {
       const fs = await import('fs/promises');
       const cliPath = `${this.middlewarePath}/operate/cli.py`;
       await fs.access(cliPath);
     } catch {
-      issues.push(`Middleware not found at ${this.middlewarePath}. Ensure git submodule is initialized.`);
+      issues.push(`Middleware not found at ${this.middlewarePath}. Ensure middleware is installed.`);
     }
-    
+
     return issues;
   }
 
