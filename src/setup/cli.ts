@@ -21,6 +21,7 @@ import { SimplifiedServiceBootstrap, type SimplifiedBootstrapConfig } from '../w
 import { logger } from '../logging/index.js';
 import { getRequiredRpcUrl, getOptionalMechChainConfig, getOptionalOperatePassword } from '../agent/mcp/tools/shared/env.js';
 import { createIsolatedMiddlewareEnvironment, type IsolatedEnvironment } from './test-isolation.js';
+import { runPreflight } from './preflight.js';
 
 const setupLogger = logger.child({ component: "SETUP-CLI" });
 
@@ -51,6 +52,7 @@ interface CLIArgs {
   help?: boolean;
   unattended?: boolean;
   isolated?: boolean;
+  autoInstall?: boolean;
 }
 
 function parseArgs(): CLIArgs {
@@ -73,6 +75,8 @@ function parseArgs(): CLIArgs {
       args.unattended = true;
     } else if (arg === '--isolated') {
       args.isolated = true;
+    } else if (arg === '--auto-install') {
+      args.autoInstall = true;
     }
   }
 
@@ -103,6 +107,7 @@ OPTIONS:
   --staking-contract  Custom staking contract address (default: AgentsFun1)
   --unattended        Run middleware in unattended mode (requires env vars)
   --isolated          Run in isolated temp directory (fresh .operate, no production state)
+  --auto-install      Auto-run 'poetry install' if Python dependencies missing
   --help, -h          Show this help message
 
 ENVIRONMENT FILES:
@@ -158,6 +163,21 @@ async function main() {
     printHelp();
     process.exit(0);
   }
+
+  // Run preflight checks (Poetry, middleware, dependencies)
+  console.log('\n  Checking prerequisites...\n');
+  const preflightResult = await runPreflight({
+    autoInstall: args.autoInstall,
+  });
+
+  if (!preflightResult.success) {
+    console.error('  Preflight checks failed:\n');
+    for (const error of preflightResult.errors) {
+      console.error(`  ✗ ${error}\n`);
+    }
+    process.exit(1);
+  }
+  console.log('  ✓ Poetry and middleware dependencies ready\n');
 
   // Validate environment
   const operatePassword = getOptionalOperatePassword();
