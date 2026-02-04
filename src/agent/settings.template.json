@@ -1,0 +1,29 @@
+{
+  "security": {
+    "auth": {
+      "selectedType": "oauth-personal"
+    }
+  },
+  "previewFeatures": true,
+  "mcpServers": {
+    "metacog": {
+      "command": "node",
+      "args": [
+        "./mcp/server.js"
+      ],
+      "trust": true
+    },
+    "fireflies": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://api.fireflies.ai/mcp",
+        "--header",
+        "Authorization: Bearer ${FIREFLIES_API_KEY}"
+      ],
+      "trust": true,
+      "includeTools": []
+    }
+  }
+}

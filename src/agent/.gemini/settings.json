@@ -1,0 +1,78 @@
+{
+  "security": {
+    "auth": {
+      "selectedType": "oauth-personal"
+    }
+  },
+  "previewFeatures": true,
+  "mcpServers": {
+    "metacog": {
+      "command": "/Users/adrianobradley/jinn-gemini-2/node_modules/.bin/tsx",
+      "args": [
+        "/Users/adrianobradley/jinn-gemini-2/gemini-agent/mcp/server.ts"
+      ],
+      "trust": true,
+      "includeTools": [
+        "list_tools",
+        "get_details",
+        "inspect_situation",
+        "dispatch_new_job",
+        "dispatch_existing_job",
+        "create_artifact",
+        "create_measurement",
+        "search_jobs",
+        "search_artifacts",
+        "google_web_search",
+        "web_fetch",
+        "list_directory",
+        "read_file",
+        "search_file_content",
+        "glob",
+        "read_many_files",
+        "write_file",
+        "replace",
+        "run_shell_command"
+      ]
+    }
+  },
+  "excludeTools": [
+    "click",
+    "drag",
+    "fill",
+    "fill_form",
+    "handle_dialog",
+    "hover",
+    "press_key",
+    "upload_file",
+    "close_page",
+    "list_pages",
+    "navigate_page",
+    "new_page",
+    "select_page",
+    "wait_for",
+    "emulate",
+    "resize_page",
+    "performance_analyze_insight",
+    "performance_start_trace",
+    "performance_stop_trace",
+    "get_network_request",
+    "list_network_requests",
+    "evaluate_script",
+    "get_console_message",
+    "list_console_messages",
+    "take_screenshot",
+    "take_snapshot"
+  ],
+  "coreTools": [
+    "list_directory",
+    "read_file",
+    "write_file",
+    "search_file_content",
+    "glob",
+    "web_fetch",
+    "google_web_search",
+    "replace",
+    "read_many_files",
+    "run_shell_command"
+  ]
+}
