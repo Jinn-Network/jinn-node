@@ -159,25 +159,60 @@ export class OlasOperateWrapper {
   }
 
   /**
-   * Resolve middleware path relative to this file's location
+   * Resolve middleware path - checks config, env var, Poetry, then fallback
    */
   private static async _resolveMiddlewarePath(configPath?: string): Promise<string> {
+    // 1. Explicit config path
     if (configPath) {
+      operateLogger.debug({ configPath }, "Using config-provided middleware path");
       return resolve(configPath);
     }
 
-    // Resolve relative to this file's location
+    // 2. Environment variable override
+    if (process.env.OLAS_MIDDLEWARE_PATH) {
+      operateLogger.debug({ envPath: process.env.OLAS_MIDDLEWARE_PATH }, "Using OLAS_MIDDLEWARE_PATH env var");
+      return resolve(process.env.OLAS_MIDDLEWARE_PATH);
+    }
+
+    // 3. Try to find Poetry-installed package
+    try {
+      const { execSync } = await import('child_process');
+      const jinnNodeRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+      const poetryShow = execSync('poetry show olas-operate-middleware --path', {
+        cwd: jinnNodeRoot,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe']
+      }).trim();
+      if (poetryShow) {
+        operateLogger.info({ poetryPath: poetryShow }, "Found middleware via Poetry");
+        return poetryShow;
+      }
+    } catch {
+      // Poetry not available or package not installed - continue to fallback
+      operateLogger.debug("Poetry middleware lookup failed, trying fallback paths");
+    }
+
+    // 4. Fallback: sibling directory (monorepo compatibility)
     const currentFile = fileURLToPath(import.meta.url);
     const workerDir = dirname(currentFile);
     const projectRoot = resolve(workerDir, '..');
-    const middlewarePath = join(projectRoot, 'olas-operate-middleware');
+
+    // First try jinn-node sibling (standalone mode)
+    let middlewarePath = join(projectRoot, 'olas-operate-middleware');
+
+    // If not found, try monorepo root sibling
+    const fs = await import('fs');
+    if (!fs.existsSync(middlewarePath)) {
+      const monorepoRoot = resolve(projectRoot, '..');
+      middlewarePath = join(monorepoRoot, 'olas-operate-middleware');
+    }
 
     operateLogger.debug({
       currentFile,
       workerDir,
       projectRoot,
       middlewarePath
-    }, "Resolved middleware path");
+    }, "Resolved middleware path via fallback");
 
     return middlewarePath;
   }

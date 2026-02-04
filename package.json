@@ -5,7 +5,8 @@
   "main": "dist/worker/mech_worker.js",
   "types": "dist/worker/mech_worker.d.ts",
   "bin": {
-    "jinn-worker": "./dist/worker/mech_worker.js"
+    "jinn-worker": "./dist/worker/mech_worker.js",
+    "jinn-setup": "./dist/setup/cli.js"
   },
   "exports": {
     "./worker": "./dist/worker/mech_worker.js",
@@ -49,7 +50,9 @@
     "./data/*": "./dist/data/*.js",
     "./lib/*": "./dist/lib/*.js",
     "./types": "./dist/types/index.js",
-    "./types/*": "./dist/types/*.js"
+    "./types/*": "./dist/types/*.js",
+    "./setup": "./dist/setup/index.js",
+    "./setup/*": "./dist/setup/*.js"
   },
   "files": [
     "dist",
@@ -62,6 +65,7 @@
     "dev": "tsx src/worker/mech_worker.ts",
     "dev:mech": "sh -c 'USE_TSX_MCP=1 tsx src/worker/mech_worker.ts \"$@\" | tsx src/logging/dev-pretty-cli.ts' --",
     "mcp:start": "tsx --env-file=../.env src/agent/mcp/server.ts",
+    "setup": "tsx src/setup/cli.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
