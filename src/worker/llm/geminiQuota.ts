@@ -12,6 +12,12 @@ import { OAuth2Client } from 'google-auth-library';
 import { homedir } from 'os';
 import { join } from 'path';
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'fs';
+import {
+  getGeminiCredentialFromAuthManager,
+  syncAndWriteGeminiCredentials,
+  hasLegacyEnvCredentials,
+  type GeminiCredentialSet,
+} from './authIntegration.js';
 
 type QuotaCheckOptions = {
   model?: string;
@@ -319,6 +325,17 @@ export async function selectAvailableCredential(
   const credentials = parseCredentialsArray();
 
   if (!credentials) {
+    // No legacy env var credentials configured
+    // Try AuthManager as fallback for zero-friction onboarding
+    if (!hasLegacyEnvCredentials()) {
+      const authManagerCred = getGeminiCredentialFromAuthManager();
+      if (authManagerCred) {
+        workerLogger.info({ source: 'AuthManager' }, 'Using Gemini credentials discovered by AuthManager');
+        // Write to ~/.gemini/ so Gemini CLI can use them
+        syncAndWriteGeminiCredentials();
+        return { selectedCredential: authManagerCred as unknown as OAuthCredentialSet, selectedIndex: 0, allExhausted: false };
+      }
+    }
     // Fall back to legacy single credential env var
     return { selectedCredential: null, selectedIndex: -1, allExhausted: false };
   }
@@ -545,7 +562,7 @@ export async function waitForGeminiQuota(options: QuotaWaitOptions = {}): Promis
   // fall back to legacy single-credential behavior
   if (!selection.allExhausted) {
     let attempt = 0;
-    for (;;) {
+    for (; ;) {
       const result = await checkGeminiQuota({ model });
       if (!result.checked) {
         if (!loggedMissingKey) {
