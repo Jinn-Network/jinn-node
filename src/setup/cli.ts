@@ -15,15 +15,94 @@
 
 import 'dotenv/config';
 import { config as dotenvConfig } from 'dotenv';
-import { existsSync } from 'fs';
+import { existsSync, copyFileSync, appendFileSync } from 'fs';
 import { resolve } from 'path';
+import { createInterface } from 'readline';
 import { SimplifiedServiceBootstrap, type SimplifiedBootstrapConfig } from '../worker/SimplifiedServiceBootstrap.js';
 import { logger } from '../logging/index.js';
 import { getRequiredRpcUrl, getOptionalMechChainConfig, getOptionalOperatePassword } from '../agent/mcp/tools/shared/env.js';
 import { createIsolatedMiddlewareEnvironment, type IsolatedEnvironment } from './test-isolation.js';
 import { runPreflight } from './preflight.js';
+import { printHeader, printStep, printSuccess, printError } from './display.js';
 
 const setupLogger = logger.child({ component: "SETUP-CLI" });
+
+/**
+ * Prompt user for input
+ */
+async function promptInput(question: string): Promise<string> {
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
+/**
+ * Append a key=value pair to .env file
+ */
+function appendToEnvFile(key: string, value: string, envPath: string): void {
+  const line = `${key}=${value}\n`;
+  appendFileSync(envPath, line);
+}
+
+/**
+ * Ensure .env file exists and has required values
+ * Returns true if we should reload env vars
+ */
+async function ensureEnvFile(isTestnet: boolean): Promise<boolean> {
+  const envFile = isTestnet ? '.env.test' : '.env';
+  const envExample = isTestnet ? '.env.test.example' : '.env.example';
+  const envPath = resolve(process.cwd(), envFile);
+  const examplePath = resolve(process.cwd(), envExample);
+
+  let needsReload = false;
+
+  // Copy from example if .env doesn't exist
+  if (!existsSync(envPath) && existsSync(examplePath)) {
+    console.log(`  Creating ${envFile} from template...`);
+    copyFileSync(examplePath, envPath);
+    needsReload = true;
+  }
+
+  // Reload env vars
+  if (needsReload) {
+    dotenvConfig({ path: envPath, override: true });
+  }
+
+  // Check for required values and prompt if missing
+  if (!process.env.RPC_URL) {
+    console.log('');
+    const rpcUrl = await promptInput('  Enter RPC URL for Base network: ');
+    if (rpcUrl) {
+      process.env.RPC_URL = rpcUrl;
+      if (existsSync(envPath)) {
+        appendToEnvFile('RPC_URL', rpcUrl, envPath);
+        console.log(`  ✓ Saved RPC_URL to ${envFile}`);
+      }
+    }
+  }
+
+  if (!process.env.OPERATE_PASSWORD) {
+    console.log('');
+    const password = await promptInput('  Enter OPERATE_PASSWORD (min 8 chars): ');
+    if (password) {
+      process.env.OPERATE_PASSWORD = password;
+      if (existsSync(envPath)) {
+        appendToEnvFile('OPERATE_PASSWORD', password, envPath);
+        console.log(`  ✓ Saved OPERATE_PASSWORD to ${envFile}`);
+      }
+    }
+  }
+
+  return needsReload;
+}
 
 // Parse args early to determine environment
 const earlyArgs = process.argv.slice(2);
@@ -164,27 +243,33 @@ async function main() {
     process.exit(0);
   }
 
-  // Run preflight checks (Poetry, middleware, dependencies)
-  console.log('\n  Checking prerequisites...\n');
+  // Print setup header
+  printHeader('JINN Node Setup');
+
+  // Step 1: Run preflight checks (Poetry, middleware, dependencies)
+  printStep('active', 'Checking prerequisites...');
   const preflightResult = await runPreflight({
     autoInstall: args.autoInstall,
   });
 
   if (!preflightResult.success) {
-    console.error('  Preflight checks failed:\n');
+    printStep('error', 'Prerequisites check failed');
     for (const error of preflightResult.errors) {
-      console.error(`  ✗ ${error}\n`);
+      console.error(`\n  ✗ ${error}\n`);
     }
     process.exit(1);
   }
-  console.log('  ✓ Poetry and middleware dependencies ready\n');
+  printStep('done', 'Prerequisites checked');
 
-  // Validate environment
+  // Step 2: Ensure .env exists and has required values
+  printStep('active', 'Checking configuration...');
+  await ensureEnvFile(isTestnet);
+
+  // Validate environment after potential prompts
   const operatePassword = getOptionalOperatePassword();
   if (!operatePassword) {
-    console.error(`\n Error: OPERATE_PASSWORD environment variable is required\n`);
-    console.error(`Set it in your .env or .env.test file or export it:\n`);
-    console.error(`  export OPERATE_PASSWORD="your-password"\n`);
+    printStep('error', 'OPERATE_PASSWORD is required');
+    printError('OPERATE_PASSWORD not set. Add it to .env or export it.');
     process.exit(1);
   }
 
@@ -193,11 +278,11 @@ async function main() {
   const rpcUrl = getRequiredRpcUrl();
 
   if (!rpcUrl) {
-    console.error(`\n Error: RPC_URL environment variable is required\n`);
-    console.error(`Set it in your ${args.testnet ? '.env.test' : '.env'} file or export it:\n`);
-    console.error(`  export RPC_URL="https://your-rpc-url"\n`);
+    printStep('error', 'RPC_URL is required');
+    printError('RPC_URL not set. Add it to .env or export it.');
     process.exit(1);
   }
+  printStep('done', 'Configuration validated');
 
   // Mech marketplace addresses (Base mainnet is the primary target)
   const mechMarketplaceAddresses: Record<string, string> = {
@@ -299,29 +384,20 @@ async function main() {
     const result = await bootstrap.bootstrap();
 
     if (result.success) {
-      console.log('\n' + '='.repeat(80));
-      console.log('  SETUP COMPLETED SUCCESSFULLY');
-      console.log('='.repeat(80));
-      console.log('');
-
-      if (result.serviceConfigId) {
-        console.log(`Service Config ID: ${result.serviceConfigId}`);
-      }
-      if (result.serviceSafeAddress) {
-        console.log(`Service Safe: ${result.serviceSafeAddress}`);
-      }
-      console.log('');
-
       // Save result to file for reference
       const resultPath = `/tmp/jinn-service-setup-${Date.now()}.json`;
       const fs = await import('fs/promises');
       await fs.writeFile(resultPath, JSON.stringify(result, null, 2));
-      console.log(`Setup details saved to: ${resultPath}`);
-      console.log('');
+
+      printSuccess({
+        serviceConfigId: result.serviceConfigId,
+        serviceSafeAddress: result.serviceSafeAddress,
+      });
+      console.log(`  Setup details saved to: ${resultPath}\n`);
 
       exitCode = 0;
     } else {
-      console.error(`\n Setup failed: ${result.error}\n`);
+      printError(result.error || 'Unknown error');
       exitCode = 1;
     }
   } finally {

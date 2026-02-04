@@ -29,6 +29,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { createDefaultServiceConfig, SERVICE_CONSTANTS } from './config/ServiceConfig.js';
 import { enableMechMarketplaceInConfig } from './config/MechConfig.js';
+import { printFundingRequirements } from '../setup/display.js';
 
 const bootstrapLogger = logger.child({ component: "SIMPLIFIED-BOOTSTRAP" });
 
@@ -465,17 +466,29 @@ ${'='.repeat(80)}
     masterSafe?: string;
     serviceConfig: ReturnType<typeof createDefaultServiceConfig>;
   }): void {
-    const { chain, fundingRequirements, masterEoa, masterSafe, serviceConfig } = params;
+    const { chain, fundingRequirements, masterEoa, masterSafe } = params;
     const refill = fundingRequirements?.refill_requirements?.[chain] || {};
     const zeroAddress = "0x0000000000000000000000000000000000000000";
     const olasTokenAddress = SERVICE_CONSTANTS.DEFAULT_OLAS_TOKEN_ADDRESS;
+
+    const requirements: Array<{
+      purpose: string;
+      address: string;
+      amount: string;
+      token: string;
+    }> = [];
 
     if (masterEoa) {
       const masterEoaRefill = this.getRefillForAddress(refill, masterEoa);
       const ethWei = this.toBigInt(masterEoaRefill?.[zeroAddress]);
       if (ethWei > 0n) {
         const ethAmount = this.formatUnits(ethWei, 18);
-        this.writeOutput(`Please transfer at least ${ethAmount} ETH to the Master EOA ${masterEoa}\n`);
+        requirements.push({
+          purpose: 'Master EOA',
+          address: masterEoa,
+          amount: ethAmount,
+          token: 'ETH',
+        });
       }
     }
 
@@ -484,14 +497,29 @@ ${'='.repeat(80)}
       const ethWei = this.toBigInt(masterSafeRefill?.[zeroAddress]);
       if (ethWei > 0n) {
         const ethAmount = this.formatUnits(ethWei, 18);
-        this.writeOutput(`Please transfer at least ${ethAmount} ETH to the Master Safe ${masterSafe}\n`);
+        requirements.push({
+          purpose: 'Master Safe',
+          address: masterSafe,
+          amount: ethAmount,
+          token: 'ETH',
+        });
       }
 
       const olasWei = this.toBigInt(masterSafeRefill?.[olasTokenAddress]);
       if (olasWei > 0n) {
         const olasAmount = this.formatUnits(olasWei, 18);
-        this.writeOutput(`Please transfer at least ${olasAmount} OLAS to the Master Safe ${masterSafe}\n`);
+        requirements.push({
+          purpose: 'Master Safe (staking)',
+          address: masterSafe,
+          amount: olasAmount,
+          token: 'OLAS',
+        });
       }
+    }
+
+    // Use the new display utility
+    if (requirements.length > 0) {
+      printFundingRequirements(requirements);
     }
   }
 
