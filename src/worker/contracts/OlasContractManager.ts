@@ -346,14 +346,14 @@ export class OlasContractManager {
   /**
    * Parse agent ID from transaction receipt
    */
-  parseAgentIdFromReceipt(receipt: ethers.providers.TransactionReceipt): number | null {
+  parseAgentIdFromReceipt(receipt: TransactionReceipt): number | null {
     return OlasContractHelpers.parseCreateAgentEvent(receipt);
   }
 
   /**
    * Parse service ID from transaction receipt
    */
-  parseServiceIdFromReceipt(receipt: ethers.providers.TransactionReceipt): number | null {
+  parseServiceIdFromReceipt(receipt: TransactionReceipt): number | null {
     return OlasContractHelpers.parseCreateServiceEvent(receipt);
   }
 
