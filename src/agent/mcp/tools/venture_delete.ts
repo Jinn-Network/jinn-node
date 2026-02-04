@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { mcpLogger } from '../../../logging/index.js';
-import { archiveVenture, deleteVenture } from '../../../../../scripts/ventures/update.js';
+import { archiveVenture, deleteVenture } from '../../../data/ventures.js';
 
 /**
  * Input schema for deleting a venture.

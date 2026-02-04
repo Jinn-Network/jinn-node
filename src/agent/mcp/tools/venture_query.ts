@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { mcpLogger } from '../../../logging/index.js';
-import { getVenture, getVentureBySlug, listVentures } from '../../../../../scripts/ventures/mint.js';
+import { getVenture, getVentureBySlug, listVentures } from '../../../data/ventures.js';
 
 /**
  * Input schema for querying ventures.

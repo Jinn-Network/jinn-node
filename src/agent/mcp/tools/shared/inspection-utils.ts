@@ -5,7 +5,7 @@
  * with MCP-compatible adaptations (no console output, configurable timeouts)
  */
 
-// Re-export all types from workstream-utils
+// Re-export all types from workstream-utils (local package path)
 export type {
   ErrorSummary,
   GitOperationSummary,
@@ -20,7 +20,7 @@ export type {
   WorkerTelemetryLog,
   WorkerTelemetryEvent,
   ToolMetrics,
-} from '../../../../../../scripts/shared/workstream-utils.js';
+} from '../../../../shared/workstream-utils.js';
 
 // Re-export pure functions that don't have side effects
 export {
@@ -38,7 +38,7 @@ export {
   aggregateTimingMetrics,
   aggregateToolMetrics,
   computeDepth,
-} from '../../../../../../scripts/shared/workstream-utils.js';
+} from '../../../../shared/workstream-utils.js';
 
 import { mcpLogger } from '../../../../logging/index.js';
 

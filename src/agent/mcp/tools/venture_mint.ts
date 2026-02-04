@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { mcpLogger } from '../../../logging/index.js';
-import { createVenture, type CreateVentureArgs } from '../../../../../scripts/ventures/mint.js';
+import { createVenture, type CreateVentureArgs } from '../../../data/ventures.js';
 
 /**
  * Input schema for minting a venture.

@@ -690,7 +690,7 @@ export class OlasServiceManager {
    * @private
    */
   private async deployWithTenderlyFunding(configPath: string): Promise<ServiceInfo> {
-    const { createTenderlyClient, ethToWei } = await import('../../../scripts/lib/tenderly.js');
+    const { createTenderlyClient, ethToWei } = await import('../lib/tenderly.js');
     
     serviceLogger.info("Setting up Tenderly environment for funded deployment");
     

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { mcpLogger } from '../../../logging/index.js';
-import { updateVenture, type UpdateVentureArgs } from '../../../../../scripts/ventures/update.js';
+import { updateVenture, type UpdateVentureArgs } from '../../../data/ventures.js';
 
 /**
  * Input schema for updating a venture.
