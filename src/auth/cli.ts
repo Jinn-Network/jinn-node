@@ -18,18 +18,18 @@ interface CLIArgs {
 
 function parseArgs(): CLIArgs {
     const args = process.argv.slice(2);
-    const command = args[0] as CLIArgs['command'];
+    const rawCommand = args[0];
 
-    if (!command || command === 'help' || command === '--help' || command === '-h') {
+    if (!rawCommand || rawCommand === 'help' || rawCommand === '--help' || rawCommand === '-h') {
         return { command: 'help' };
     }
 
-    if (!['status', 'sync', 'list'].includes(command)) {
-        console.error(`Unknown command: ${command}`);
+    if (!['status', 'sync', 'list'].includes(rawCommand)) {
+        console.error(`Unknown command: ${rawCommand}`);
         return { command: 'help' };
     }
 
-    return { command };
+    return { command: rawCommand as CLIArgs['command'] };
 }
 
 function printHelp(): void {
