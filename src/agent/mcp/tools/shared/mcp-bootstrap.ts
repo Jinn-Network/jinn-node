@@ -1,6 +1,7 @@
 import { execa } from 'execa';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { existsSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -16,7 +17,10 @@ export async function loadMcpServer(): Promise<void> {
 
   const env = { ...process.env };
   // Use path relative to this module for standalone compatibility
-  const serverPath = join(__dirname, '../../server.ts');
+  // Support both .ts (development) and .js (compiled) execution
+  const serverPathTs = join(__dirname, '../../server.ts');
+  const serverPathJs = join(__dirname, '../../server.js');
+  const serverPath = existsSync(serverPathTs) ? serverPathTs : serverPathJs;
   mcpProcess = execa('yarn', ['tsx', serverPath], {
     cwd: process.cwd(),
     stdio: 'pipe',
