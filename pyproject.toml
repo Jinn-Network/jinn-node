@@ -7,10 +7,7 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-# TODO: Update URL to Jinn-Network fork once created
-# olas-operate-middleware = {git = "https://github.com/Jinn-Network/olas-operate-middleware.git", tag = "v0.1.0"}
-# For now, use Valory upstream
-olas-operate-middleware = {git = "https://github.com/valory-xyz/olas-operate-middleware.git", branch = "main"}
+olas-operate-middleware = {git = "https://github.com/Jinn-Network/olas-operate-middleware.git", tag = "v0.1.0"}
 
 [build-system]
 requires = ["poetry-core"]
