@@ -273,6 +273,8 @@ async function main() {
 
   const bootstrap = new SimplifiedServiceBootstrap(config);
 
+  let exitCode = 1;
+
   try {
     const result = await bootstrap.bootstrap();
 
@@ -297,22 +299,25 @@ async function main() {
       console.log(`Setup details saved to: ${resultPath}`);
       console.log('');
 
-      process.exit(0);
+      exitCode = 0;
     } else {
       console.error(`\n Setup failed: ${result.error}\n`);
-      process.exit(1);
+      exitCode = 1;
     }
   } finally {
-    // Cleanup resources
+    // Cleanup daemon - MUST happen before process.exit()
+    console.log('\n Stopping middleware daemon...');
     await bootstrap.cleanup();
 
     // Cleanup isolated environment if used
     if (isolatedEnv) {
-      console.log('\n Cleaning up isolated environment...');
+      console.log(' Cleaning up isolated environment...');
       await isolatedEnv.cleanup();
-      console.log('Cleanup complete');
     }
+    console.log(' Cleanup complete\n');
   }
+
+  process.exit(exitCode);
 }
 
 main().catch((error) => {

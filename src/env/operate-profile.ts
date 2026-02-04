@@ -88,16 +88,26 @@ function resolveOperateHome(): string | null {
     return null;
   }
 
-  const candidate = join(repoRoot, 'olas-operate-middleware', '.operate');
-  if (!existsSync(candidate)) {
-    // Only warn if env vars don't provide the needed config
-    if (!hasAllServiceEnvVars()) {
-      configLogger.warn({ candidate }, 'Default .operate directory not found under olas-operate-middleware');
-    }
-    return null;
+  // Check standalone/Poetry mode first (<repoRoot>/.operate)
+  const standaloneCandidate = join(repoRoot, '.operate');
+  if (existsSync(standaloneCandidate)) {
+    return standaloneCandidate;
   }
 
-  return candidate;
+  // Fall back to monorepo/submodule mode (<repoRoot>/olas-operate-middleware/.operate)
+  const submoduleCandidate = join(repoRoot, 'olas-operate-middleware', '.operate');
+  if (existsSync(submoduleCandidate)) {
+    return submoduleCandidate;
+  }
+
+  // Neither location exists
+  if (!hasAllServiceEnvVars()) {
+    configLogger.warn(
+      { standaloneCandidate, submoduleCandidate },
+      '.operate directory not found in standalone or submodule location'
+    );
+  }
+  return null;
 }
 
 interface ServiceConfig {
