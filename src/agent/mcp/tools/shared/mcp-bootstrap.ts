@@ -10,7 +10,7 @@ export async function loadMcpServer(): Promise<void> {
   }
 
   const env = { ...process.env };
-  mcpProcess = execa('yarn', ['tsx', 'gemini-agent/mcp/server.ts'], {
+  mcpProcess = execa('yarn', ['tsx', 'jinn-node/src/agent/mcp/server.ts'], {
     cwd: process.cwd(),
     stdio: 'pipe',
     env,

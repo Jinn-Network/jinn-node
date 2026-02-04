@@ -10,8 +10,8 @@ import {
   getOptionalMechTargetRequestId,
   getOptionalControlApiUrl,
 } from '../agent/mcp/tools/shared/env.js';
-// Import JSON artifact with type assertion for Node 22
-import marketplaceAbi from '../../abis/MechMarketplace.json' with { type: 'json' };
+// Import ABI from mech-client-ts package
+import marketplaceAbi from '@jinn-network/mech-client-ts/dist/abis/MechMarketplace.json' with { type: 'json' };
 import { workerLogger } from '../logging/index.js';
 import { claimRequest as apiClaimRequest } from './control_api_client.js';
 import { deliverViaSafe } from '@jinn-network/mech-client-ts/dist/post_deliver.js';

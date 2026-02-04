@@ -13,22 +13,26 @@
     "./agent": "./dist/agent/agent.js",
     "./agent/*": "./dist/agent/*.js",
     "./logging": "./dist/logging/index.js",
+    "./logging/*": "./dist/logging/*.js",
     "./config": "./dist/config/index.js",
+    "./config/*": "./dist/config/*.js",
     "./env": "./dist/env/index.js",
     "./env/*": "./dist/env/*.js",
     "./http": "./dist/http/client.js",
+    "./http/*": "./dist/http/*.js",
     "./shared": "./dist/shared/index.js",
     "./shared/*": "./dist/shared/*.js",
-    "./types": "./dist/types/index.js"
+    "./types": "./dist/types/index.js",
+    "./types/*": "./dist/types/*.js"
   },
   "files": [
     "dist",
-    "abis",
     "scripts",
     ".env.example"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && yarn copy-assets",
+    "copy-assets": "copyfiles -u 1 'src/**/*.json' 'src/**/.gemini/**' dist",
     "dev": "tsx src/worker/mech_worker.ts",
     "dev:mech": "sh -c 'USE_TSX_MCP=1 tsx src/worker/mech_worker.ts \"$@\" | tsx src/logging/dev-pretty-cli.ts' --",
     "mcp:start": "tsx --env-file=../.env src/agent/mcp/server.ts",
@@ -57,6 +61,7 @@
     "@google/gemini-cli": "^0.25.0",
     "@types/node": "^20.0.0",
     "@types/yargs": "^17.0.33",
+    "copyfiles": "^2.4.1",
     "tsx": "^4.20.6",
     "typescript": "^5.0.0"
   },
