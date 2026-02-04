@@ -25,11 +25,10 @@
 
 import { ethers } from 'ethers';
 import { logger } from '../logging/index.js';
-import { ITransactionExecutor } from './IExecutor.js';
-import { TransactionRequest } from './queue/types.js';
+import { ITransactionExecutor, StatusUpdateCallback } from './IExecutor.js';
+import { TransactionRequest } from './types/transaction.js';
 import { ExecutionResult } from './types.js';
 import { validateTransaction } from './validation.js';
-import { ITransactionQueue } from './queue/index.js';
 import { updateTransactionStatus } from './control_api_client.js';
 import {
   getRequiredChainId,
@@ -145,7 +144,7 @@ export class EoaExecutor implements ITransactionExecutor {
   /**
    * Process a single transaction request (implements ITransactionExecutor interface)
    */
-  async processTransactionRequest(request: TransactionRequest, queue: ITransactionQueue): Promise<void> {
+  async processTransactionRequest(request: TransactionRequest, onStatusUpdate: StatusUpdateCallback): Promise<void> {
     eoaLogger.info({ requestId: request.id }, 'Processing EOA transaction request');
 
     try {
@@ -154,11 +153,11 @@ export class EoaExecutor implements ITransactionExecutor {
         workerChainId: this.chainId,
         executionStrategy: 'EOA'
       });
-      
+
       if (!validation.valid) {
         eoaLogger.warn({ requestId: request.id, error: validation.errorMessage }, 'EOA transaction validation failed');
 
-        await queue.updateStatus(request.id, 'FAILED', {
+        await onStatusUpdate(request.id, 'FAILED', {
           error_code: validation.errorCode,
           error_message: validation.errorMessage,
           completed_at: new Date().toISOString()
@@ -168,16 +167,16 @@ export class EoaExecutor implements ITransactionExecutor {
 
       // Execute the transaction
       const result = await this.executeEoaTransaction(request);
-      
+
       // Update status based on result
       if (result.success) {
-        await queue.updateStatus(request.id, 'CONFIRMED', {
+        await onStatusUpdate(request.id, 'CONFIRMED', {
           tx_hash: result.txHash,
           completed_at: new Date().toISOString()
         });
         eoaLogger.info({ requestId: request.id, txHash: result.txHash }, 'EOA transaction confirmed');
       } else {
-        await queue.updateStatus(request.id, 'FAILED', {
+        await onStatusUpdate(request.id, 'FAILED', {
           error_code: result.errorCode,
           error_message: result.errorMessage,
           completed_at: new Date().toISOString()
@@ -186,7 +185,7 @@ export class EoaExecutor implements ITransactionExecutor {
       }
     } catch (error) {
       eoaLogger.error({ requestId: request.id, error }, 'Error processing EOA transaction');
-      await queue.updateStatus(request.id, 'FAILED', {
+      await onStatusUpdate(request.id, 'FAILED', {
         error_code: 'UNEXPECTED_ERROR',
         error_message: error instanceof Error ? error.message : String(error),
         completed_at: new Date().toISOString()

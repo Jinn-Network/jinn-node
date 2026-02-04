@@ -13,7 +13,7 @@ import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { URL } from 'url';
 import { z } from 'zod';
-import { TransactionRequest, ExecutionStrategy } from './queue/types.js';
+import { TransactionRequest, ExecutionStrategy } from './types/transaction.js';
 import { logger } from '../logging/index.js';
 
 /**

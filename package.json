@@ -26,7 +26,7 @@
     "./worker/logging/*": "./dist/worker/logging/*.js",
     "./worker/contracts/*": "./dist/worker/contracts/*.js",
     "./worker/config/*": "./dist/worker/config/*.js",
-    "./worker/queue/*": "./dist/worker/queue/*.js",
+    "./worker/types/*": "./dist/worker/types/*.js",
     "./worker/recognition/*": "./dist/worker/recognition/*.js",
     "./worker/reflection/*": "./dist/worker/reflection/*.js",
     "./worker/orchestration/*": "./dist/worker/orchestration/*.js",
@@ -57,7 +57,10 @@
   "files": [
     "dist",
     "scripts",
-    ".env.example"
+    ".env.example",
+    "yarn.lock",
+    "pyproject.toml",
+    "poetry.lock"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && yarn copy-assets",
@@ -97,5 +100,6 @@
   },
   "engines": {
     "node": ">=20.0.0"
-  }
+  },
+  "packageManager": "yarn@1.22.22"
 }

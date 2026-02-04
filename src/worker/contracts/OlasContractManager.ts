@@ -8,7 +8,7 @@
  */
 
 import { Contract, JsonRpcProvider, keccak256, toUtf8Bytes, TransactionReceipt } from 'ethers';
-import { TransactionRequest, TransactionPayload } from '../queue/types.js';
+import { TransactionRequest, TransactionPayload } from '../types/transaction.js';
 import { 
   AGENT_REGISTRY_ABI, 
   SERVICE_REGISTRY_ABI, 

@@ -1,6 +1,5 @@
 /**
- * Shared types for transaction queue operations
- * These types mirror the database schema and existing types.ts
+ * Transaction types for worker operations
  */
 
 export interface TransactionInput {
@@ -48,32 +47,3 @@ export interface UpdateMetadata {
   error_message?: string;
   completed_at?: string;
 }
-
-export interface QueueMetrics {
-  pending_count: number;
-  claimed_count: number;
-  confirmed_count: number;
-  failed_count: number;
-  avg_processing_time_ms: number;
-  oldest_pending_age_ms: number;
-  worker_claims: Map<string, number>;
-}
-
-export interface QueueConfig {
-  type: 'local' | 'supabase';
-  local?: LocalQueueConfig;
-  supabase?: SupabaseQueueConfig;
-}
-
-export interface LocalQueueConfig {
-  dbPath: string;
-  walMode?: boolean;
-  cacheSize?: number;
-}
-
-export interface SupabaseQueueConfig {
-  url: string;
-  key: string;
-}
-
-export const CLAIM_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes

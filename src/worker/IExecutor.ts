@@ -1,17 +1,25 @@
 /**
  * Transaction Executor Interface
- * 
+ *
  * This interface defines the contract that all transaction executors must implement
  * in the dual-rail execution architecture. It provides a common interface for both
  * EOA (Externally Owned Account) and Safe (Gnosis Safe) execution strategies.
- * 
- * @version 2.0.0
- * @since Phase 3 - Dual Rail Architecture with Queue Abstraction
+ *
+ * @version 2.1.0
+ * @since Phase 3 - Dual Rail Architecture
  */
 
-import { TransactionRequest } from './queue/types.js';
+import { TransactionRequest, TransactionStatus, UpdateMetadata } from './types/transaction.js';
 import { ExecutionResult } from './types.js';
-import { ITransactionQueue } from './queue/index.js';
+
+/**
+ * Callback type for status updates during transaction processing
+ */
+export type StatusUpdateCallback = (
+  id: string,
+  status: TransactionStatus,
+  metadata?: UpdateMetadata
+) => Promise<void>;
 
 /**
  * Interface that all transaction executors must implement
@@ -19,14 +27,17 @@ import { ITransactionQueue } from './queue/index.js';
 export interface ITransactionExecutor {
   /**
    * Process a single transaction request
-   * 
+   *
    * This method handles the complete lifecycle of a transaction:
    * 1. Validates the transaction against security constraints
    * 2. Executes the transaction using the appropriate method (EOA or Safe)
-   * 3. Updates the queue with the result via the provided queue abstraction
-   * 
+   * 3. Reports status via the provided callback
+   *
    * @param request The transaction request to process
-   * @param queue The queue abstraction for status updates
+   * @param onStatusUpdate Callback for reporting status changes
    */
-  processTransactionRequest(request: TransactionRequest, queue: ITransactionQueue): Promise<void>;
+  processTransactionRequest(
+    request: TransactionRequest,
+    onStatusUpdate: StatusUpdateCallback
+  ): Promise<void>;
 }

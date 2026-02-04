@@ -1,8 +1,7 @@
 import { EoaExecutor } from './EoaExecutor.js';
-import { TransactionRequest } from './queue/types.js';
+import { TransactionRequest, TransactionStatus, UpdateMetadata } from './types/transaction.js';
 import { logger } from '../logging/index.js';
 import { claimTransactionRequest, updateTransactionStatus } from './control_api_client.js';
-import { ITransactionQueue } from './queue/ITransactionQueue.js';
 
 const txLogger = logger.child({ component: 'TransactionProcessor' });
 
@@ -46,27 +45,25 @@ export class TransactionProcessor {
                 // Update the request's execution strategy to EOA so validation passes
                 request.execution_strategy = 'EOA';
             }
-            
+
             // All transactions now use EOA executor
             if (request.execution_strategy !== 'EOA') {
                 txLogger.warn({ requestId: request.id, originalStrategy: request.execution_strategy }, "Unknown execution strategy, defaulting to EOA");
                 request.execution_strategy = 'EOA';
             }
 
-            // Create a queue adapter that redirects status updates to the Control API
-            const queueAdapter = {
-                updateStatus: async (id: string, status: any, metadata?: any) => {
-                    const updateParams: any = { id, status };
-                    if (metadata) {
-                        if (metadata.tx_hash) updateParams.tx_hash = metadata.tx_hash;
-                        if (metadata.error_code) updateParams.error_code = metadata.error_code;
-                        if (metadata.error_message) updateParams.error_message = metadata.error_message;
-                    }
-                    await updateTransactionStatus(updateParams);
+            // Status update callback that redirects to Control API
+            const onStatusUpdate = async (id: string, status: TransactionStatus, metadata?: UpdateMetadata) => {
+                const updateParams: any = { id, status };
+                if (metadata) {
+                    if (metadata.tx_hash) updateParams.tx_hash = metadata.tx_hash;
+                    if (metadata.error_code) updateParams.error_code = metadata.error_code;
+                    if (metadata.error_message) updateParams.error_message = metadata.error_message;
                 }
-            } as unknown as ITransactionQueue;
+                await updateTransactionStatus(updateParams);
+            };
 
-            await this.eoaExecutor.processTransactionRequest(request, queueAdapter);
+            await this.eoaExecutor.processTransactionRequest(request, onStatusUpdate);
         } catch (error) {
             txLogger.error({ requestId: request.id, error }, "Error processing transaction");
             await this.updateTransactionAsFailed(request.id, 'ROUTING_ERROR', `Transaction routing failed: ${error instanceof Error ? error.message : String(error)}`);
