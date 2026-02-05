@@ -11,7 +11,7 @@
  * - Scripts (for various operations)
  */
 
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, statSync } from 'fs';
 import { join, dirname, parse, resolve, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
@@ -145,7 +145,11 @@ function getOperateDir(): string | null {
 }
 
 /**
- * Read service configuration from the first service found in .operate/services
+ * Read service configuration from .operate/services
+ * Preference order:
+ * 1) Configs with MECH_TO_CONFIG populated
+ * 2) Configs with multisig + agent instance present
+ * 3) Most recently modified config.json
  */
 function readServiceConfig(): ServiceConfig | null {
   try {
@@ -164,21 +168,63 @@ function readServiceConfig(): ServiceConfig | null {
       return null;
     }
 
-    // Find the first service directory that contains a config.json
+    // Collect service configs
     const serviceDirs = readdirSync(servicesDir, { withFileTypes: true })
       .filter(dirent => dirent.isDirectory())
       .map(dirent => dirent.name);
 
-    let configPath: string | null = null;
+    const candidates: Array<{
+      dir: string;
+      path: string;
+      config: ServiceConfig;
+      score: number;
+      mtimeMs: number;
+    }> = [];
+
     for (const serviceDir of serviceDirs) {
       const candidatePath = join(servicesDir, serviceDir, 'config.json');
-      if (existsSync(candidatePath)) {
-        configPath = candidatePath;
-        break;
+      if (!existsSync(candidatePath)) continue;
+
+      try {
+        const raw = readFileSync(candidatePath, 'utf-8');
+        const config: ServiceConfig = JSON.parse(raw);
+
+        const mechToConfig = config.env_variables?.MECH_TO_CONFIG?.value;
+        const hasMechConfig = Boolean(mechToConfig && mechToConfig.trim() !== '');
+
+        let hasMultisig = false;
+        let hasInstance = false;
+        if (config.chain_configs) {
+          for (const chainConfig of Object.values(config.chain_configs)) {
+            if (chainConfig.chain_data?.multisig) {
+              hasMultisig = true;
+            }
+            if (chainConfig.chain_data?.instances && chainConfig.chain_data.instances.length > 0) {
+              hasInstance = true;
+            }
+          }
+        }
+
+        let score = 0;
+        if (hasMechConfig) score += 4;
+        if (hasMultisig) score += 2;
+        if (hasInstance) score += 1;
+
+        const mtimeMs = statSync(candidatePath).mtimeMs;
+
+        candidates.push({
+          dir: serviceDir,
+          path: candidatePath,
+          config,
+          score,
+          mtimeMs,
+        });
+      } catch {
+        continue;
       }
     }
 
-    if (!configPath) {
+    if (candidates.length === 0) {
       // Only warn if env vars don't provide the needed config
       if (!hasAllServiceEnvVars()) {
         configLogger.warn({ servicesDir }, 'No service directories with config.json found');
@@ -186,10 +232,20 @@ function readServiceConfig(): ServiceConfig | null {
       return null;
     }
 
-    const configData = readFileSync(configPath, 'utf-8');
-    const config: ServiceConfig = JSON.parse(configData);
+    candidates.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return b.mtimeMs - a.mtimeMs;
+    });
 
-    return config;
+    const chosen = candidates[0];
+    if (candidates.length > 1) {
+      configLogger.info(
+        { serviceConfigDir: chosen.dir, score: chosen.score, totalCandidates: candidates.length },
+        'Selected service config from .operate/services'
+      );
+    }
+
+    return chosen.config;
   } catch (error) {
     configLogger.warn({ err: error }, 'Error reading service config');
     return null;
