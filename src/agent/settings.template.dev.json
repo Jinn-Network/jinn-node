@@ -9,7 +9,7 @@
     "metacog": {
       "command": "tsx",
       "args": [
-        "../gemini-agent/mcp/server.ts"
+        "./mcp/server.ts"
       ],
       "trust": true
     },
