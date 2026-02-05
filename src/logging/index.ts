@@ -11,6 +11,9 @@ export async function flushLogger(): Promise<void> {
 }
 
 function flushLoggerSync(): void {
+  if (!destination) {
+    return;
+  }
   if (typeof destination.flushSync === 'function') {
     destination.flushSync();
     return;

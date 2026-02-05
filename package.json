@@ -63,12 +63,9 @@
     "poetry.lock"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && yarn copy-assets",
-    "copy-assets": "copyfiles -u 1 'src/**/*.json' dist",
-    "dev": "tsx src/worker/mech_worker.ts",
-    "dev:mech": "sh -c 'USE_TSX_MCP=1 tsx src/worker/mech_worker.ts \"$@\" | tsx src/logging/dev-pretty-cli.ts' --",
-    "mcp:start": "tsx --env-file=../.env src/agent/mcp/server.ts",
-    "setup": "tsx src/setup/cli.ts",
+    "build": "tsc -p tsconfig.build.json && copyfiles -u 1 'src/**/*.json' dist",
+    "run": "sh -c 'LOG_PRETTY=1 USE_TSX_MCP=1 tsx src/worker/mech_worker.ts \"$@\"' --",
+    "setup": "sh -c 'LOG_PRETTY=1 tsx src/setup/cli.ts \"$@\"' --",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

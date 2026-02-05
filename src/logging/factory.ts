@@ -5,7 +5,7 @@ import { getLoggingConfig, LoggingConfig } from './config.js';
 export type LoggerBundle = {
   logger: pino.Logger;
   flush: () => Promise<void>;
-  destination: SonicBoom;
+  destination: SonicBoom | null;
 };
 
 function createDestination(destination: LoggingConfig['destination']): SonicBoom {
@@ -48,20 +48,35 @@ function flushDestination(destination: SonicBoom): Promise<void> {
 export function buildLogger(config: LoggingConfig = getLoggingConfig()): LoggerBundle {
   const forceStderr = process.env.FORCE_STDERR === 'true';
   const destinationTarget = forceStderr ? 'stderr' : config.destination;
-  const destination = createDestination(destinationTarget);
-  const logger = pino(
-    {
-      level: config.level,
-      formatters: {
-        level: (label) => ({ level: label }),
-      },
-      timestamp: pino.stdTimeFunctions.isoTime,
+  const baseOptions = {
+    level: config.level,
+    formatters: {
+      level: (label: string) => ({ level: label }),
     },
-    destination,
-  );
+    timestamp: pino.stdTimeFunctions.isoTime,
+  };
 
+  if (config.format === 'pretty') {
+    const transport = pino.transport({
+      target: 'pino-pretty',
+      options: {
+        colorize: true,
+        translateTime: 'SYS:standard',
+        ignore: 'pid,hostname',
+        destination: destinationTarget === 'stderr' ? 2 : 1,
+      },
+    });
+
+    return {
+      logger: pino(baseOptions, transport),
+      destination: null,
+      flush: async () => {},
+    };
+  }
+
+  const destination = createDestination(destinationTarget);
   return {
-    logger,
+    logger: pino(baseOptions, destination),
     destination,
     flush: () => flushDestination(destination),
   };

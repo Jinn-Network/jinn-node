@@ -131,7 +131,6 @@ interface CLIArgs {
   help?: boolean;
   unattended?: boolean;
   isolated?: boolean;
-  autoInstall?: boolean;
 }
 
 function parseArgs(): CLIArgs {
@@ -154,8 +153,6 @@ function parseArgs(): CLIArgs {
       args.unattended = true;
     } else if (arg === '--isolated') {
       args.isolated = true;
-    } else if (arg === '--auto-install') {
-      args.autoInstall = true;
     }
   }
 
@@ -186,7 +183,6 @@ OPTIONS:
   --staking-contract  Custom staking contract address (default: AgentsFun1)
   --unattended        Run middleware in unattended mode (requires env vars)
   --isolated          Run in isolated temp directory (fresh .operate, no production state)
-  --auto-install      Auto-run 'poetry install' if Python dependencies missing
   --help, -h          Show this help message
 
 ENVIRONMENT FILES:
@@ -249,7 +245,7 @@ async function main() {
   // Step 1: Run preflight checks (Poetry, middleware, dependencies)
   printStep('active', 'Checking prerequisites...');
   const preflightResult = await runPreflight({
-    autoInstall: args.autoInstall,
+    autoInstall: true,
   });
 
   if (!preflightResult.success) {

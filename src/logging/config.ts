@@ -3,6 +3,7 @@ import pino from 'pino';
 export type LoggingConfig = {
   level: pino.Level;
   destination: 'stdout' | string;
+  format: 'json' | 'pretty';
 };
 
 const VALID_LEVELS: pino.Level[] = ['trace', 'debug', 'info', 'warn', 'error', 'fatal'];
@@ -15,6 +16,20 @@ function resolveLogLevel(): pino.Level {
   }
 
   return process.env.NODE_ENV === 'test' ? 'warn' : 'info';
+}
+
+function resolveFormat(): 'json' | 'pretty' {
+  const rawFormat = process.env.LOG_FORMAT?.trim().toLowerCase();
+  const prettyFlag = (process.env.LOG_PRETTY || '').trim().toLowerCase();
+
+  if (!rawFormat) {
+    return prettyFlag === '1' || prettyFlag === 'true' ? 'pretty' : 'json';
+  }
+
+  if (rawFormat === 'json') return 'json';
+  if (rawFormat === 'pretty') return 'pretty';
+
+  throw new Error('LOG_FORMAT must be "json" or "pretty" to match the unified logging pipeline.');
 }
 
 function resolveDestination(): 'stdout' | string {
@@ -31,16 +46,13 @@ function resolveDestination(): 'stdout' | string {
 }
 
 export function getLoggingConfig(): LoggingConfig {
-  const format = process.env.LOG_FORMAT?.trim();
-  if (format && format.toLowerCase() !== 'json') {
-    throw new Error('LOG_FORMAT must be "json" to match the unified logging pipeline.');
-  }
-
   const level = resolveLogLevel();
   const destination = resolveDestination();
+  const format = resolveFormat();
 
   return {
     level,
     destination,
+    format,
   };
 }
