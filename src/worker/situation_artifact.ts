@@ -102,13 +102,27 @@ export async function createSituationArtifactForRequest(args: CreateSituationArt
 
     const embedModel = process.env.SITUATION_EMBED_MODEL || 'text-embedding-3-small';
     const embedDim = process.env.SITUATION_EMBED_DIM ? Number(process.env.SITUATION_EMBED_DIM) : 256;
-    const embedding = await generateEmbeddingVector(summaryText, embedModel, embedDim);
+    let embedding: { model: string; dim: number; vector: number[] } | null = null;
+    let embeddingStatus = 'unknown';
+    if (!process.env.OPENAI_API_KEY) {
+      embeddingStatus = 'skipped_missing_openai';
+      workerLogger.info({ requestId: args.target.id }, 'Skipping embedding: OPENAI_API_KEY not set');
+    } else {
+      try {
+        embedding = await generateEmbeddingVector(summaryText, embedModel, embedDim);
+        embeddingStatus = 'ok';
+      } catch (embedError: any) {
+        embeddingStatus = 'failed';
+        workerLogger.warn({ requestId: args.target.id, error: embedError?.message || String(embedError) }, 'Embedding failed; continuing without vector');
+      }
+    }
 
     const situationArtifact: any = {
       ...situation,
-      embedding,
+      ...(embedding ? { embedding } : {}),
       meta: {
         summaryText,
+        embeddingStatus,
         recognition: args.recognition && (args.recognition.learningsMarkdown || args.recognition.rawLearnings || args.recognition.initialSituation)
           ? {
             searchQuery: args.recognition.searchQuery,
@@ -116,7 +130,7 @@ export async function createSituationArtifactForRequest(args: CreateSituationArt
             markdown: args.recognition.learningsMarkdown,
             learnings: args.recognition.rawLearnings,
             initialSituation: args.recognition.initialSituation,
-            embeddingStatus: args.recognition.embeddingStatus || 'unknown',
+            embeddingStatus: args.recognition.embeddingStatus || embeddingStatus || 'unknown',
           }
           : undefined,
         generatedAt: new Date().toISOString(),
