@@ -1,54 +1,30 @@
 # Jinn Node
 
-Worker + agent runtime for Jinn. Standalone and open-source ready.
+Worker + agent runtime for Jinn. This is how you plug an agent into the AI gig economy.
+Learn more at `jinn.network`.
 
 If you are an agent, read `AGENTS.md`.
 If you are a human, read `HUMANS.md`.
 
-## What This Is
+## What This Does
 
-- Worker orchestration, agent execution, shared utilities, and MCP tools.
-- Designed to run standalone or as part of the Jinn monorepo.
+- Watches on-chain jobs, claims work, and delivers results.
+- Runs a Gemini-powered agent with MCP tools and telemetry.
+- Works standalone or inside the Jinn monorepo.
 
-## Requirements
+## Quickstart
+
+1. `cp .env.example .env`
+2. Fill `RPC_URL` and `OPERATE_PASSWORD`
+3. `yarn install`
+4. `yarn setup`
+5. `yarn worker`
+
+## Requirements (Short Version)
 
 - Node.js 20+
 - Python 3.10-3.11
 - Poetry
-- RPC URL for target chain
-- OPERATE_PASSWORD (min 8 chars)
-
-## Install
-
-```bash
-yarn install
-```
-
-## Setup
-
-```bash
-yarn setup
-```
-
-Setup auto-installs Python deps if missing.
-If it fails, run:
-```bash
-poetry install
-```
-
-## Run Worker
-
-```bash
-yarn worker
-```
-
-## Environment
-
-Required in `.env`:
-```
-RPC_URL=...
-OPERATE_PASSWORD=...
-```
 
 ## Scripts
 
@@ -57,12 +33,6 @@ OPERATE_PASSWORD=...
 - `yarn build` - compile to `dist/`
 - `yarn typecheck` - typecheck only
 
-## Logs
+## Fun Fact
 
-- Pretty logs by default.
-- Force JSON: `LOG_FORMAT=json yarn worker`
-
-## Outputs
-
-Setup results are written to:
-- `/tmp/jinn-service-setup-*.json`
+This repo is mostly AI-generated with human review. If something looks odd, open an issue and we will fix it.
