@@ -640,8 +640,9 @@ export function getPonderGraphqlUrl(): string {
   const explicit = getConfig().PONDER_GRAPHQL_URL;
   if (explicit) return explicit;
 
-  // Default to local Ponder instance
-  return 'http://localhost:42069/graphql';
+  // Default to Railway production endpoint (Railway Ponder is the primary dependency)
+  // Only use localhost if explicitly testing Ponder changes
+  return 'https://jinn-gemini-production.up.railway.app/graphql';
 }
 
 export function getOptionalPonderStartBlock(): number | undefined {
@@ -657,7 +658,7 @@ export function getOptionalPonderEndBlock(): number | undefined {
 // ============================================================================
 
 export function getOptionalControlApiUrl(): string | undefined {
-  return getConfig().CONTROL_API_URL || 'http://localhost:4001/graphql';
+  return getConfig().CONTROL_API_URL || 'https://control-api-production-c1f5.up.railway.app/graphql';
 }
 
 export function getOptionalControlApiPort(): number | undefined {
