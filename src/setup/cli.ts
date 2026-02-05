@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Interactive Service Setup CLI - JINN-202 Simplified Version
+ * Non-Interactive Service Setup CLI - JINN-202 Simplified Version
  *
  * User-friendly command-line wizard for setting up an OLAS service.
  * Uses middleware daemon + HTTP API (no interactive CLI prompts).
@@ -15,10 +15,9 @@
 
 import 'dotenv/config';
 import { config as dotenvConfig } from 'dotenv';
-import { existsSync, copyFileSync, appendFileSync } from 'fs';
+import { existsSync, copyFileSync } from 'fs';
 import { homedir } from 'os';
 import { join, resolve } from 'path';
-import { createInterface } from 'readline';
 import { SimplifiedServiceBootstrap, type SimplifiedBootstrapConfig } from '../worker/SimplifiedServiceBootstrap.js';
 import { logger } from '../logging/index.js';
 import {
@@ -31,68 +30,10 @@ import {
 import { createIsolatedMiddlewareEnvironment, type IsolatedEnvironment } from './test-isolation.js';
 import { runPreflight } from './preflight.js';
 import { printHeader, printStep, printSuccess, printError } from './display.js';
-import { hasAuthManagerCredentials } from '../worker/llm/authIntegration.js';
+import { syncCredentials } from '../auth/index.js';
+import { hasAuthManagerCredentials, syncAndWriteGeminiCredentials } from '../worker/llm/authIntegration.js';
 
 const setupLogger = logger.child({ component: "SETUP-CLI" });
-
-/**
- * Prompt user for input
- */
-async function promptInput(question: string): Promise<string> {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-
-  return new Promise((resolve) => {
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
-  });
-}
-
-/**
- * Append a key=value pair to .env file
- */
-function formatEnvValue(value: string): string {
-  if (value === '') {
-    return '""';
-  }
-
-  const needsQuotes = /[\s"'`$\\#]/.test(value);
-  if (!needsQuotes) {
-    return value;
-  }
-
-  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  return `"${escaped}"`;
-}
-
-function appendToEnvFile(key: string, value: string, envPath: string): void {
-  const line = `${key}=${formatEnvValue(value)}\n`;
-  appendFileSync(envPath, line);
-}
-
-async function promptOptionalEnv(
-  key: string,
-  question: string,
-  envPath: string,
-  envFile: string
-): Promise<void> {
-  if (process.env[key]) {
-    return;
-  }
-  const value = await promptInput(question);
-  if (!value) {
-    return;
-  }
-  process.env[key] = value;
-  if (existsSync(envPath)) {
-    appendToEnvFile(key, value, envPath);
-    console.log(`  ✓ Saved ${key} to ${envFile}`);
-  }
-}
 
 type LlmAuthStatus = {
   hasGeminiOauthEnv: boolean;
@@ -136,42 +77,44 @@ function logLlmAuthStatus(status: LlmAuthStatus): void {
   }
 }
 
-async function ensureLlmAuth(envPath: string, envFile: string): Promise<void> {
+async function ensureLlmAuth(): Promise<void> {
+  try {
+    const syncResult = syncCredentials();
+    if (syncResult.sources.length > 0) {
+      setupLogger.info({ sources: syncResult.sources }, 'Synced auth sources');
+    }
+    if (syncResult.errors?.length) {
+      setupLogger.debug({ errors: syncResult.errors }, 'Auth sync errors');
+    }
+  } catch (error) {
+    setupLogger.debug(
+      { error: error instanceof Error ? error.message : String(error) },
+      'Auth sync failed'
+    );
+  }
+
   let status = getLlmAuthStatus();
   const hasGeminiAuth =
     status.hasGeminiOauthEnv || status.hasGeminiCli || status.hasAuthStore;
   const hasGeminiApiKey = status.hasGeminiApiKey;
 
+  if (status.hasAuthStore && !status.hasGeminiCli) {
+    const wroteCreds = syncAndWriteGeminiCredentials();
+    if (wroteCreds) {
+      status = getLlmAuthStatus();
+    }
+  }
+
   if (!hasGeminiAuth && !hasGeminiApiKey) {
     console.log('\n  LLM authentication required');
     console.log('  No Gemini credentials were found.');
+    console.log(`  Checked: ${join(homedir(), '.gemini', 'oauth_creds.json')}`);
     console.log('  Options:');
     console.log('   1) Run: npx @google/gemini-cli auth login');
     console.log('   2) Provide GEMINI_OAUTH_CREDENTIALS JSON (array)');
     console.log('   3) Provide GEMINI_API_KEY (API-key auth)');
-
-    const oauthJson = await promptInput('  GEMINI_OAUTH_CREDENTIALS (JSON array, press Enter to skip): ');
-    if (oauthJson) {
-      const trimmed = oauthJson.trim();
-      if (!trimmed.startsWith('[')) {
-        console.log('  ✗ GEMINI_OAUTH_CREDENTIALS must be a JSON array');
-      } else {
-        process.env.GEMINI_OAUTH_CREDENTIALS = trimmed;
-        if (existsSync(envPath)) {
-          appendToEnvFile('GEMINI_OAUTH_CREDENTIALS', trimmed, envPath);
-          console.log(`  ✓ Saved GEMINI_OAUTH_CREDENTIALS to ${envFile}`);
-        }
-      }
-    } else {
-      const apiKey = await promptInput('  GEMINI_API_KEY (press Enter to skip): ');
-      if (apiKey) {
-        process.env.GEMINI_API_KEY = apiKey;
-        if (existsSync(envPath)) {
-          appendToEnvFile('GEMINI_API_KEY', apiKey, envPath);
-          console.log(`  ✓ Saved GEMINI_API_KEY to ${envFile}`);
-        }
-      }
-    }
+    printError('Missing required LLM authentication. Set it in .env before rerunning.');
+    process.exit(1);
   }
 
   status = getLlmAuthStatus();
@@ -213,42 +156,7 @@ async function ensureEnvFile(isTestnet: boolean): Promise<boolean> {
   if (needsReload) {
     dotenvConfig({ path: envPath, override: true });
   }
-
-  // Check for required values and prompt if missing
-  if (!process.env.RPC_URL) {
-    console.log('');
-    const rpcUrl = await promptInput('  Enter RPC URL for Base network: ');
-    if (rpcUrl) {
-      process.env.RPC_URL = rpcUrl;
-      if (existsSync(envPath)) {
-        appendToEnvFile('RPC_URL', rpcUrl, envPath);
-        console.log(`  ✓ Saved RPC_URL to ${envFile}`);
-      }
-    }
-  }
-
-  if (!process.env.OPERATE_PASSWORD) {
-    console.log('');
-    const password = await promptInput('  Enter OPERATE_PASSWORD (min 8 chars): ');
-    if (password) {
-      process.env.OPERATE_PASSWORD = password;
-      if (existsSync(envPath)) {
-        appendToEnvFile('OPERATE_PASSWORD', password, envPath);
-        console.log(`  ✓ Saved OPERATE_PASSWORD to ${envFile}`);
-      }
-    }
-  }
-
-  await ensureLlmAuth(envPath, envFile);
-
-  console.log('\n  Optional: API keys (press Enter to skip)');
-  await promptOptionalEnv('GEMINI_API_KEY', '  GEMINI_API_KEY: ', envPath, envFile);
-  await promptOptionalEnv('OPENAI_API_KEY', '  OPENAI_API_KEY: ', envPath, envFile);
-
-  console.log('\n  Optional: Git credentials (press Enter to skip)');
-  await promptOptionalEnv('GITHUB_TOKEN', '  GITHUB_TOKEN: ', envPath, envFile);
-  await promptOptionalEnv('GIT_AUTHOR_NAME', '  GIT_AUTHOR_NAME: ', envPath, envFile);
-  await promptOptionalEnv('GIT_AUTHOR_EMAIL', '  GIT_AUTHOR_EMAIL: ', envPath, envFile);
+  await ensureLlmAuth();
 
   return needsReload;
 }
@@ -311,7 +219,7 @@ function parseArgs(): CLIArgs {
 function printHelp(): void {
   console.log(`
 +-----------------------------------------------------------------------------+
-|           OLAS Service Interactive Setup Wizard (jinn-node)                 |
+|             OLAS Service Setup Wizard (jinn-node)                           |
 +-----------------------------------------------------------------------------+
 
 This wizard uses the middleware daemon + HTTP API to guide you through
@@ -330,9 +238,12 @@ OPTIONS:
   --no-mech           Disable mech deployment (mech enabled by default)
   --no-staking        Disable staking (staking enabled by default)
   --staking-contract  Custom staking contract address (default: AgentsFun1)
-  --unattended        Run middleware in unattended mode (requires env vars)
+  --unattended        Run middleware in unattended mode (default)
   --isolated          Run in isolated temp directory (fresh .operate, no production state)
   --help, -h          Show this help message
+
+NOTES:
+  Set ATTENDED=true to wait for funding in-process (blocks until funded).
 
 ENVIRONMENT FILES:
   .env                Production/mainnet configuration (default)
@@ -343,7 +254,7 @@ REQUIRED ENVIRONMENT VARIABLES:
   RPC_URL             RPC URL for the target network
 
 EXAMPLES:
-  # Deploy on mainnet using .env
+  # Deploy on mainnet using .env (unattended default)
   npx jinn-setup --chain=base
 
   # Deploy on testnet using .env.test (Tenderly VNet)
@@ -443,7 +354,7 @@ async function main() {
   const envAttended = typeof process.env.ATTENDED === 'string'
     ? process.env.ATTENDED.toLowerCase() === 'true'
     : undefined;
-  const attendedMode = args.unattended ? false : envAttended ?? true;
+  const attendedMode = args.unattended ? false : envAttended ?? false;
 
   // Set mech request price to 0.000005 ETH (5000000000000 wei) for cost-effective marketplace requests
   const mechRequestPrice = '5000000000000'; // 0.000005 ETH in wei

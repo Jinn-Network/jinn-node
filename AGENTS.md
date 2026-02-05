@@ -15,14 +15,8 @@ This doc is written for an **agent** running setup on behalf of a human. It focu
 - `RPC_URL` for the target chain.
 - `OPERATE_PASSWORD` (min 8 chars, used for wallet encryption).
 - Funding confirmations when setup prints addresses.
-- LLM auth (required for worker execution):
-  - Either Gemini CLI login (`npx @google/gemini-cli auth login`)
-  - Or `GEMINI_OAUTH_CREDENTIALS` JSON (array)
-  - Or `GEMINI_API_KEY` (API-key auth; supported)
-- Optional (only if the human provides them):
-  - `GEMINI_API_KEY` or `OPENAI_API_KEY`
-  - `GITHUB_TOKEN`
-  - `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL`
+- LLM auth (required for worker execution). One of: Gemini CLI login (`npx @google/gemini-cli auth login`), `GEMINI_OAUTH_CREDENTIALS` JSON (array), or `GEMINI_API_KEY`.
+- Optional if the human provides them: `GITHUB_TOKEN`, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`.
 
 ## Agent Setup Flow
 
@@ -52,42 +46,33 @@ RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_KEY
 Optional (only if provided by the human):
 ```
 GEMINI_API_KEY=...
-OPENAI_API_KEY=...
 GITHUB_TOKEN=...
 GIT_AUTHOR_NAME=...
 GIT_AUTHOR_EMAIL=...
 ```
+Tell the human that `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL` become the commit identity used by the agent.
 
 If Gemini CLI auth is used, no env var is needed—just ensure the operator is logged in.
+Setup will auto-detect `~/.gemini/oauth_creds.json` and `~/.jinn/auth/profiles.json` if present.
+If setup reports missing auth, ask the human to log in or provide env creds, then re-run `yarn setup`.
 
-### 3) Run setup in background (important)
+### 3) Run setup (foreground, unattended by default)
 
-**Do not run setup in the foreground.** It waits for funding and can run indefinitely.
-Also **do not tail indefinitely**. Only check logs when needed.
+Setup is non-interactive by default. It will **exit immediately** if required env vars are missing.
+Run unattended in the foreground so you can capture funding prompts.
 
 ```bash
-yarn setup > setup.log 2>&1 &
-echo $! > setup.pid
-```
-
-### 4) Check for funding prompts (poll, don’t tail)
-
-Use on-demand checks:
-```bash
-tail -n 200 setup.log
-```
-
-Or target funding prompts:
-```bash
-rg -n "Please transfer|Funding Required|Master EOA|Master Safe" setup.log
+yarn setup
 ```
 
 When you see a funding prompt:
 1. Tell the human the exact address + amount.
 2. Wait for confirmation of funding.
-3. Re-check `setup.log` to confirm it continued.
+3. Re-run `yarn setup` to continue.
 
-### 5) Capture outputs
+If you need a blocking wait (human present), set `ATTENDED=true` and run `yarn setup` to wait for funding detection.
+
+### 4) Capture outputs
 
 Setup writes results to `/tmp/jinn-service-setup-*.json`. Extract and report:
 - **Service Config ID**
@@ -103,12 +88,10 @@ yarn run
 ## CLI Options
 
 ```
---testnet           Use .env.test for testnet/Tenderly VNet deployment
 --chain=NETWORK     base, gnosis, mode, optimism (default: base)
 --no-mech           Disable mech deployment
 --no-staking        Disable staking
---unattended        Non-interactive mode (requires pre-funded wallets)
---isolated          Fresh .operate in temp directory
+--unattended        Non-interactive mode (default)
 ```
 
 ## Common Issues (Agent-Resolvable)
@@ -116,4 +99,6 @@ yarn run
 - `poetry not found`: install Poetry or ask the human to install it.
 - `OPERATE_PASSWORD not set`: prompt for it and write to `.env`.
 - `RPC_URL not set`: prompt for it and write to `.env`.
-- Setup appears stuck: it is waiting for funding. Check `setup.log` for addresses.
+- Setup appears stuck: it is waiting for funding. Re-run `yarn setup` to re-print funding requirements.
+- Setup asks for Gemini auth even though you are logged in: verify `~/.gemini/oauth_creds.json`
+  exists and that `HOME` points at the correct user.
