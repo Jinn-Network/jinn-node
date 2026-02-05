@@ -27,7 +27,7 @@ export type MessageInput = {
   status?: string;
 };
 
-const CONTROL_API_URL = getOptionalControlApiUrl() || 'http://localhost:4001/graphql';
+const CONTROL_API_URL = getOptionalControlApiUrl();
 
 function getWorkerAddress(): string {
   const addr = getMechAddress();
@@ -169,4 +169,3 @@ export async function updateJobStatus(requestId: string, statusUpdate: string, w
     return null;
   }
 }
-

@@ -121,13 +121,6 @@ export function syncAndWriteGeminiCredentials(): boolean {
 }
 
 /**
- * Check if legacy environment variables are configured
- */
-export function hasLegacyEnvCredentials(): boolean {
-    return !!(process.env.GEMINI_OAUTH_CREDS || process.env.GEMINI_OAUTH_CREDENTIALS);
-}
-
-/**
  * Check if AuthManager has Gemini credentials
  */
 export function hasAuthManagerCredentials(): boolean {

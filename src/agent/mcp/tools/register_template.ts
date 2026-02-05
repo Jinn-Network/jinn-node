@@ -7,6 +7,8 @@ import { parseAnnotatedTools } from '../../../shared/template-tools.js';
 
 loadEnvOnce();
 
+const X402_GATEWAY_URL = (process.env.X402_GATEWAY_URL || 'https://x402-gateway-production-1b84.up.railway.app').replace(/\/+$/, '');
+
 /**
  * Get the Ponder database URL for direct SQL access.
  * Falls back through multiple env vars for compatibility.
@@ -241,7 +243,7 @@ export async function registerTemplate(args: unknown) {
                 templateId,
                 action: 'updated',
                 status: finalStatus,
-                marketplaceUrl: `https://x402.jinn.network/templates/${templateId}`,
+                marketplaceUrl: `${X402_GATEWAY_URL}/templates/${templateId}`,
                 explorerUrl: `https://explorer.jinn.network/templates/${templateId}`,
             };
 
@@ -295,7 +297,7 @@ export async function registerTemplate(args: unknown) {
             templateId,
             action: 'created',
             status,
-            marketplaceUrl: `https://x402.jinn.network/templates/${templateId}`,
+            marketplaceUrl: `${X402_GATEWAY_URL}/templates/${templateId}`,
             explorerUrl: `https://explorer.jinn.network/templates/${templateId}`,
             note: status === 'hidden'
                 ? 'Template requires approval before becoming visible in marketplace'

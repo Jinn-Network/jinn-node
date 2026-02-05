@@ -16,14 +16,22 @@
 import 'dotenv/config';
 import { config as dotenvConfig } from 'dotenv';
 import { existsSync, copyFileSync, appendFileSync } from 'fs';
-import { resolve } from 'path';
+import { homedir } from 'os';
+import { join, resolve } from 'path';
 import { createInterface } from 'readline';
 import { SimplifiedServiceBootstrap, type SimplifiedBootstrapConfig } from '../worker/SimplifiedServiceBootstrap.js';
 import { logger } from '../logging/index.js';
-import { getRequiredRpcUrl, getOptionalMechChainConfig, getOptionalOperatePassword } from '../agent/mcp/tools/shared/env.js';
+import {
+  getRequiredRpcUrl,
+  getOptionalMechChainConfig,
+  getOptionalOperatePassword,
+  getOptionalGeminiApiKey,
+  getOptionalOpenAiApiKey,
+} from '../agent/mcp/tools/shared/env.js';
 import { createIsolatedMiddlewareEnvironment, type IsolatedEnvironment } from './test-isolation.js';
 import { runPreflight } from './preflight.js';
 import { printHeader, printStep, printSuccess, printError } from './display.js';
+import { hasAuthManagerCredentials } from '../worker/llm/authIntegration.js';
 
 const setupLogger = logger.child({ component: "SETUP-CLI" });
 
@@ -47,9 +55,139 @@ async function promptInput(question: string): Promise<string> {
 /**
  * Append a key=value pair to .env file
  */
+function formatEnvValue(value: string): string {
+  if (value === '') {
+    return '""';
+  }
+
+  const needsQuotes = /[\s"'`$\\#]/.test(value);
+  if (!needsQuotes) {
+    return value;
+  }
+
+  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `"${escaped}"`;
+}
+
 function appendToEnvFile(key: string, value: string, envPath: string): void {
-  const line = `${key}=${value}\n`;
+  const line = `${key}=${formatEnvValue(value)}\n`;
   appendFileSync(envPath, line);
+}
+
+async function promptOptionalEnv(
+  key: string,
+  question: string,
+  envPath: string,
+  envFile: string
+): Promise<void> {
+  if (process.env[key]) {
+    return;
+  }
+  const value = await promptInput(question);
+  if (!value) {
+    return;
+  }
+  process.env[key] = value;
+  if (existsSync(envPath)) {
+    appendToEnvFile(key, value, envPath);
+    console.log(`  ✓ Saved ${key} to ${envFile}`);
+  }
+}
+
+type LlmAuthStatus = {
+  hasGeminiOauthEnv: boolean;
+  hasGeminiCli: boolean;
+  hasAuthStore: boolean;
+  hasGeminiApiKey: boolean;
+  hasOpenAiKey: boolean;
+};
+
+function getLlmAuthStatus(): LlmAuthStatus {
+  const hasGeminiOauthEnv = Boolean(process.env.GEMINI_OAUTH_CREDENTIALS);
+  const hasGeminiCli = existsSync(join(homedir(), '.gemini', 'oauth_creds.json'));
+  const hasAuthStore = hasAuthManagerCredentials();
+  const hasGeminiApiKey = Boolean(getOptionalGeminiApiKey());
+  const hasOpenAiKey = Boolean(getOptionalOpenAiApiKey());
+
+  return {
+    hasGeminiOauthEnv,
+    hasGeminiCli,
+    hasAuthStore,
+    hasGeminiApiKey,
+    hasOpenAiKey,
+  };
+}
+
+function logLlmAuthStatus(status: LlmAuthStatus): void {
+  if (status.hasGeminiOauthEnv) {
+    console.log('  ✓ Found Gemini OAuth credentials in env');
+  }
+  if (status.hasGeminiCli) {
+    console.log('  ✓ Found Gemini CLI credentials in ~/.gemini');
+  }
+  if (status.hasAuthStore) {
+    console.log('  ✓ Found Gemini credentials in AuthManager store');
+  }
+  if (status.hasGeminiApiKey) {
+    console.log('  ✓ Found GEMINI_API_KEY');
+  }
+  if (status.hasOpenAiKey) {
+    console.log('  ✓ Found OPENAI_API_KEY');
+  }
+}
+
+async function ensureLlmAuth(envPath: string, envFile: string): Promise<void> {
+  let status = getLlmAuthStatus();
+  const hasGeminiAuth =
+    status.hasGeminiOauthEnv || status.hasGeminiCli || status.hasAuthStore;
+  const hasGeminiApiKey = status.hasGeminiApiKey;
+
+  if (!hasGeminiAuth && !hasGeminiApiKey) {
+    console.log('\n  LLM authentication required');
+    console.log('  No Gemini credentials were found.');
+    console.log('  Options:');
+    console.log('   1) Run: npx @google/gemini-cli auth login');
+    console.log('   2) Provide GEMINI_OAUTH_CREDENTIALS JSON (array)');
+    console.log('   3) Provide GEMINI_API_KEY (API-key auth)');
+
+    const oauthJson = await promptInput('  GEMINI_OAUTH_CREDENTIALS (JSON array, press Enter to skip): ');
+    if (oauthJson) {
+      const trimmed = oauthJson.trim();
+      if (!trimmed.startsWith('[')) {
+        console.log('  ✗ GEMINI_OAUTH_CREDENTIALS must be a JSON array');
+      } else {
+        process.env.GEMINI_OAUTH_CREDENTIALS = trimmed;
+        if (existsSync(envPath)) {
+          appendToEnvFile('GEMINI_OAUTH_CREDENTIALS', trimmed, envPath);
+          console.log(`  ✓ Saved GEMINI_OAUTH_CREDENTIALS to ${envFile}`);
+        }
+      }
+    } else {
+      const apiKey = await promptInput('  GEMINI_API_KEY (press Enter to skip): ');
+      if (apiKey) {
+        process.env.GEMINI_API_KEY = apiKey;
+        if (existsSync(envPath)) {
+          appendToEnvFile('GEMINI_API_KEY', apiKey, envPath);
+          console.log(`  ✓ Saved GEMINI_API_KEY to ${envFile}`);
+        }
+      }
+    }
+  }
+
+  status = getLlmAuthStatus();
+  const hasGeminiAuthAfter =
+    status.hasGeminiOauthEnv || status.hasGeminiCli || status.hasAuthStore;
+  const hasGeminiApiKeyAfter = status.hasGeminiApiKey;
+  if (!hasGeminiAuthAfter && !hasGeminiApiKeyAfter) {
+    printError('Gemini credentials not configured. Authentication is required to run the worker.');
+    console.error('  Fix: run `npx @google/gemini-cli auth login`, set GEMINI_OAUTH_CREDENTIALS, or set GEMINI_API_KEY.');
+    process.exit(1);
+  }
+
+  logLlmAuthStatus(status);
+  if (!hasGeminiAuthAfter && hasGeminiApiKeyAfter) {
+    console.log('  Note: Using GEMINI_API_KEY (supported). OAuth is recommended for best compatibility.');
+  }
 }
 
 /**
@@ -100,6 +238,17 @@ async function ensureEnvFile(isTestnet: boolean): Promise<boolean> {
       }
     }
   }
+
+  await ensureLlmAuth(envPath, envFile);
+
+  console.log('\n  Optional: API keys (press Enter to skip)');
+  await promptOptionalEnv('GEMINI_API_KEY', '  GEMINI_API_KEY: ', envPath, envFile);
+  await promptOptionalEnv('OPENAI_API_KEY', '  OPENAI_API_KEY: ', envPath, envFile);
+
+  console.log('\n  Optional: Git credentials (press Enter to skip)');
+  await promptOptionalEnv('GITHUB_TOKEN', '  GITHUB_TOKEN: ', envPath, envFile);
+  await promptOptionalEnv('GIT_AUTHOR_NAME', '  GIT_AUTHOR_NAME: ', envPath, envFile);
+  await promptOptionalEnv('GIT_AUTHOR_EMAIL', '  GIT_AUTHOR_EMAIL: ', envPath, envFile);
 
   return needsReload;
 }

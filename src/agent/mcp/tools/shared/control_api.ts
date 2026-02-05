@@ -34,7 +34,7 @@ type MessageInput = {
   status?: string;
 };
 
-const CONTROL_API_URL = getOptionalControlApiUrl() || 'http://localhost:4001/graphql';
+const CONTROL_API_URL = getOptionalControlApiUrl();
 const RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1000; // 1 second
 

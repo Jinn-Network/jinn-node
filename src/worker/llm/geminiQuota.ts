@@ -15,7 +15,6 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import {
   getGeminiCredentialFromAuthManager,
   syncAndWriteGeminiCredentials,
-  hasLegacyEnvCredentials,
   type GeminiCredentialSet,
 } from './authIntegration.js';
 
@@ -325,18 +324,14 @@ export async function selectAvailableCredential(
   const credentials = parseCredentialsArray();
 
   if (!credentials) {
-    // No legacy env var credentials configured
     // Try AuthManager as fallback for zero-friction onboarding
-    if (!hasLegacyEnvCredentials()) {
-      const authManagerCred = getGeminiCredentialFromAuthManager();
-      if (authManagerCred) {
-        workerLogger.info({ source: 'AuthManager' }, 'Using Gemini credentials discovered by AuthManager');
-        // Write to ~/.gemini/ so Gemini CLI can use them
-        syncAndWriteGeminiCredentials();
-        return { selectedCredential: authManagerCred as unknown as OAuthCredentialSet, selectedIndex: 0, allExhausted: false };
-      }
+    const authManagerCred = getGeminiCredentialFromAuthManager();
+    if (authManagerCred) {
+      workerLogger.info({ source: 'AuthManager' }, 'Using Gemini credentials discovered by AuthManager');
+      // Write to ~/.gemini/ so Gemini CLI can use them
+      syncAndWriteGeminiCredentials();
+      return { selectedCredential: authManagerCred as unknown as OAuthCredentialSet, selectedIndex: 0, allExhausted: false };
     }
-    // Fall back to legacy single credential env var
     return { selectedCredential: null, selectedIndex: -1, allExhausted: false };
   }
 
@@ -359,124 +354,9 @@ export async function selectAvailableCredential(
   return { selectedCredential: null, selectedIndex: -1, allExhausted: true };
 }
 
-// Legacy OAuth quota check via CodeAssist API (for backwards compatibility)
-// Uses GEMINI_OAUTH_CREDS env var
-async function checkOAuthQuota(model?: string, timeoutMs?: number): Promise<QuotaCheckResult> {
-  const oauthCredsJson = process.env.GEMINI_OAUTH_CREDS;
-  if (!oauthCredsJson) {
-    return { ok: true, checked: false, isQuotaError: false, detail: 'GEMINI_OAUTH_CREDS not set' };
-  }
-
-  try {
-    const creds = JSON.parse(oauthCredsJson);
-    let accessToken = creds.access_token;
-
-    // Refresh token if expired
-    if (creds.expiry_date && Date.now() > creds.expiry_date) {
-      workerLogger.info({}, 'OAuth access token expired, refreshing...');
-
-      if (!creds.refresh_token) {
-        return { ok: true, checked: false, isQuotaError: false, detail: 'Token expired, no refresh token' };
-      }
-
-      try {
-        const oauth2Client = new OAuth2Client(OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET);
-        oauth2Client.setCredentials({ refresh_token: creds.refresh_token });
-        const { credentials } = await oauth2Client.refreshAccessToken();
-        accessToken = credentials.access_token;
-        // Note: We don't persist refreshed token - CLI handles its own refresh from ~/.gemini/
-
-        workerLogger.info({}, 'OAuth token refreshed for quota check');
-      } catch (refreshError: any) {
-        workerLogger.warn({ error: refreshError.message }, 'Failed to refresh OAuth token');
-        return { ok: true, checked: false, isQuotaError: false, detail: `Token refresh failed: ${refreshError.message}` };
-      }
-    }
-
-    // Call CodeAssist retrieveUserQuota endpoint
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs ?? DEFAULT_TIMEOUT_MS);
-
-    try {
-      const url = 'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota';
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ project: 'user' }),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        const isQuotaError = response.status === 429 || isQuotaText(text);
-        return {
-          ok: !isQuotaError,
-          checked: true,
-          isQuotaError,
-          status: response.status,
-          detail: truncate(text, 240),
-        };
-      }
-
-      const quota = await response.json() as { buckets?: Array<{ remainingAmount?: string; remainingFraction?: number; modelId?: string; resetTime?: string }> };
-
-      // Check if the specific model family has remaining quota
-      const normalizedModel = model ? normalizeModel(model) : undefined;
-      const requestedFamily = normalizedModel ? extractModelFamily(normalizedModel) : undefined;
-
-      // Log bucket details for debugging
-      workerLogger.info({
-        checkingModel: normalizedModel,
-        modelFamily: requestedFamily,
-        bucketCount: quota.buckets?.length || 0,
-        bucketModels: quota.buckets?.map(b => b.modelId).join(','),
-      }, 'OAuth quota buckets received');
-
-      const hasQuota = quota.buckets?.some((b) => {
-        // If we're checking a specific model family, only check matching buckets
-        if (requestedFamily && b.modelId) {
-          const bucketFamily = extractModelFamily(b.modelId);
-          if (bucketFamily && requestedFamily !== bucketFamily) {
-            return false;  // Skip non-matching model families
-          }
-        }
-        const remaining = parseFloat(b.remainingAmount || '0');
-        return remaining > 0 || (b.remainingFraction !== undefined && b.remainingFraction > 0);
-      }) ?? true;
-
-      workerLogger.info({
-        buckets: quota.buckets?.length || 0,
-        hasQuota,
-        model: normalizedModel,
-        authMethod: 'oauth',
-      }, 'OAuth quota check completed');
-
-      return { ok: hasQuota, checked: true, isQuotaError: !hasQuota };
-    } finally {
-      clearTimeout(timeout);
-    }
-  } catch (error: any) {
-    workerLogger.warn({ error: error.message }, 'OAuth quota check failed');
-    return { ok: true, checked: false, isQuotaError: false, detail: error.message };
-  }
-}
-
 export async function checkGeminiQuota(
   options: QuotaCheckOptions = {}
 ): Promise<QuotaCheckResult> {
-  // Try OAuth quota check first (uses CodeAssist API)
-  if (process.env.GEMINI_OAUTH_CREDS) {
-    const oauthResult = await checkOAuthQuota(options.model, options.timeoutMs);
-    if (oauthResult.checked) {
-      return oauthResult;
-    }
-    // Fall through to API key check if OAuth check didn't work
-    workerLogger.debug({ detail: oauthResult.detail }, 'OAuth quota check skipped, falling back to API key');
-  }
-
   // Existing API key quota check
   const apiKey = getOptionalGeminiApiKey() || process.env.GEMINI_API_KEY;
   if (!apiKey) {

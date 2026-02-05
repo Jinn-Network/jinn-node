@@ -95,7 +95,7 @@ const ponderSchema = z.object({
  * For job management and coordination
  */
 const controlApiSchema = z.object({
-  // CONTROL_API_URL: GraphQL endpoint for Control API
+  // CONTROL_API_URL: GraphQL endpoint for Control API (defaults to hosted Control API)
   CONTROL_API_URL: z.string().url().optional(),
 
   // CONTROL_API_PORT: Server port when running Control API locally
@@ -658,7 +658,7 @@ export function getOptionalPonderEndBlock(): number | undefined {
 // ============================================================================
 
 export function getOptionalControlApiUrl(): string | undefined {
-  return getConfig().CONTROL_API_URL;
+  return getConfig().CONTROL_API_URL || 'https://control-api-production-c1f5.up.railway.app/graphql';
 }
 
 export function getOptionalControlApiPort(): number | undefined {

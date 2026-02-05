@@ -50,7 +50,7 @@ type JobDefinitionStatus = {
 
 
 const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
-const CONTROL_API_URL = getOptionalControlApiUrl() || 'http://localhost:4001/graphql';
+const CONTROL_API_URL = getOptionalControlApiUrl();
 const SINGLE_SHOT = process.argv.includes('--single') || process.argv.includes('--single-job');
 const USE_CONTROL_API = getUseControlApi();
 

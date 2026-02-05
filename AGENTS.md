@@ -15,6 +15,14 @@ This doc is written for an **agent** running setup on behalf of a human. It focu
 - `RPC_URL` for the target chain.
 - `OPERATE_PASSWORD` (min 8 chars, used for wallet encryption).
 - Funding confirmations when setup prints addresses.
+- LLM auth (required for worker execution):
+  - Either Gemini CLI login (`npx @google/gemini-cli auth login`)
+  - Or `GEMINI_OAUTH_CREDENTIALS` JSON (array)
+  - Or `GEMINI_API_KEY` (API-key auth; supported)
+- Optional (only if the human provides them):
+  - `GEMINI_API_KEY` or `OPENAI_API_KEY`
+  - `GITHUB_TOKEN`
+  - `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL`
 
 ## Agent Setup Flow
 
@@ -40,6 +48,17 @@ Ensure `.env` contains:
 OPERATE_PASSWORD=your_secure_password_min_8_chars
 RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_KEY
 ```
+
+Optional (only if provided by the human):
+```
+GEMINI_API_KEY=...
+OPENAI_API_KEY=...
+GITHUB_TOKEN=...
+GIT_AUTHOR_NAME=...
+GIT_AUTHOR_EMAIL=...
+```
+
+If Gemini CLI auth is used, no env var is needed—just ensure the operator is logged in.
 
 ### 3) Run setup in background (important)
 
