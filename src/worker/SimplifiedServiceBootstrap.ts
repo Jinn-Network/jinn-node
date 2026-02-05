@@ -24,7 +24,7 @@
 
 import { OlasOperateWrapper } from './OlasOperateWrapper.js';
 import { logger } from '../logging/index.js';
-import { writeFileSync } from 'fs';
+import { writeFileSync, readFileSync, readdirSync, existsSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { createDefaultServiceConfig, SERVICE_CONSTANTS } from './config/ServiceConfig.js';
@@ -76,6 +76,11 @@ export interface SimplifiedBootstrapConfig {
    * Optional backup owner address for Master Safe creation
    */
   backupOwner?: string;
+  /**
+   * Reuse an existing service config from .operate/services if available.
+   * Defaults to true unless JINN_REUSE_SERVICE_CONFIG is set to false.
+   */
+  reuseExistingService?: boolean;
 }
 
 export interface SimplifiedBootstrapResult {
@@ -92,6 +97,7 @@ export class SimplifiedServiceBootstrap {
   private operateWrapper?: OlasOperateWrapper;
   private outputBuffer: string = ''; // Buffer for E2E test auto-funding
   private isAttended: boolean;
+  private reuseExistingService: boolean;
 
   constructor(config: SimplifiedBootstrapConfig) {
     this.config = config;
@@ -100,6 +106,10 @@ export class SimplifiedServiceBootstrap {
       ? process.env.ATTENDED.toLowerCase() === 'true'
       : undefined;
     this.isAttended = config.attended ?? envAttended ?? true;
+    const envReuse = typeof process.env.JINN_REUSE_SERVICE_CONFIG === 'string'
+      ? process.env.JINN_REUSE_SERVICE_CONFIG.toLowerCase() !== 'false'
+      : undefined;
+    this.reuseExistingService = config.reuseExistingService ?? envReuse ?? true;
     
     // Validate required config
     if (!config.operatePassword) {
@@ -121,6 +131,97 @@ export class SimplifiedServiceBootstrap {
       this.outputBuffer = this.outputBuffer.slice(-50000);
     }
     process.stdout.write(text);
+  }
+
+  private findReusableServiceConfig(): { serviceConfigId: string } | null {
+    if (!this.operateWrapper) {
+      return null;
+    }
+
+    const middlewarePath = this.operateWrapper.getMiddlewarePath();
+    const servicesDir = join(middlewarePath, '.operate', 'services');
+    if (!existsSync(servicesDir)) {
+      return null;
+    }
+
+    const entries = readdirSync(servicesDir, { withFileTypes: true })
+      .filter((dirent) => dirent.isDirectory() && dirent.name.startsWith('sc-'))
+      .map((dirent) => dirent.name);
+
+    const candidates: Array<{
+      serviceConfigId: string;
+      score: number;
+      mtimeMs: number;
+    }> = [];
+
+    for (const dirName of entries) {
+      const configPath = join(servicesDir, dirName, 'config.json');
+      if (!existsSync(configPath)) continue;
+
+      try {
+        const raw = readFileSync(configPath, 'utf-8');
+        const config = JSON.parse(raw) as {
+          service_config_id?: string;
+          home_chain?: string;
+          chain_configs?: Record<string, any>;
+          env_variables?: { MECH_TO_CONFIG?: { value?: string } };
+        };
+
+        const homeChain = config.home_chain || Object.keys(config.chain_configs || {})[0] || this.config.chain;
+        const chainMatches = homeChain === this.config.chain;
+
+        const mechToConfig = config.env_variables?.MECH_TO_CONFIG?.value;
+        const hasMechConfig = Boolean(mechToConfig && mechToConfig.trim() !== '');
+
+        let hasMultisig = false;
+        let hasInstance = false;
+        if (config.chain_configs) {
+          for (const chainConfig of Object.values(config.chain_configs)) {
+            if (chainConfig?.chain_data?.multisig) {
+              hasMultisig = true;
+            }
+            if (Array.isArray(chainConfig?.chain_data?.instances) && chainConfig.chain_data.instances.length > 0) {
+              hasInstance = true;
+            }
+          }
+        }
+
+        let score = 0;
+        if (chainMatches) score += 3;
+        if (hasMechConfig) score += 4;
+        if (hasMultisig) score += 2;
+        if (hasInstance) score += 1;
+
+        const mtimeMs = statSync(configPath).mtimeMs;
+
+        candidates.push({
+          serviceConfigId: config.service_config_id || dirName,
+          score,
+          mtimeMs,
+        });
+      } catch {
+        continue;
+      }
+    }
+
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    candidates.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return b.mtimeMs - a.mtimeMs;
+    });
+
+    const chosen = candidates[0];
+    if (candidates.length > 1) {
+      bootstrapLogger.info(
+        { serviceConfigId: chosen.serviceConfigId, score: chosen.score, totalCandidates: candidates.length },
+        'Reusing existing service config'
+      );
+    }
+
+    return { serviceConfigId: chosen.serviceConfigId };
   }
 
   /**
@@ -346,14 +447,25 @@ ${'='.repeat(80)}
       this.writeOutput(`Please save the mnemonic phrase for the Master EOA: ${mnemonic.join(' ')}\n`);
     }
 
-    const serviceCreate = await this.operateWrapper.createService(serviceConfig);
-    if (!serviceCreate.success) {
-      throw new Error(`Service creation failed: ${serviceCreate.error}`);
+    let serviceConfigId: string | undefined;
+    if (this.reuseExistingService) {
+      const existing = this.findReusableServiceConfig();
+      if (existing?.serviceConfigId) {
+        serviceConfigId = existing.serviceConfigId;
+        bootstrapLogger.info({ serviceConfigId }, 'Reusing existing service config');
+      }
     }
 
-    const serviceConfigId = serviceCreate.service?.service_config_id;
     if (!serviceConfigId) {
-      throw new Error('Service creation succeeded but no service_config_id returned');
+      const serviceCreate = await this.operateWrapper.createService(serviceConfig);
+      if (!serviceCreate.success) {
+        throw new Error(`Service creation failed: ${serviceCreate.error}`);
+      }
+
+      serviceConfigId = serviceCreate.service?.service_config_id;
+      if (!serviceConfigId) {
+        throw new Error('Service creation succeeded but no service_config_id returned');
+      }
     }
 
     const fundingResult = await this.operateWrapper.getFundingRequirements(serviceConfigId);
