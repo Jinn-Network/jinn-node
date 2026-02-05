@@ -127,7 +127,7 @@ export function printSuccess(result: {
   }
 
   console.log('║' + ' '.repeat(BOX_WIDTH - 2) + '║');
-  console.log('║  Next: Run the worker with `yarn run`'.padEnd(BOX_WIDTH - 1) + '║');
+  console.log('║  Next: Run the worker with `yarn worker`'.padEnd(BOX_WIDTH - 1) + '║');
   console.log('║' + ' '.repeat(BOX_WIDTH - 2) + '║');
   console.log('╚' + line + '╝');
   console.log('');

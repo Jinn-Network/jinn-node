@@ -64,7 +64,7 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && copyfiles -u 1 'src/**/*.json' dist",
-    "run": "sh -c 'LOG_PRETTY=1 USE_TSX_MCP=1 tsx src/worker/mech_worker.ts \"$@\"' --",
+    "worker": "sh -c 'LOG_PRETTY=1 USE_TSX_MCP=1 tsx src/worker/mech_worker.ts \"$@\"' --",
     "setup": "sh -c 'LOG_PRETTY=1 tsx src/setup/cli.ts \"$@\"' --",
     "typecheck": "tsc --noEmit"
   },

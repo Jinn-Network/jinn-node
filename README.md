@@ -24,7 +24,7 @@ If you are a human, read `HUMANS.md`.
 yarn install
 ```
 
-## Setup (interactive)
+## Setup
 
 ```bash
 yarn setup
@@ -39,7 +39,7 @@ poetry install
 ## Run Worker
 
 ```bash
-yarn run
+yarn worker
 ```
 
 ## Environment
@@ -52,15 +52,15 @@ OPERATE_PASSWORD=...
 
 ## Scripts
 
-- `yarn setup` - interactive service setup wizard
-- `yarn run` - run the worker
+- `yarn setup` - service setup wizard (non-interactive by default)
+- `yarn worker` - run the worker
 - `yarn build` - compile to `dist/`
 - `yarn typecheck` - typecheck only
 
 ## Logs
 
 - Pretty logs by default.
-- Force JSON: `LOG_FORMAT=json yarn run`
+- Force JSON: `LOG_FORMAT=json yarn worker`
 
 ## Outputs
 

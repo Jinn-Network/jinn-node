@@ -16,7 +16,7 @@ This doc is written for an **agent** running setup on behalf of a human. It focu
 - `OPERATE_PASSWORD` (min 8 chars, used for wallet encryption).
 - Funding confirmations when setup prints addresses.
 - LLM auth (required for worker execution). One of: Gemini CLI login (`npx @google/gemini-cli auth login`), `GEMINI_OAUTH_CREDENTIALS` JSON (array), or `GEMINI_API_KEY`.
-- Optional if the human provides them: `GITHUB_TOKEN`, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`.
+- Optional but highly recommended: `GITHUB_TOKEN` (repo access/push), plus `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`.
 
 ## Agent Setup Flow
 
@@ -32,7 +32,7 @@ OPERATE_PASSWORD=your_secure_password_min_8_chars
 RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_KEY
 ```
 
-Optional (only if provided by the human):
+Ask the human for these optional values (they can skip any, but GitHub creds are strongly recommended):
 ```
 GEMINI_API_KEY=...
 GITHUB_TOKEN=...
@@ -82,7 +82,7 @@ Setup writes results to `/tmp/jinn-service-setup-*.json`. Extract and report:
 
 From `jinn-node/`:
 ```bash
-yarn run
+yarn worker
 ```
 
 ## CLI Options
