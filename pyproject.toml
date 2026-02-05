@@ -1,0 +1,14 @@
+[tool.poetry]
+name = "jinn-node-python-deps"
+version = "0.1.0"
+description = "Python dependencies for jinn-node OLAS service management"
+authors = ["Jinn Network"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.12"
+olas-operate-middleware = {git = "https://github.com/Jinn-Network/olas-operate-middleware.git", tag = "v0.1.0"}
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
