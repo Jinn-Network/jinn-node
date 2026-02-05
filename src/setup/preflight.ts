@@ -3,26 +3,23 @@
  *
  * Run these BEFORE creating SimplifiedServiceBootstrap to fail fast
  * with clear instructions if prerequisites are missing.
+ *
+ * The olas-operate-middleware is installed as a Poetry git dependency
+ * in jinn-node's pyproject.toml - no separate path needed.
  */
 
 import { spawn } from 'child_process';
 import { existsSync } from 'fs';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 export interface PreflightResult {
   success: boolean;
   errors: string[];
   warnings: string[];
-  middlewarePath?: string;
 }
 
 export interface PreflightOptions {
-  middlewarePath?: string;
   autoInstall?: boolean;
+  cwd?: string; // Working directory (defaults to process.cwd())
 }
 
 /**
@@ -31,6 +28,7 @@ export interface PreflightOptions {
 export async function runPreflight(options: PreflightOptions = {}): Promise<PreflightResult> {
   const errors: string[] = [];
   const warnings: string[] = [];
+  const cwd = options.cwd || process.cwd();
 
   // 1. Check Poetry is installed
   const poetryCheck = await checkPoetryInstalled();
@@ -42,22 +40,21 @@ export async function runPreflight(options: PreflightOptions = {}): Promise<Pref
     return { success: false, errors, warnings };
   }
 
-  // 2. Check middleware path exists
-  const mwPath = options.middlewarePath || resolveMiddlewarePath();
-  if (!mwPath || !existsSync(mwPath)) {
+  // 2. Check pyproject.toml exists
+  if (!existsSync(`${cwd}/pyproject.toml`)) {
     errors.push(
-      `Middleware not found at: ${mwPath || '(not resolved)'}\n` +
-      '    Expected: ../olas-operate-middleware or set OLAS_MIDDLEWARE_PATH'
+      'pyproject.toml not found in current directory.\n' +
+      '    Make sure you are in the jinn-node directory.'
     );
     return { success: false, errors, warnings };
   }
 
-  // 3. Check Poetry dependencies installed
-  const depsCheck = await checkPoetryDependencies(mwPath);
+  // 3. Check Poetry dependencies installed (venv exists)
+  const depsCheck = await checkPoetryDependencies(cwd);
   if (!depsCheck.installed) {
     if (options.autoInstall) {
       console.log('  Installing Python dependencies...\n');
-      const installResult = await runPoetryInstall(mwPath);
+      const installResult = await runPoetryInstall(cwd);
       if (!installResult.success) {
         errors.push(`Failed to install dependencies: ${installResult.error}`);
         return { success: false, errors, warnings };
@@ -66,7 +63,7 @@ export async function runPreflight(options: PreflightOptions = {}): Promise<Pref
     } else {
       errors.push(
         'Python dependencies not installed.\n' +
-        `    Run: cd ${mwPath} && poetry install\n` +
+        '    Run: poetry install\n' +
         '    Or use: yarn setup --auto-install'
       );
       return { success: false, errors, warnings };
@@ -74,17 +71,27 @@ export async function runPreflight(options: PreflightOptions = {}): Promise<Pref
   }
 
   // 4. Verify operate module is importable
-  const importCheck = await checkOperateImportable(mwPath);
+  const importCheck = await checkOperateImportable(cwd);
   if (!importCheck.success) {
-    errors.push(
-      'Cannot import operate module.\n' +
-      `    Error: ${importCheck.error}\n` +
-      `    Try: cd ${mwPath} && poetry install`
-    );
+    // Try auto-install if not already attempted
+    if (!depsCheck.installed || options.autoInstall) {
+      // Already tried install above, still failing
+      errors.push(
+        'Cannot import operate module after install.\n' +
+        `    Error: ${importCheck.error}\n` +
+        '    Try: poetry install --sync'
+      );
+    } else {
+      errors.push(
+        'Cannot import operate module.\n' +
+        `    Error: ${importCheck.error}\n` +
+        '    Try: poetry install'
+      );
+    }
     return { success: false, errors, warnings };
   }
 
-  return { success: true, errors, warnings, middlewarePath: mwPath };
+  return { success: true, errors, warnings };
 }
 
 /**
@@ -115,12 +122,12 @@ async function checkPoetryInstalled(): Promise<{ installed: boolean; version?: s
 }
 
 /**
- * Check if Poetry virtual environment exists for middleware
+ * Check if Poetry virtual environment exists
  */
-async function checkPoetryDependencies(middlewarePath: string): Promise<{ installed: boolean }> {
+async function checkPoetryDependencies(cwd: string): Promise<{ installed: boolean }> {
   return new Promise((res) => {
     const proc = spawn('poetry', ['env', 'info', '-p'], {
-      cwd: middlewarePath,
+      cwd,
       shell: true,
     });
 
@@ -147,10 +154,11 @@ async function checkPoetryDependencies(middlewarePath: string): Promise<{ instal
 /**
  * Verify the operate module can be imported
  */
-async function checkOperateImportable(middlewarePath: string): Promise<{ success: boolean; error?: string }> {
+async function checkOperateImportable(cwd: string): Promise<{ success: boolean; error?: string }> {
   return new Promise((res) => {
-    const proc = spawn('poetry', ['run', 'python', '-c', 'import operate'], {
-      cwd: middlewarePath,
+    // Use shell command string (not array) to preserve quoting
+    const proc = spawn('poetry run python -c "import operate"', [], {
+      cwd,
       shell: true,
     });
 
@@ -175,12 +183,12 @@ async function checkOperateImportable(middlewarePath: string): Promise<{ success
 }
 
 /**
- * Run poetry install in middleware directory
+ * Run poetry install in directory
  */
-async function runPoetryInstall(middlewarePath: string): Promise<{ success: boolean; error?: string }> {
+async function runPoetryInstall(cwd: string): Promise<{ success: boolean; error?: string }> {
   return new Promise((res) => {
     const proc = spawn('poetry', ['install'], {
-      cwd: middlewarePath,
+      cwd,
       shell: true,
       stdio: ['inherit', 'inherit', 'pipe'], // Show progress to user
     });
@@ -203,34 +211,4 @@ async function runPoetryInstall(middlewarePath: string): Promise<{ success: bool
       res({ success: false, error: err.message });
     });
   });
-}
-
-/**
- * Resolve middleware path using multiple strategies
- */
-function resolveMiddlewarePath(): string | null {
-  // 1. Environment variable (explicit override)
-  if (process.env.OLAS_MIDDLEWARE_PATH) {
-    return process.env.OLAS_MIDDLEWARE_PATH;
-  }
-
-  // 2. Monorepo sibling (from cwd)
-  const sibling = resolve(process.cwd(), '../olas-operate-middleware');
-  if (existsSync(sibling)) {
-    return sibling;
-  }
-
-  // 3. From jinn-node package location
-  const fromPackage = resolve(__dirname, '../../../olas-operate-middleware');
-  if (existsSync(fromPackage)) {
-    return fromPackage;
-  }
-
-  // 4. Two levels up from jinn-node (common monorepo structure)
-  const twoUp = resolve(__dirname, '../../../../olas-operate-middleware');
-  if (existsSync(twoUp)) {
-    return twoUp;
-  }
-
-  return null;
 }
