@@ -20,18 +20,7 @@ This doc is written for an **agent** running setup on behalf of a human. It focu
 
 ## Agent Setup Flow
 
-### 1) Install dependencies
-
-```bash
-yarn install
-```
-
-Setup will auto-install Python dependencies if missing. If it fails, run:
-```bash
-poetry install
-```
-
-### 2) Prepare `.env`
+### 1) Prepare `.env` first (required)
 
 ```bash
 cp .env.example .env
@@ -56,10 +45,21 @@ If Gemini CLI auth is used, no env var is needed—just ensure the operator is l
 Setup will auto-detect `~/.gemini/oauth_creds.json` and `~/.jinn/auth/profiles.json` if present.
 If setup reports missing auth, ask the human to log in or provide env creds, then re-run `yarn setup`.
 
-### 3) Run setup (foreground, unattended by default)
+### 2) Install dependencies
+
+```bash
+yarn install
+```
+
+Setup will auto-install Python dependencies if missing. If it fails, run:
+```bash
+poetry install
+```
+
+### 3) Run setup (foreground)
 
 Setup is non-interactive by default. It will **exit immediately** if required env vars are missing.
-Run unattended in the foreground so you can capture funding prompts.
+Run in the foreground so you can capture funding prompts.
 
 ```bash
 yarn setup
