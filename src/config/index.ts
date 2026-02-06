@@ -642,7 +642,7 @@ export function getPonderGraphqlUrl(): string {
 
   // Default to Railway production endpoint (Railway Ponder is the primary dependency)
   // Only use localhost if explicitly testing Ponder changes
-  return 'https://jinn-gemini-production.up.railway.app/graphql';
+  return 'https://ponder-production-6d16.up.railway.app/graphql';
 }
 
 export function getOptionalPonderStartBlock(): number | undefined {

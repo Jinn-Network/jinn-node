@@ -22,6 +22,23 @@ If you are a human, read `HUMANS.md`.
 
 ## Requirements (Short Version)
 
+## Configuration
+
+Required environment variables (set in `.env`):
+- `RPC_URL` - HTTP(S) RPC endpoint for target chain
+- `OPERATE_PASSWORD` - Password for wallet encryption (min 8 characters)
+- `PONDER_GRAPHQL_URL` - Ponder indexer endpoint (pre-configured in .env.example)
+
+Optional environment variables:
+- `WORKSTREAM_FILTER` - Filter which workstreams to process (default: all)
+  - Single: `WORKSTREAM_FILTER=0x123...`
+  - Multiple: `WORKSTREAM_FILTER=0x123...,0x456...` or `["0x123...","0x456..."]`
+  - CLI flag: `yarn worker --workstream=0x123...`
+- `GEMINI_API_KEY` or `GEMINI_OAUTH_CREDENTIALS` - LLM authentication
+- `GITHUB_TOKEN`, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` - Git integration (recommended)
+
+See `.env.example` for complete list and examples.
+
 - Node.js 20+
 - Python 3.10-3.11
 - Poetry

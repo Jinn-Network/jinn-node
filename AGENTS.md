@@ -7,6 +7,15 @@ This doc is written for an **agent** running setup on behalf of a human. It focu
 - **Node.js** 20+
 - **Python** 3.10-3.11
 - **Poetry** (for `pyproject.toml` dependencies)
+- **Tendermint** (for olas-operate-middleware consensus)
+  - macOS: `brew install tendermint`
+  - Linux: See https://docs.tendermint.com/v0.34/introduction/install.html
+- **RPC URL** for the target chain
+- **OPERATE_PASSWORD** (min 8 characters)
+
+- **Node.js** 20+
+- **Python** 3.10-3.11
+- **Poetry** (for `pyproject.toml` dependencies)
 - **RPC URL** for the target chain
 - **OPERATE_PASSWORD** (min 8 characters)
 
@@ -102,3 +111,29 @@ yarn worker
 - Setup appears stuck: it is waiting for funding. Re-run `yarn setup` to re-print funding requirements.
 - Setup asks for Gemini auth even though you are logged in: verify `~/.gemini/oauth_creds.json`
   exists and that `HOME` points at the correct user.
+
+### Environment Variables
+
+Ensure `.env` contains:
+```
+OPERATE_PASSWORD=your_secure_password_min_8_chars
+RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_KEY
+PONDER_GRAPHQL_URL=https://ponder-production-6d16.up.railway.app/graphql
+```
+
+The `PONDER_GRAPHQL_URL` is pre-configured in `.env.example` and should be copied as-is (public indexer endpoint).
+
+Optional environment variables:
+```
+WORKSTREAM_FILTER=0x1234567890abcdef...  # Filter to specific workstream(s)
+GEMINI_API_KEY=...
+GITHUB_TOKEN=...
+GIT_AUTHOR_NAME=...
+GIT_AUTHOR_EMAIL=...
+```
+
+**Workstream Filtering**: If you want this worker to only process requests from specific workstreams:
+- Set `WORKSTREAM_FILTER` in `.env`, OR
+- Use CLI flag: `yarn worker --workstream=0x123...`
+- Supports multiple workstreams: `WORKSTREAM_FILTER=0x123...,0x456...` or `["0x123...","0x456..."]`
+- Leave unset to process all workstreams (default behavior)
