@@ -20,6 +20,14 @@ export interface CreateVentureArgs {
   rootWorkstreamId?: string;
   rootJobInstanceId?: string;
   status?: 'active' | 'paused' | 'archived';
+  tokenAddress?: string;
+  tokenSymbol?: string;
+  tokenName?: string;
+  stakingContractAddress?: string;
+  tokenLaunchPlatform?: string;
+  tokenMetadata?: object;
+  governanceAddress?: string;
+  poolAddress?: string;
 }
 
 export interface UpdateVentureArgs {
@@ -32,6 +40,14 @@ export interface UpdateVentureArgs {
   rootWorkstreamId?: string | null;
   rootJobInstanceId?: string | null;
   status?: 'active' | 'paused' | 'archived';
+  tokenAddress?: string;
+  tokenSymbol?: string;
+  tokenName?: string;
+  stakingContractAddress?: string;
+  tokenLaunchPlatform?: string;
+  tokenMetadata?: object;
+  governanceAddress?: string;
+  poolAddress?: string;
 }
 
 export interface Venture {
