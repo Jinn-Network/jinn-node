@@ -92,7 +92,7 @@ function spawnWorker(workerId: string, inheritOutput: boolean): ChildProcess {
 }
 
 async function main(): Promise<void> {
-  // Start healthcheck server for monitoring
+  // Keep healthcheck live in both single-worker and multi-worker modes.
   const workerId = process.env.WORKER_ID || 'default';
   initHealthInfo(workerId);
   startHealthcheckServer();
