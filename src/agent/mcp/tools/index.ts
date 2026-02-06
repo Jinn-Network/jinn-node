@@ -17,8 +17,11 @@ export { inspectJobRun, inspectJobRunParams, inspectJobRunSchema, type InspectJo
 export { inspectJob, inspectJobParams, inspectJobSchema, type InspectJobParams } from './inspect-job.js';
 export { inspectWorkstream, inspectWorkstreamParams, inspectWorkstreamSchema, type InspectWorkstreamParams } from './inspect-workstream.js';
 
-// Template registration
-export { registerTemplate, registerTemplateParams, registerTemplateSchema, type RegisterTemplateParams } from './register_template.js';
+// Template CRUD tools
+export { templateCreate, templateCreateParams, templateCreateSchema, type TemplateCreateParams } from './template_create.js';
+export { templateQuery, templateQueryParams, templateQuerySchema, type TemplateQueryParams } from './template_query.js';
+export { templateUpdate, templateUpdateParams, templateUpdateSchema, type TemplateUpdateParams } from './template_update.js';
+export { templateDelete, templateDeleteParams, templateDeleteSchema, type TemplateDeleteParams } from './template_delete.js';
 
 // GitHub tools
 export { getFileContents, getFileContentsParams, getFileContentsSchema, searchCode, searchCodeParams, searchCodeSchema, listCommits, listCommitsParams, listCommitsSchema } from './github_tools.js';

@@ -150,6 +150,13 @@ export function hasVenturesRegistry(enabledTools: string[]): boolean {
 }
 
 /**
+ * Check if templates registry is enabled in the tools list
+ */
+export function hasTemplatesRegistry(enabledTools: string[]): boolean {
+  return enabledTools.includes('templates_registry');
+}
+
+/**
  * Check if services registry is enabled in the tools list
  */
 export function hasServicesRegistry(enabledTools: string[]): boolean {
@@ -174,6 +181,17 @@ export const VENTURES_REGISTRY_TOOLS = [
   'venture_query',
   'venture_update',
   'venture_delete',
+] as const;
+
+/**
+ * Templates registry MCP tools
+ * Full CRUD for reusable template definitions
+ */
+export const TEMPLATES_REGISTRY_TOOLS = [
+  'template_create',
+  'template_query',
+  'template_update',
+  'template_delete',
 ] as const;
 
 /**
@@ -208,6 +226,12 @@ workstream_analysis: {
     extensionName: 'jinn-extensions',
     requiredEnv: [] as readonly string[],
     tools: [...VENTURES_REGISTRY_TOOLS] as string[],
+  },
+  templates_registry: {
+    installUrl: 'local:gemini-extension',
+    extensionName: 'jinn-extensions',
+    requiredEnv: [] as readonly string[],
+    tools: [...TEMPLATES_REGISTRY_TOOLS] as string[],
   },
   services_registry: {
     installUrl: 'local:gemini-extension',

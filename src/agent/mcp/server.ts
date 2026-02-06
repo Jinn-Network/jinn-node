@@ -22,7 +22,10 @@ export const REGISTERED_MCP_TOOLS = [
   'search_code',
   'list_commits',
   'process_branch',
-  'register_template',
+  'template_create',
+  'template_query',
+  'template_update',
+  'template_delete',
   'list_tools', // Special tool registered separately
   'verify_trade_ideas',
   // Blog management tools
@@ -109,7 +112,11 @@ async function main() {
       { name: 'search_code', schema: tools.searchCodeSchema, handler: tools.searchCode },
       { name: 'list_commits', schema: tools.listCommitsSchema, handler: tools.listCommits },
       { name: 'process_branch', schema: tools.process_branch_schema, handler: tools.process_branch },
-      { name: 'register_template', schema: tools.registerTemplateSchema, handler: tools.registerTemplate },
+      // Template CRUD tools
+      { name: 'template_create', schema: tools.templateCreateSchema, handler: tools.templateCreate },
+      { name: 'template_query', schema: tools.templateQuerySchema, handler: tools.templateQuery },
+      { name: 'template_update', schema: tools.templateUpdateSchema, handler: tools.templateUpdate },
+      { name: 'template_delete', schema: tools.templateDeleteSchema, handler: tools.templateDelete },
       // Blog management tools
       { name: 'blog_create_post', schema: tools.blogCreatePostSchema, handler: tools.blogCreatePost },
       { name: 'blog_list_posts', schema: tools.blogListPostsSchema, handler: tools.blogListPosts },

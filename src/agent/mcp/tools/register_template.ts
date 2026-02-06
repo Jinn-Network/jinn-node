@@ -1,3 +1,9 @@
+/**
+ * @deprecated Use template_create, template_query, template_update, template_delete instead.
+ * This file writes directly to Ponder's PostgreSQL which is the wrong abstraction.
+ * New template CRUD tools use Supabase's `templates` table via scripts/templates/crud.ts.
+ * Kept for reference only — no longer registered in the MCP server.
+ */
 import { z } from 'zod';
 // @ts-ignore - pg package exists but @types/pg not installed
 import { Client } from 'pg';
