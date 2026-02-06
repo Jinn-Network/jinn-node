@@ -78,8 +78,6 @@ When you see a funding prompt:
 2. Wait for confirmation of funding.
 3. Re-run `yarn setup` to continue.
 
-If you need a blocking wait (human present), set `ATTENDED=true` and run `yarn setup` to wait for funding detection.
-
 ### 4) Capture outputs
 
 Setup writes results to `/tmp/jinn-service-setup-*.json`. Extract and report:
