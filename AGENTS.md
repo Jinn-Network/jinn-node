@@ -99,6 +99,21 @@ yarn worker
 --unattended        Non-interactive mode (default)
 ```
 
+## Mech Filtering (Multi-Operator)
+
+By default the worker uses **single mech mode** — it reads `JINN_SERVICE_MECH_ADDRESS` (or falls back to the operate profile) and only processes requests for that one mech.
+
+For multi-operator deployments where multiple services are staked in the same staking contract, use **staking-based filtering**:
+
+```
+WORKER_MECH_FILTER_MODE=staking
+WORKER_STAKING_CONTRACT=0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139
+```
+
+This queries Ponder for all mechs whose services are staked in the given contract and filters requests accordingly.
+
+**Gotcha:** Setting `JINN_SERVICE_MECH_ADDRESS` alone does NOT enable staking-based filtering. Without `WORKER_MECH_FILTER_MODE=staking` and `WORKER_STAKING_CONTRACT`, the worker falls back to single mech mode using `JINN_SERVICE_MECH_ADDRESS` directly. If you deploy a new worker to Railway and only set `JINN_SERVICE_MECH_ADDRESS`, it will only process requests for that one mech — not all mechs staked in the same pool. You must explicitly set both `WORKER_MECH_FILTER_MODE` and `WORKER_STAKING_CONTRACT` for multi-operator filtering.
+
 ## Common Issues (Agent-Resolvable)
 
 - `poetry not found`: install Poetry or ask the human to install it.
