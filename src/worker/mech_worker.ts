@@ -25,8 +25,15 @@ import { fetchIpfsMetadata } from './metadata/fetchIpfsMetadata.js';
 import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
 import { shouldStop } from './cycleControl.js';
 import { waitForGeminiQuota } from './llm/geminiQuota.js';
-import { getOptionalWorkerJobDelayMs } from '../config/index.js';
+import {
+  getOptionalWorkerJobDelayMs,
+  getOptionalWorkerMechFilterMode,
+  getOptionalWorkerStakingContract,
+  getOptionalWorkerMechFilterList,
+  type WorkerMechFilterMode,
+} from '../config/index.js';
 import { recordIdleCycle, recordExecutionTime } from './healthcheck.js';
+import { getMechAddressesForStakingContract } from './filters/stakingFilter.js';
 
 export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
 
@@ -171,29 +178,76 @@ const dependencyCancelAttempts = new Map<string, number>();
 // This file now serves as a CLI wrapper that handles request discovery, claiming, and orchestration delegation
 
 // Mech filter configuration
-type MechFilterMode = 'any' | 'list' | 'single';
+type MechFilterMode = WorkerMechFilterMode;
 interface MechFilterConfig {
   mode: MechFilterMode;
-  addresses: string[]; // lowercase, only used for 'list' and 'single' modes
+  addresses: string[]; // lowercase, only used for 'list', 'single', and 'staking' modes
+  stakingContract?: string; // only set for 'staking' mode
 }
 
-function getMechFilterConfig(): MechFilterConfig {
-  const envValue = process.env.WORKER_MECH_FILTER_LIST;
+// Cache for staking filter addresses (async initialization)
+let cachedStakingAddresses: string[] | null = null;
+let stakingAddressesFetchedAt: number = 0;
 
-  // Mode 1: "any" - accept requests from any mech
-  if (envValue?.toLowerCase() === 'any') {
+/**
+ * Get mech filter configuration.
+ * Priority order:
+ * 1. WORKER_MECH_FILTER_MODE='staking' with WORKER_STAKING_CONTRACT
+ * 2. WORKER_MECH_FILTER_MODE='list' or legacy WORKER_MECH_FILTER_LIST
+ * 3. WORKER_MECH_FILTER_MODE='any'
+ * 4. WORKER_MECH_FILTER_MODE='single' or fallback to getMechAddress()
+ */
+async function getMechFilterConfig(): Promise<MechFilterConfig> {
+  const explicitMode = getOptionalWorkerMechFilterMode();
+  const stakingContract = getOptionalWorkerStakingContract();
+  const filterList = getOptionalWorkerMechFilterList();
+
+  // Deprecation warning for legacy WORKER_MECH_FILTER_LIST
+  if (filterList && !explicitMode) {
+    workerLogger.warn({
+      envVar: 'WORKER_MECH_FILTER_LIST',
+      recommendation: "Use WORKER_MECH_FILTER_MODE='staking' with WORKER_STAKING_CONTRACT instead"
+    }, 'WORKER_MECH_FILTER_LIST is deprecated - consider migrating to staking-based filtering');
+  }
+
+  // Mode 1: Staking-based filtering (new recommended approach)
+  if (explicitMode === 'staking' || (stakingContract && !explicitMode)) {
+    if (!stakingContract) {
+      workerLogger.error('WORKER_MECH_FILTER_MODE=staking requires WORKER_STAKING_CONTRACT');
+      return { mode: 'single', addresses: [] };
+    }
+
+    // Fetch mech addresses from staking contract
+    const addresses = await getMechAddressesForStakingContract(stakingContract);
+
+    if (addresses.length === 0) {
+      workerLogger.warn({
+        stakingContract,
+        note: 'No mechs found staked in this contract - will not match any requests'
+      }, 'Staking filter returned no addresses');
+    }
+
+    return {
+      mode: 'staking',
+      addresses,
+      stakingContract: stakingContract.toLowerCase(),
+    };
+  }
+
+  // Mode 2: Explicit "any" mode
+  if (explicitMode === 'any' || filterList?.toLowerCase() === 'any') {
     return { mode: 'any', addresses: [] };
   }
 
-  // Mode 2: Comma-separated list
-  if (envValue) {
-    const addresses = envValue.split(',').map(a => a.trim().toLowerCase()).filter(Boolean);
+  // Mode 3: List mode (from WORKER_MECH_FILTER_LIST or explicit mode)
+  if (explicitMode === 'list' || (filterList && filterList.toLowerCase() !== 'any')) {
+    const addresses = (filterList || '').split(',').map(a => a.trim().toLowerCase()).filter(Boolean);
     if (addresses.length > 0) {
       return { mode: 'list', addresses };
     }
   }
 
-  // Mode 3: Fallback to single mech from getMechAddress()
+  // Mode 4: Fallback to single mech from getMechAddress()
   const single = getMechAddress();
   if (single) {
     return { mode: 'single', addresses: [single.toLowerCase()] };
@@ -366,10 +420,13 @@ async function maybeCancelMissingDependency(params: {
 
 async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest[]> {
   try {
-    const mechFilter = getMechFilterConfig();
+    const mechFilter = await getMechFilterConfig();
 
     if (mechFilter.mode !== 'any' && mechFilter.addresses.length === 0) {
-      workerLogger.warn('Cannot fetch requests without mech address or WORKER_MECH_FILTER_LIST');
+      workerLogger.warn({
+        mode: mechFilter.mode,
+        stakingContract: mechFilter.stakingContract
+      }, 'Cannot fetch requests without mech address, WORKER_MECH_FILTER_LIST, or staked mechs');
       return [];
     }
 
@@ -377,12 +434,14 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       ponderUrl: PONDER_GRAPHQL_URL,
       mechFilterMode: mechFilter.mode,
       mechFilterAddresses: mechFilter.mode === 'any' ? 'any' : mechFilter.addresses,
+      stakingContract: mechFilter.stakingContract,
       workstreamFilter: WORKSTREAM_FILTERS.length > 0 ? WORKSTREAM_FILTERS : 'none'
     }, 'Fetching requests from Ponder');
 
     // Build where conditions based on filter mode
+    // 'staking' mode uses the same query structure as 'list' mode
     const whereConditions: string[] = ['delivered: false'];
-    if (mechFilter.mode === 'list') {
+    if (mechFilter.mode === 'list' || mechFilter.mode === 'staking') {
       whereConditions.push('mech_in: $mechs');
     } else if (mechFilter.mode === 'single') {
       whereConditions.push('mech: $mech');
@@ -399,7 +458,7 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
 
     // Build query variables definition
     const varDefs: string[] = ['$limit: Int!'];
-    if (mechFilter.mode === 'list') {
+    if (mechFilter.mode === 'list' || mechFilter.mode === 'staking') {
       varDefs.push('$mechs: [String!]!');
     } else if (mechFilter.mode === 'single') {
       varDefs.push('$mech: String!');
@@ -432,7 +491,7 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
 }`;
 
     const variables: any = { limit };
-    if (mechFilter.mode === 'list') {
+    if (mechFilter.mode === 'list' || mechFilter.mode === 'staking') {
       variables.mechs = mechFilter.addresses;
     } else if (mechFilter.mode === 'single') {
       variables.mech = mechFilter.addresses[0];

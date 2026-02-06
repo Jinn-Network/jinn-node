@@ -348,6 +348,27 @@ const devTestingSchema = z.object({
   // Helps spread API usage when hitting quota limits. Default: 0 (no delay)
   WORKER_JOB_DELAY_MS: z.coerce.number().int().nonnegative().optional(),
 
+  // WORKER_MECH_FILTER_MODE: How to filter which mechs to accept requests from
+  // Values: 'any' (all mechs), 'list' (WORKER_MECH_FILTER_LIST), 'single' (getMechAddress()),
+  //         'staking' (dynamic from WORKER_STAKING_CONTRACT)
+  // Default: Falls back to 'single' if not set
+  WORKER_MECH_FILTER_MODE: z.enum(['any', 'list', 'single', 'staking']).optional(),
+
+  // WORKER_STAKING_CONTRACT: Staking contract address for 'staking' filter mode
+  // Only used when WORKER_MECH_FILTER_MODE='staking'
+  // Known contracts:
+  //   - Jinn: 0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139 (5,000 OLAS min)
+  //   - AgentsFun1: 0x2585e63df7BD9De8e058884D496658a030b5c6ce (50 OLAS min)
+  WORKER_STAKING_CONTRACT: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
+
+  // WORKER_STAKING_REFRESH_MS: Cache TTL for staking filter queries
+  // Default: 300000 (5 minutes)
+  WORKER_STAKING_REFRESH_MS: z.coerce.number().int().positive().default(300000),
+
+  // WORKER_MECH_FILTER_LIST: Comma-separated list of mech addresses (legacy)
+  // Deprecated: Use WORKER_MECH_FILTER_MODE='staking' instead
+  WORKER_MECH_FILTER_LIST: z.string().optional(),
+
   // Playwright configuration
   PLAYWRIGHT_CHANNEL: z.string().optional(),
   PLAYWRIGHT_FAST: z.coerce.boolean().optional(),
@@ -936,6 +957,28 @@ export function getWorkerTxConfirmations(): number {
 export function getOptionalWorkerJobDelayMs(): number | undefined {
   const val = getConfig().WORKER_JOB_DELAY_MS;
   return val !== undefined && val >= 0 ? val : undefined;
+}
+
+// ============================================================================
+// Public API: Mech Filtering Configuration
+// ============================================================================
+
+export type WorkerMechFilterMode = 'any' | 'list' | 'single' | 'staking';
+
+export function getOptionalWorkerMechFilterMode(): WorkerMechFilterMode | undefined {
+  return getConfig().WORKER_MECH_FILTER_MODE;
+}
+
+export function getOptionalWorkerStakingContract(): string | undefined {
+  return getConfig().WORKER_STAKING_CONTRACT;
+}
+
+export function getWorkerStakingRefreshMs(): number {
+  return getConfig().WORKER_STAKING_REFRESH_MS;
+}
+
+export function getOptionalWorkerMechFilterList(): string | undefined {
+  return getConfig().WORKER_MECH_FILTER_LIST;
 }
 
 export function getOptionalPlaywrightChannel(): string | undefined {
