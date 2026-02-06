@@ -180,7 +180,7 @@ export function extractToolPolicyFromBlueprint(blueprint: any): TemplateToolPoli
 // Model Policy
 // ============================================================================
 
-const DEFAULT_MODEL = 'auto-gemini-3';
+const DEFAULT_MODEL = 'gemini-3-flash';
 
 export interface TemplateModelPolicy {
   allowedModels: string[];  // Whitelist of valid models (empty = no restriction)

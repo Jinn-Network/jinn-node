@@ -7,7 +7,7 @@
  *   which can produce 404 errors from the Gemini API / Gemini CLI.
  */
 
-export const DEFAULT_WORKER_MODEL = 'auto-gemini-3';
+export const DEFAULT_WORKER_MODEL = 'gemini-3-flash';
 
 const MODELS_PREFIX = 'models/';
 
@@ -21,9 +21,9 @@ const LEGACY_MODEL_ALIASES: Record<string, string> = {
   'gemini-3-flash': 'gemini-3-flash-preview',
   'gemini-3-flash-latest': 'gemini-3-flash-preview',
   // Deprecated experimental models - agent LLMs sometimes suggest these from training data
-  'gemini-2.0-flash-thinking-exp-1219': 'auto-gemini-3',
-  'gemini-2.0-flash-thinking-exp': 'auto-gemini-3',
-  'gemini-2.0-flash-exp': 'auto-gemini-3',
+  'gemini-2.0-flash-thinking-exp-1219': 'gemini-3-flash',
+  'gemini-2.0-flash-thinking-exp': 'gemini-3-flash',
+  'gemini-2.0-flash-exp': 'gemini-3-flash',
 };
 
 /**
@@ -127,4 +127,3 @@ export function normalizeGeminiModel(
     changed: false,
   };
 }
-
