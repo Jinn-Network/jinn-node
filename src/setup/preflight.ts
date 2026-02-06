@@ -40,7 +40,20 @@ export async function runPreflight(options: PreflightOptions = {}): Promise<Pref
     return { success: false, errors, warnings };
   }
 
-  // 2. Check pyproject.toml exists
+  // 2. Check Tendermint is installed
+  const tendermintCheck = await checkTendermintInstalled();
+  if (!tendermintCheck.installed) {
+    errors.push(
+      'Tendermint not found. Required by olas-operate-middleware.\n' +
+      '    Install instructions:\n' +
+      '      macOS:   brew install tendermint\n' +
+      '      Linux:   See https://docs.tendermint.com/v0.34/introduction/install.html\n' +
+      '      Docker:  Use tendermint/tendermint image'
+    );
+    return { success: false, errors, warnings };
+  }
+
+  // 3. Check pyproject.toml exists
   if (!existsSync(`${cwd}/pyproject.toml`)) {
     errors.push(
       'pyproject.toml not found in current directory.\n' +
@@ -49,7 +62,7 @@ export async function runPreflight(options: PreflightOptions = {}): Promise<Pref
     return { success: false, errors, warnings };
   }
 
-  // 3. Check Poetry dependencies installed (venv exists)
+  // 4. Check Poetry dependencies installed (venv exists)
   const depsCheck = await checkPoetryDependencies(cwd);
   if (!depsCheck.installed) {
     if (options.autoInstall) {
@@ -70,7 +83,7 @@ export async function runPreflight(options: PreflightOptions = {}): Promise<Pref
     }
   }
 
-  // 4. Verify operate module is importable
+  // 5. Verify operate module is importable
   const importCheck = await checkOperateImportable(cwd);
   if (!importCheck.success) {
     // Try auto-install if not already attempted
@@ -110,6 +123,34 @@ async function checkPoetryInstalled(): Promise<{ installed: boolean; version?: s
       if (code === 0) {
         const match = output.match(/Poetry.*?(\d+\.\d+\.\d+)/);
         res({ installed: true, version: match?.[1] });
+      } else {
+        res({ installed: false });
+      }
+    });
+
+    proc.on('error', () => {
+      res({ installed: false });
+    });
+  });
+}
+
+/**
+ * Check if Tendermint CLI is available
+ * Required by olas-operate-middleware for consensus
+ */
+async function checkTendermintInstalled(): Promise<{ installed: boolean; version?: string }> {
+  return new Promise((res) => {
+    const proc = spawn('tendermint', ['version'], { shell: true });
+    let output = '';
+
+    proc.stdout.on('data', (d) => {
+      output += d.toString();
+    });
+
+    proc.on('close', (code) => {
+      if (code === 0) {
+        const version = output.trim();
+        res({ installed: true, version });
       } else {
         res({ installed: false });
       }

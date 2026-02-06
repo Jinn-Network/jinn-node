@@ -12,6 +12,9 @@ https://explorer.jinn.network/ventures/0x9470f6f2bec6940c93fedebc0ea74bccaf27091
 - **Node.js** 20+
 - **Python** 3.10-3.11
 - **Poetry** (for `pyproject.toml` dependencies)
+- **Tendermint** (for olas-operate-middleware consensus)
+  - macOS: `brew install tendermint`
+  - Linux: See https://docs.tendermint.com/v0.34/introduction/install.html
 - **RPC URL** for the target chain
 - **OPERATE_PASSWORD** (min 8 characters)
 
