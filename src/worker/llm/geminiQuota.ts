@@ -113,7 +113,7 @@ function isQuotaText(text: string): boolean {
   );
 }
 
-// Extract model family for matching (e.g., "auto-gemini-3" -> "gemini-3", "gemini-2.5-flash" -> "gemini-2.5")
+// Extract model family for matching (e.g., "gemini-3-flash" -> "gemini-3", "gemini-2.5-flash" -> "gemini-2.5")
 function extractModelFamily(model: string): string | undefined {
   const match = model.match(/gemini-[\d.]+/i);
   return match?.[0]?.toLowerCase();

@@ -17,7 +17,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 const dispatchNewJobParamsBase = z.object({
   jobName: z.string().min(1).describe('Name for this job definition'),
   blueprint: z.string().optional().describe('JSON string containing structured blueprint with invariants array. Each invariant must have: id, type (FLOOR/CEILING/RANGE/BOOLEAN), assessment, and type-specific fields (metric+min for FLOOR, metric+max for CEILING, metric+min+max for RANGE, condition for BOOLEAN). Optional: examples.'),
-  model: z.string().optional().describe('Gemini model to use for this job (e.g., "auto-gemini-3", "gemini-2.5-pro"). Defaults to "auto-gemini-3" if not specified.'),
+  model: z.string().optional().describe('Gemini model to use for this job (e.g., "gemini-3-flash", "gemini-2.5-pro"). Defaults to "gemini-3-flash" if not specified.'),
   enabledTools: z.array(z.string()).optional().describe('Array of tool names to enable for this job'),
   message: z.string().optional().describe('Optional message to include in the job request'),
   dependencies: z.array(z.string()).optional().describe('Array of job definition UUIDs (not job names) that must have at least one delivered request before this job can execute. Use get_details or search_jobs to find job definition IDs. Example: ["4eac1570-7980-4e2b-afc7-3f5159e99ea5"]'),
@@ -102,7 +102,7 @@ Each child sees only its own scope, not requirements for sibling work.
 PARAMETERS:
 - jobName: (required) Name for this job definition
 - blueprint: (required) JSON string containing structured invariants array as defined above
-- model: (optional) Gemini model to use (defaults to "auto-gemini-3")
+- model: (optional) Gemini model to use (defaults to "gemini-3-flash")
 - enabledTools: (optional) Array of tool names to enable
 - message: (optional) Additional message to include in the job request
 - dependencies: (optional) Array of job definition UUIDs (not job names) that must have at least one delivered request before this job executes. Use get_details or search_jobs to find job definition IDs.
