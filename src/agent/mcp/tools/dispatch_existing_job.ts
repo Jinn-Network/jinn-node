@@ -8,9 +8,10 @@ import { getPonderGraphqlUrl } from './shared/env.js';
 import { collectLocalCodeMetadata, ensureJobBranch } from '../../shared/code_metadata.js';
 import { getCodeMetadataDefaultBaseBranch } from '../../../config/index.js';
 import { ensureUniversalTools, BASE_UNIVERSAL_TOOLS } from '../../toolPolicy.js';
-import { buildAnnotatedTools, normalizeToolArray } from '../../../shared/template-tools.js';
+import { buildAnnotatedTools, normalizeToolArray, extractModelPolicyFromBlueprint } from '../../../shared/template-tools.js';
 import { blueprintStructureSchema } from '../../shared/blueprint-schema.js';
 import { validateInvariantsStrict } from '../../../worker/prompt/invariant-validator.js';
+import { validateModelAllowed, normalizeGeminiModel, DEFAULT_WORKER_MODEL } from '../../../shared/gemini-models.js';
 
 const dispatchExistingJobParamsBase = z.object({
   jobId: z.string().uuid().optional(),
@@ -208,6 +209,30 @@ export async function dispatchExistingJob(args: unknown) {
     return { content: [{ type: 'text' as const, text: JSON.stringify({ data: null, meta: { ok: false, code: 'MISSING_BLUEPRINT', message: 'No blueprint content available to dispatch. Use dispatch_new_job to create a job definition with a blueprint first.' } }) }] };
   }
 
+  // Model validation: extract model from blueprint and validate
+  let blueprintObj: any = {};
+  try { blueprintObj = JSON.parse(finalBlueprint); } catch { /* ignore */ }
+  const modelPolicy = extractModelPolicyFromBlueprint(blueprintObj);
+  const modelToValidate = modelPolicy.defaultModel;
+
+  // 1. Check for deprecated models
+  const modelValidation = validateModelAllowed(modelToValidate);
+  if (!modelValidation.ok) {
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ data: null, meta: { ok: false, code: 'DEPRECATED_MODEL', message: modelValidation.reason, details: { requestedModel: modelToValidate, suggestion: modelValidation.suggestion } } }) }] };
+  }
+
+  // 2. Check against parent context allowlist (cascaded from workstream root)
+  const parentAllowedModels = context.allowedModels;
+  if (Array.isArray(parentAllowedModels) && parentAllowedModels.length > 0) {
+    const normalizedRequested = normalizeGeminiModel(modelToValidate, DEFAULT_WORKER_MODEL).normalized;
+    const parentAllowedSet = new Set(parentAllowedModels.map(m =>
+      normalizeGeminiModel(m, DEFAULT_WORKER_MODEL).normalized
+    ));
+    if (!parentAllowedSet.has(normalizedRequested)) {
+      return { content: [{ type: 'text' as const, text: JSON.stringify({ data: null, meta: { ok: false, code: 'UNAUTHORIZED_MODEL', message: `Model not allowed by workstream policy: ${modelToValidate}`, details: { requestedModel: modelToValidate, allowedModels: parentAllowedModels } } }) }] };
+    }
+  }
+
   // Build request payload mirroring post_marketplace_job expectations
   const lineageContext: Record<string, any> = {};
 
@@ -373,12 +398,16 @@ export async function dispatchExistingJob(args: unknown) {
     : (requiredTools.length > 0 ? { requiredTools, availableTools: requiredTools } : null);
   const tools = toolPolicy ? buildAnnotatedTools(toolPolicy) : undefined;
 
+  // Resolve allowed models for child propagation
+  const resolvedAllowedModels = parentAllowedModels || (modelPolicy.allowedModels.length > 0 ? modelPolicy.allowedModels : undefined);
+
   const ipfsJsonContents: any[] = [{
     networkId: 'jinn', // Identify Jinn network requests for Ponder filtering
     blueprint: finalBlueprint,
     jobName: name,
     enabledTools: finalTools,
     ...(tools?.length ? { tools } : {}),
+    ...(resolvedAllowedModels ? { allowedModels: resolvedAllowedModels } : {}),
     jobDefinitionId,
     additionalContext,
     ...lineageContext,

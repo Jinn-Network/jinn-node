@@ -49,6 +49,11 @@ export interface BuildIpfsPayloadOptions {
     inputSchema?: Record<string, any>;
 
     /**
+     * Allowed models for child agents (cascaded from blueprint/workstream policy).
+     */
+    allowedModels?: string[];
+
+    /**
      * Enable cyclic (continuous) operation.
      * Only available to human-initiated dispatches, not agent tools.
      */
@@ -112,6 +117,7 @@ export async function buildIpfsPayload(
         skipBranch = false,
         dependencies,
         message,
+        allowedModels: explicitAllowedModels,
         cyclic = false,
         workstreamId,
         additionalContextOverrides,
@@ -262,6 +268,13 @@ export async function buildIpfsPayload(
             }
             : undefined;
 
+    // Resolve allowed models: explicit option > parent context inheritance
+    const allowedModels = explicitAllowedModels || (
+        context.allowedModels && Array.isArray(context.allowedModels) && context.allowedModels.length > 0
+            ? [...context.allowedModels]
+            : undefined
+    );
+
     // Assemble the complete IPFS payload
     const ipfsJsonContents: any[] = [{
         blueprint,
@@ -269,6 +282,7 @@ export async function buildIpfsPayload(
         model: normalizedModel.normalized,
         enabledTools,
         ...(toolPolicy.availableTools.length > 0 ? { tools } : {}),
+        ...(allowedModels ? { allowedModels } : {}),
         jobDefinitionId,
         nonce: randomUUID(),
         networkId: 'jinn',

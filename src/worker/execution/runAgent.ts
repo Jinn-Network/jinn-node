@@ -6,7 +6,7 @@ import { Agent } from '../../agent/agent.js';
 import { createBlueprintBuilder } from '../prompt/index.js';
 import { setJobContext, clearJobContext, snapshotJobContext, restoreJobContext } from '../metadata/jobContext.js';
 import { extractMissionInvariantIds } from '../prompt/utils/invariantIds.js';
-import { parseAnnotatedTools, normalizeToolArray } from '../../shared/template-tools.js';
+import { parseAnnotatedTools, normalizeToolArray, extractModelPolicyFromBlueprint } from '../../shared/template-tools.js';
 import { didDispatchChild } from '../status/dispatchUtils.js';
 import { updateJobStatus } from '../control_api_client.js';
 import type { UnclaimedRequest, IpfsMetadata, AdditionalContext, AgentExecutionResult } from '../types.js';
@@ -103,6 +103,16 @@ export async function runAgentForRequest(
   // Extract mission invariant IDs from blueprint for downstream validation
   const blueprintInvariantIds = extractMissionInvariantIds(metadata?.blueprint);
 
+  // Extract model policy: IPFS-level allowedModels (from parent cascade) takes precedence over blueprint
+  const blueprintObj = (() => { try { return JSON.parse(metadata?.blueprint || '{}'); } catch { return {}; } })();
+  const blueprintModelPolicy = extractModelPolicyFromBlueprint(blueprintObj);
+  const modelPolicy = {
+    allowedModels: Array.isArray(metadata?.allowedModels) && metadata.allowedModels.length > 0
+      ? metadata.allowedModels
+      : blueprintModelPolicy.allowedModels,
+    defaultModel: blueprintModelPolicy.defaultModel,
+  };
+
   // Snapshot and set job context for downstream tools
   const prevContext = snapshotJobContext();
   try {
@@ -121,6 +131,8 @@ export async function runAgentForRequest(
       requiredTools,
       availableTools,
       blueprintInvariantIds: blueprintInvariantIds.length > 0 ? blueprintInvariantIds : undefined,
+      allowedModels: modelPolicy.allowedModels.length > 0 ? modelPolicy.allowedModels : undefined,
+      defaultModel: modelPolicy.defaultModel !== DEFAULT_WORKER_MODEL ? modelPolicy.defaultModel : undefined,
     });
 
     const result = await agent.run(prompt);

@@ -460,6 +460,34 @@ export async function dispatchNewJob(args: unknown) {
       }
     }
 
+    // 3. Check against parent context allowlist (cascaded from workstream root)
+    const parentAllowedModels = context.allowedModels;
+    if (Array.isArray(parentAllowedModels) && parentAllowedModels.length > 0) {
+      const normalizedRequested = normalizeGeminiModel(modelToUse, DEFAULT_WORKER_MODEL).normalized;
+      const parentAllowedSet = new Set(parentAllowedModels.map(m =>
+        normalizeGeminiModel(m, DEFAULT_WORKER_MODEL).normalized
+      ));
+      if (!parentAllowedSet.has(normalizedRequested)) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              data: null,
+              meta: {
+                ok: false,
+                code: 'UNAUTHORIZED_MODEL',
+                message: `Model not allowed by workstream policy: ${modelToUse}`,
+                details: {
+                  requestedModel: modelToUse,
+                  allowedModels: parentAllowedModels,
+                },
+              },
+            }),
+          }],
+        };
+      }
+    }
+
     // Use validated model
     const validatedModel = modelToUse;
 
@@ -532,6 +560,7 @@ export async function dispatchNewJob(args: unknown) {
         dependencies,
         message,
         inputSchema,
+        allowedModels: parentAllowedModels || (modelPolicy.allowedModels.length > 0 ? modelPolicy.allowedModels : undefined),
         // cyclic and additionalContextOverrides intentionally NOT passed
         // These are only available to human-initiated dispatches
       });

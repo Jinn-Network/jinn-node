@@ -226,6 +226,7 @@ export interface IpfsMetadata {
   jobDefinitionId?: string;
   codeMetadata?: CodeMetadata;
   model?: string;
+  allowedModels?: string[];  // Cascaded model allowlist from blueprint/workstream
   recognition?: RecognitionPhaseResult | null;
   dependencies?: string[];  // Request IDs that must complete first
   /** Template ID if job was dispatched from a template */
