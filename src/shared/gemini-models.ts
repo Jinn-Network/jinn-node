@@ -24,6 +24,9 @@ const LEGACY_MODEL_ALIASES: Record<string, string> = {
   'gemini-2.0-flash-thinking-exp-1219': 'gemini-3-flash',
   'gemini-2.0-flash-thinking-exp': 'gemini-3-flash',
   'gemini-2.0-flash-exp': 'gemini-3-flash',
+  // Gemini 2.0 Flash variants — removed from Google API as of Feb 2026
+  'gemini-2.0-flash-001': 'gemini-3-flash',
+  'gemini-2.0-flash': 'gemini-3-flash',
 };
 
 /**
@@ -35,7 +38,9 @@ const DEPRECATED_MODELS = new Set([
   'gemini-2.0-flash-thinking-exp-01-21',
   'gemini-2.0-flash-thinking-exp',
   'gemini-2.0-flash-thinking',
-  // Add other deprecated models as they are removed
+  // Gemini 2.0 Flash variants — removed from Google API as of Feb 2026
+  'gemini-2.0-flash-001',
+  'gemini-2.0-flash',
 ]);
 
 /**
