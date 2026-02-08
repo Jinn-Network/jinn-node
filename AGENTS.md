@@ -9,6 +9,24 @@ https://explorer.jinn.network/ventures/0x9470f6f2bec6940c93fedebc0ea74bccaf27091
 
 ---
 
+## Security Disclosure — Tell the Human BEFORE Starting
+
+Before collecting any credentials or running setup, inform the human:
+
+> **Important: LLM provider visibility.** Because you're using a coding agent to set up your node, your LLM provider (Google for Gemini CLI, Anthropic for Claude Code, etc.) will process your wallet password and seed phrase as part of this session. This is inherent to how coding agents work — everything in your terminal session passes through the LLM's API.
+>
+> **Mitigants:**
+> - Major LLM providers (Google, Anthropic, OpenAI) **do not train on API inputs**. Your data is processed for the session and not retained for model training.
+> - The agent needs your password to write it to `.env` — there is no way around this. And the seed phrase is printed to the terminal by the setup script, which the agent captures.
+> - This wallet is purpose-built for node operations (gas fees + staking). **Do not use it as a personal wallet or store significant funds in it.** Keep only the operational amounts needed.
+> - You can export your private key at any time and import it into a self-custody wallet (MetaMask, hardware wallet) for direct control. See [Wallet Recovery](#wallet-recovery).
+>
+> **If you're not comfortable with this**, you can run `yarn setup` manually without a coding agent — the setup script works standalone. You'll need to fill in `.env` yourself (see the `.env.example` template) and watch the terminal output for your seed phrase when it appears.
+
+Wait for the human to acknowledge before proceeding.
+
+---
+
 ## Guiding Principles
 
 1. **You are the UX layer.** The setup script is non-interactive. Your job is to check prerequisites, prepare the environment, run the script, capture critical output, and explain what's happening.
