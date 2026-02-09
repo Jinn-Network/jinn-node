@@ -1,4 +1,4 @@
-import { supabase } from '../../agent/mcp/tools/shared/supabase.js';
+import { supabase } from '../../data/supabase.js';
 
 export interface Template {
   id: string;

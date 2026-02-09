@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { supabase } from './shared/supabase.js';
+import { getSupabase } from './shared/supabase.js';
 import { getCurrentJobContext } from './shared/context.js';
 
 export const sendMessageParams = z.object({
@@ -67,6 +67,7 @@ export async function sendMessage(params: z.infer<typeof sendMessageParams>) {
     }
 
     // Enforce DB-function-only write path
+    const supabase = await getSupabase();
     const { data: newId, error } = await supabase.rpc('create_record', {
       p_table_name: 'messages',
       p_data: payload,

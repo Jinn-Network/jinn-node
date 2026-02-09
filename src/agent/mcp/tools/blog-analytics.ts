@@ -11,6 +11,7 @@
  */
 
 import { z } from 'zod';
+import { getCredential } from '../../shared/credential-client.js';
 
 // ============================================
 // Type Definitions
@@ -172,74 +173,35 @@ Returns: { stats, topPages, referrers, period, insights }`,
 // Helper Functions
 // ============================================
 
-// Cache for JWT token (valid for session)
-let cachedToken: { token: string; expiresAt: number } | null = null;
+interface UmamiConfig {
+  host: string;
+  websiteId: string;
+}
 
-function getUmamiConfig() {
+function getUmamiConfig(): UmamiConfig {
   const host = process.env.UMAMI_HOST;
   const websiteId = process.env.UMAMI_WEBSITE_ID;
-  const username = process.env.UMAMI_USERNAME;
-  const password = process.env.UMAMI_PASSWORD;
 
   const missing: string[] = [];
   if (!host) missing.push('UMAMI_HOST');
   if (!websiteId) missing.push('UMAMI_WEBSITE_ID');
-  if (!username) missing.push('UMAMI_USERNAME');
-  if (!password) missing.push('UMAMI_PASSWORD');
 
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
   }
 
   return {
-    host: host!.replace(/\/$/, ''), // Remove trailing slash
+    host: host!.replace(/\/$/, ''),
     websiteId: websiteId!,
-    username: username!,
-    password: password!,
   };
-}
-
-async function getAuthToken(config: ReturnType<typeof getUmamiConfig>): Promise<string> {
-  // Return cached token if still valid (with 5 min buffer)
-  if (cachedToken && cachedToken.expiresAt > Date.now() + 5 * 60 * 1000) {
-    return cachedToken.token;
-  }
-
-  // Login to get new token
-  const response = await fetch(`${config.host}/api/auth/login`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      username: config.username,
-      password: config.password,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Umami auth failed: ${response.status} ${response.statusText} - ${errorText}`);
-  }
-
-  const data = await response.json();
-  const token = data.token;
-
-  // Cache token for 1 hour (typical JWT lifetime)
-  cachedToken = {
-    token,
-    expiresAt: Date.now() + 60 * 60 * 1000,
-  };
-
-  return token;
 }
 
 async function umamiApiCall<T>(
   endpoint: string,
-  config: ReturnType<typeof getUmamiConfig>,
+  config: UmamiConfig,
   params?: Record<string, string>
 ): Promise<T> {
-  const token = await getAuthToken(config);
+  const token = await getCredential('umami');
   const url = new URL(`${config.host}/api/websites/${config.websiteId}${endpoint}`);
 
   if (params) {

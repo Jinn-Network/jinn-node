@@ -5,7 +5,7 @@
  * the MCP tools and CLI scripts.
  */
 
-import { supabase } from '../agent/mcp/tools/shared/supabase.js';
+import { supabase } from './supabase.js';
 
 // ============================================================================
 // Types

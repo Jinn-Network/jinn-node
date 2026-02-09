@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { supabase } from './shared/supabase.js';
+import { getSupabase } from './shared/supabase.js';
 import { mcpLogger } from '../../../logging/index.js';
 
 // ============================================================================
@@ -155,6 +155,7 @@ export async function serviceRegistry(args: unknown) {
     }
 
     const params = parsed.data;
+    const supabase = await getSupabase();
 
     switch (params.action) {
       // ======================================================================

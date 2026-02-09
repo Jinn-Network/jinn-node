@@ -1,12 +1,6 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 export { getCurrentJobContext, setJobContext, clearJobContext, type JobContext } from './context.js';
-import { loadEnvOnce } from './env.js';
-
-// Ensure env is loaded when supabase is referenced (idempotent)
-loadEnvOnce();
-
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+import { getCredential } from '../../../shared/credential-client.js';
 
 // Mock client for when Supabase is not configured or URL is invalid
 class MockSupabaseClient {
@@ -32,19 +26,29 @@ class MockQueryBuilder {
   }
 }
 
-let client: any;
+let cachedClient: any = null;
 
-// Check for missing credentials
-if (!supabaseUrl || !supabaseKey) {
-  console.warn('Supabase URL or key missing or invalid. Supabase features will be disabled (using Mock client).');
-  client = new MockSupabaseClient();
-} else {
+/**
+ * Get the Supabase client. Fetches the service role key from the credential
+ * bridge on first call and caches the client for subsequent calls.
+ */
+export async function getSupabase(): Promise<any> {
+  if (cachedClient) return cachedClient;
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  if (!supabaseUrl) {
+    console.warn('SUPABASE_URL not set. Supabase features will be disabled (using Mock client).');
+    cachedClient = new MockSupabaseClient();
+    return cachedClient;
+  }
+
   try {
-    client = createClient(supabaseUrl, supabaseKey);
+    const serviceRoleKey = await getCredential('supabase');
+    cachedClient = createClient(supabaseUrl, serviceRoleKey);
+    return cachedClient;
   } catch (error) {
     console.warn('Failed to initialize Supabase client:', error);
-    client = new MockSupabaseClient();
+    cachedClient = new MockSupabaseClient();
+    return cachedClient;
   }
 }
-
-export const supabase = client;

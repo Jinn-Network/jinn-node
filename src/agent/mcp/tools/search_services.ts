@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { supabase } from './shared/supabase.js';
+import { getSupabase } from './shared/supabase.js';
 import { mcpLogger } from '../../../logging/index.js';
 
 // ============================================================================
@@ -133,6 +133,7 @@ export async function searchServices(args: unknown) {
 // ============================================================================
 
 async function discoverServices(params: SearchServicesParams) {
+  const supabase = await getSupabase();
   let query = supabase
     .from('services')
     .select(`
@@ -238,6 +239,7 @@ async function discoverServices(params: SearchServicesParams) {
 }
 
 async function findMcpTools(params: SearchServicesParams) {
+  const supabase = await getSupabase();
   let query = supabase
     .from('interfaces')
     .select('*, service:services!interfaces_service_id_fkey(id, name, slug, venture_id)')
@@ -278,6 +280,7 @@ async function findMcpTools(params: SearchServicesParams) {
 }
 
 async function findHealthyDeployments(params: SearchServicesParams) {
+  const supabase = await getSupabase();
   let query = supabase
     .from('deployments')
     .select('*, service:services!deployments_service_id_fkey(*)')
@@ -304,6 +307,7 @@ async function findHealthyDeployments(params: SearchServicesParams) {
 }
 
 async function getServiceDetails(serviceId: string) {
+  const supabase = await getSupabase();
   const { data: service, error } = await supabase
     .from('services')
     .select(`

@@ -13,6 +13,90 @@ import { startSigningProxy } from './signing-proxy.js';
 dotenv.config({ path: join(process.cwd(), '.env') });
 
 /**
+ * Environment variable allowlist for the agent subprocess.
+ * Only variables matching these patterns are passed to the agent.
+ * Everything else (API keys, service credentials, operator secrets) is blocked.
+ *
+ * Categories:
+ * 1. Operator secrets (PRIVATE_KEY, OPERATE_*) — NEVER passed
+ * 2. Venture credentials (GITHUB_TOKEN, TELEGRAM_BOT_TOKEN, etc.) — via credential bridge
+ * 3. Platform infra (SUPABASE_SERVICE_ROLE_KEY, etc.) — via credential bridge
+ * 4. Agent-safe config (below) — passed through
+ */
+const AGENT_ENV_ALLOWLIST: Array<string | RegExp> = [
+  // System
+  'PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'TERM', 'TMPDIR',
+  'NODE_ENV', 'NODE_PATH', 'NODE_OPTIONS', 'NODE_EXTRA_CA_CERTS',
+  'npm_config_cache', 'npm_config_prefix',
+  'TZ', /^LC_/,
+
+  // Job context (all JINN_* except private key and signing proxy — proxy injected separately)
+  /^JINN_(?!SERVICE_PRIVATE_KEY)/,
+
+  // Credential bridge + payment config
+  'CREDENTIAL_BRIDGE_URL', 'X402_NETWORK', 'GATEWAY_PAYMENT_ADDRESS',
+
+  // Service endpoints (non-secret URLs/ports)
+  'RPC_URL', 'MECHX_CHAIN_RPC', 'MECH_RPC_HTTP_URL', 'BASE_RPC_URL',
+  'PONDER_GRAPHQL_URL', 'PONDER_PORT',
+  'CONTROL_API_URL', 'CONTROL_API_PORT',
+  'SUPABASE_URL',  // URL only — NOT the service role key
+  'BLOG_DOMAIN',
+  'IPFS_GATEWAY_URL', 'IPFS_FETCH_TIMEOUT_MS',
+
+  // Gemini CLI config (includes GEMINI_API_KEY — CLI needs it as OAuth fallback)
+  /^GEMINI_/,
+
+  // Git identity and code metadata (non-secret)
+  /^GIT_AUTHOR_/, /^GIT_COMMITTER_/, /^CODE_METADATA_/,
+  'GITHUB_API_URL', 'GITHUB_REPOSITORY',
+
+  // Tool config (non-secret values — IDs and hosts, not tokens)
+  'TELEGRAM_CHAT_ID', 'TELEGRAM_TOPIC_ID',
+  'UMAMI_HOST', 'UMAMI_WEBSITE_ID',
+  'CIVITAI_AIR_WAIT',
+
+  // Mech config (non-secret)
+  'MECH_MARKETPLACE_ADDRESS_BASE', 'MECH_MODEL', 'CHAIN_ID',
+
+  // Worker/agent runtime config
+  'AGENT_MAX_STDOUT_SIZE', 'AGENT_REPETITION_THRESHOLD',
+  /^WORKER_/,  // WORKER_POLL_*, WORKER_STUCK_EXIT_CYCLES, etc.
+  /^STAKING_/,
+  'WORKSTREAM_FILTER', 'WORKER_MECH_FILTER_LIST',
+
+  // Blueprint builder config (non-secret flags)
+  /^BLUEPRINT_/,
+
+  // Dev / testing
+  'USE_TSX_MCP', 'DEBUG', 'VITEST', 'RUNTIME_ENVIRONMENT',
+  'DRY_RUN', 'MCP_LOG_LEVEL', 'DISABLE_STS_CHECKS',
+
+  // OpenTelemetry
+  /^OTEL_/,
+];
+
+/**
+ * Build an environment object containing only allowlisted variables.
+ * This prevents secrets (API keys, service credentials, operator keys)
+ * from leaking into the agent subprocess.
+ */
+function buildAllowlistedEnv(): NodeJS.ProcessEnv {
+  const result: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    for (const pattern of AGENT_ENV_ALLOWLIST) {
+      if (typeof pattern === 'string') {
+        if (key === pattern) { result[key] = value; break; }
+      } else {
+        if (pattern.test(key)) { result[key] = value; break; }
+      }
+    }
+  }
+  return result;
+}
+
+/**
  * Strip ANSI escape codes from a string
  * Used to ensure status detection regex works regardless of terminal coloring
  */
@@ -696,17 +780,10 @@ export class Agent {
         args.push('-p', prompt);
       }
 
-      // Propagate job context to the MCP server via environment variables so the separate
-      // MCP process can read them on startup
-      const envWithJob: NodeJS.ProcessEnv = { ...process.env };
-
-      // Strip sensitive credentials from agent subprocess environment
-      // The agent uses the signing proxy instead of direct key access
-      delete envWithJob.JINN_SERVICE_PRIVATE_KEY;
-      delete envWithJob.OPERATE_PASSWORD;
-      delete envWithJob.OPERATE_PROFILE_DIR;
-      delete envWithJob.OPERATE_DIR;
-      delete envWithJob.OPERATE_HOME;
+      // Build agent environment from allowlist — only non-secret config passes through.
+      // API keys, service credentials, and operator secrets are blocked by default.
+      // Venture credentials are fetched dynamically via the credential bridge.
+      const envWithJob: NodeJS.ProcessEnv = buildAllowlistedEnv();
 
       // Inject signing proxy configuration so agent-side code can delegate signing
       envWithJob.JINN_SIGNING_PROXY_URL = signingProxy.url;

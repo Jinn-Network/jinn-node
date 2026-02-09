@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { getCredential } from '../../shared/credential-client.js';
 
 /**
  * GitHub Tools for Metacog MCP Server
@@ -45,9 +46,9 @@ export const listCommitsSchema = {
 
 // Helper to call GitHub API
 async function githubApiCall(endpoint: string, token?: string): Promise<any> {
-  const authToken = token || process.env.GITHUB_TOKEN;
+  const authToken = token || await getCredential('github');
   if (!authToken) {
-    throw new Error('GITHUB_TOKEN environment variable not set');
+    throw new Error('GitHub credential not available (check credential bridge)');
   }
 
   const response = await fetch(`https://api.github.com${endpoint}`, {

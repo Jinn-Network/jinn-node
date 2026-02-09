@@ -1,4 +1,4 @@
-import { supabase } from './supabase.js';
+import { getSupabase } from './supabase.js';
 
 export interface ReadRecordsParams {
   table_name: string;
@@ -14,7 +14,8 @@ export interface CreateRecordParams {
 
 export async function readRecords(params: ReadRecordsParams) {
   const { table_name, filter = {}, limit, offset } = params;
-  
+  const supabase = await getSupabase();
+
   let query = supabase.from(table_name).select('*');
   
   // Apply filters
@@ -41,7 +42,8 @@ export async function readRecords(params: ReadRecordsParams) {
 
 export async function createRecord(params: CreateRecordParams) {
   const { table_name, data } = params;
-  
+  const supabase = await getSupabase();
+
   const { data: result, error } = await supabase
     .from(table_name)
     .insert(data)

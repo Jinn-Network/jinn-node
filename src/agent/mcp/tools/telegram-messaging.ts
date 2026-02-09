@@ -11,6 +11,7 @@
  */
 
 import { z } from 'zod';
+import { getCredential } from '../../shared/credential-client.js';
 
 // ============================================
 // Schema Definitions
@@ -82,23 +83,19 @@ Returns: { message_id, chat_id, date } on success`,
 // Helper Functions
 // ============================================
 
-function getTelegramConfig() {
-    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+async function getTelegramConfig() {
+    const botToken = await getCredential('telegram');
     const chatId = process.env.TELEGRAM_CHAT_ID;
     const topicIdRaw = process.env.TELEGRAM_TOPIC_ID;
 
-    const missing: string[] = [];
-    if (!botToken) missing.push('TELEGRAM_BOT_TOKEN');
-    if (!chatId) missing.push('TELEGRAM_CHAT_ID');
-
-    if (missing.length > 0) {
-        throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+    if (!chatId) {
+        throw new Error('Missing required environment variable: TELEGRAM_CHAT_ID');
     }
 
     // Parse topic ID as number if provided
     const topicId = topicIdRaw ? parseInt(topicIdRaw, 10) : undefined;
 
-    return { botToken: botToken!, chatId: chatId!, topicId };
+    return { botToken, chatId, topicId };
 }
 
 async function telegramApiCall<T>(
@@ -149,7 +146,7 @@ export async function telegramSendMessage(args: unknown) {
             };
         }
 
-        const config = getTelegramConfig();
+        const config = await getTelegramConfig();
         const { text, parse_mode, disable_notification } = parsed.data;
 
         const result = await telegramApiCall<TelegramMessage>('sendMessage', config.botToken, {
@@ -202,7 +199,7 @@ export async function telegramSendPhoto(args: unknown) {
             };
         }
 
-        const config = getTelegramConfig();
+        const config = await getTelegramConfig();
         const { photo, caption, parse_mode } = parsed.data;
 
         const result = await telegramApiCall<TelegramMessage>('sendPhoto', config.botToken, {
@@ -255,7 +252,7 @@ export async function telegramSendDocument(args: unknown) {
             };
         }
 
-        const config = getTelegramConfig();
+        const config = await getTelegramConfig();
         const { document, caption, parse_mode } = parsed.data;
 
         const result = await telegramApiCall<TelegramMessage>('sendDocument', config.botToken, {
