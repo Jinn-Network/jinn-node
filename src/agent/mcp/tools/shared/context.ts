@@ -10,6 +10,7 @@ export interface JobContext {
   mechAddress?: string | null;
   baseBranch?: string | null;
   workstreamId?: string | null;
+  ventureId?: string | null;
   parentRequestId?: string | null;
   branchName?: string | null;
   requiredTools?: string[] | null;
@@ -32,6 +33,7 @@ export function getCurrentJobContext(): JobContext {
     mechAddress: process.env.JINN_MECH_ADDRESS || null,
     baseBranch: process.env.JINN_BASE_BRANCH || null,
     workstreamId: process.env.JINN_WORKSTREAM_ID || null,
+    ventureId: process.env.JINN_VENTURE_ID || null,
     parentRequestId: process.env.JINN_PARENT_REQUEST_ID || null,
     branchName: process.env.JINN_BRANCH_NAME || null,
     requiredTools: process.env.JINN_REQUIRED_TOOLS
@@ -100,6 +102,7 @@ export function setJobContext(
   if (workstreamId !== undefined) {
     if (workstreamId) process.env.JINN_WORKSTREAM_ID = workstreamId; else delete process.env.JINN_WORKSTREAM_ID;
   }
+  // ventureId is set via worker metadata/jobContext.ts (JINN_VENTURE_ID env var)
   if (parentRequestId !== undefined) {
     if (parentRequestId) process.env.JINN_PARENT_REQUEST_ID = parentRequestId; else delete process.env.JINN_PARENT_REQUEST_ID;
   }
@@ -124,6 +127,7 @@ export function clearJobContext() {
   delete process.env.JINN_PROJECT_DEFINITION_ID;
   delete process.env.JINN_BASE_BRANCH;
   delete process.env.JINN_WORKSTREAM_ID;
+  delete process.env.JINN_VENTURE_ID;
   delete process.env.JINN_PARENT_REQUEST_ID;
   delete process.env.JINN_BRANCH_NAME;
   delete process.env.JINN_INHERITED_ENV;

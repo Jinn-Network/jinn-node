@@ -125,6 +125,7 @@ export async function runAgentForRequest(
         metadata?.codeMetadata?.baseBranch ||
         undefined,
       workstreamId: metadata?.workstreamId || request.workstreamId || request.id, // Fallback to requestId for root jobs
+      ventureId: metadata?.ventureId || undefined,
       parentRequestId: metadata?.sourceRequestId || undefined,
       branchName: metadata?.codeMetadata?.branch?.name || undefined,
       completedChildRequestIds,

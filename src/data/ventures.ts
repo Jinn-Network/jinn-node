@@ -6,6 +6,7 @@
  */
 
 import { supabase } from '../agent/mcp/tools/shared/supabase.js';
+import type { ScheduleEntry } from './types/scheduleEntry.js';
 
 // ============================================================================
 // Types
@@ -48,6 +49,7 @@ export interface UpdateVentureArgs {
   tokenMetadata?: object;
   governanceAddress?: string;
   poolAddress?: string;
+  dispatchSchedule?: ScheduleEntry[];
 }
 
 export interface Venture {
@@ -60,6 +62,7 @@ export interface Venture {
   root_workstream_id: string | null;
   root_job_instance_id: string | null;
   status: string;
+  dispatch_schedule: ScheduleEntry[];
   created_at: string;
   updated_at: string;
 }
@@ -224,6 +227,10 @@ export async function updateVenture(args: UpdateVentureArgs): Promise<Venture> {
       throw new Error('Blueprint must contain an "invariants" array');
     }
     record.blueprint = blueprint;
+  }
+
+  if (updates.dispatchSchedule !== undefined) {
+    record.dispatch_schedule = updates.dispatchSchedule;
   }
 
   if (Object.keys(record).length === 0) {

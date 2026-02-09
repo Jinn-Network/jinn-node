@@ -68,3 +68,7 @@ export { serviceRegistry, serviceRegistryParams, serviceRegistrySchema, type Ser
 // Service discovery tools
 export { searchServices, searchServicesParams, searchServicesSchema, type SearchServicesParams } from './search_services.js';
 
+// Dispatch schedule tools
+export { readDispatchSchedule, readDispatchScheduleParams, readDispatchScheduleSchema, type ReadDispatchScheduleParams } from './read_dispatch_schedule.js';
+export { updateDispatchSchedule, updateDispatchScheduleParams, updateDispatchScheduleSchema, type UpdateDispatchScheduleParams } from './update_dispatch_schedule.js';
+

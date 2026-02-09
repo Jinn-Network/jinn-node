@@ -11,6 +11,7 @@ export function setJobContext(params: {
   baseBranch?: string;
   mechAddress?: string;
   workstreamId?: string;
+  ventureId?: string;
   parentRequestId?: string;
   branchName?: string;
   completedChildRequestIds?: string[];
@@ -26,6 +27,7 @@ export function setJobContext(params: {
     baseBranch,
     mechAddress,
     workstreamId,
+    ventureId,
     parentRequestId,
     branchName,
     completedChildRequestIds,
@@ -54,6 +56,10 @@ export function setJobContext(params: {
 
   if (workstreamId) {
     process.env.JINN_WORKSTREAM_ID = workstreamId;
+  }
+
+  if (ventureId) {
+    process.env.JINN_VENTURE_ID = ventureId;
   }
 
   if (parentRequestId) {
@@ -117,6 +123,7 @@ export function clearJobContext(): void {
   delete process.env.JINN_BASE_BRANCH;
   delete process.env.JINN_MECH_ADDRESS;
   delete process.env.JINN_WORKSTREAM_ID;
+  delete process.env.JINN_VENTURE_ID;
   delete process.env.JINN_PARENT_REQUEST_ID;
   delete process.env.JINN_BRANCH_NAME;
   delete process.env.JINN_COMPLETED_CHILDREN;
@@ -137,6 +144,7 @@ export function snapshotJobContext(): {
   baseBranch?: string;
   mechAddress?: string;
   workstreamId?: string;
+  ventureId?: string;
   parentRequestId?: string;
   branchName?: string;
   completedChildRequestIds?: string[];
@@ -154,6 +162,7 @@ export function snapshotJobContext(): {
     baseBranch: process.env.JINN_BASE_BRANCH,
     mechAddress: process.env.JINN_MECH_ADDRESS,
     workstreamId: process.env.JINN_WORKSTREAM_ID,
+    ventureId: process.env.JINN_VENTURE_ID,
     parentRequestId: process.env.JINN_PARENT_REQUEST_ID,
     branchName: process.env.JINN_BRANCH_NAME,
     completedChildRequestIds: process.env.JINN_COMPLETED_CHILDREN
@@ -216,6 +225,7 @@ export function restoreJobContext(snapshot: {
   baseBranch?: string;
   mechAddress?: string;
   workstreamId?: string;
+  ventureId?: string;
   parentRequestId?: string;
   branchName?: string;
   completedChildRequestIds?: string[];
@@ -232,6 +242,7 @@ export function restoreJobContext(snapshot: {
     baseBranch: snapshot.baseBranch,
     mechAddress: snapshot.mechAddress,
     workstreamId: snapshot.workstreamId,
+    ventureId: snapshot.ventureId,
     parentRequestId: snapshot.parentRequestId,
     branchName: snapshot.branchName,
     completedChildRequestIds: snapshot.completedChildRequestIds,

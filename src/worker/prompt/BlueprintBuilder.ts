@@ -31,6 +31,7 @@ import type { RecognitionPhaseResult } from '../recognition_helpers.js';
 import { JobContextProvider } from './providers/context/JobContextProvider.js';
 import { ProgressCheckpointProvider } from './providers/context/ProgressCheckpointProvider.js';
 import { MeasurementContextProvider } from './providers/context/MeasurementContextProvider.js';
+import { VentureContextProvider } from './providers/context/VentureContextProvider.js';
 
 // Invariant providers
 import {
@@ -320,6 +321,7 @@ export function createBlueprintBuilder(
   builder.registerContextProvider(new JobContextProvider());
   builder.registerContextProvider(new ProgressCheckpointProvider());
   builder.registerContextProvider(new MeasurementContextProvider());
+  builder.registerContextProvider(VentureContextProvider);
 
   // Phase 2: Invariant providers (have access to built context)
   // Order follows domain priority: system → strategy → recovery → goal → learning → coordination → state → tooling → quality

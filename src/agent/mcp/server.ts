@@ -54,6 +54,9 @@ export const REGISTERED_MCP_TOOLS = [
   'venture_delete',
   'service_registry',
   'search_services',
+  // Dispatch schedule tools
+  'read_dispatch_schedule',
+  'update_dispatch_schedule',
 ] as const;
 
 async function main() {
@@ -143,6 +146,9 @@ async function main() {
       { name: 'venture_delete', schema: tools.ventureDeleteSchema, handler: tools.ventureDelete },
       { name: 'service_registry', schema: tools.serviceRegistrySchema, handler: tools.serviceRegistry },
       { name: 'search_services', schema: tools.searchServicesSchema, handler: tools.searchServices },
+      // Dispatch schedule tools
+      { name: 'read_dispatch_schedule', schema: tools.readDispatchScheduleSchema, handler: tools.readDispatchSchedule },
+      { name: 'update_dispatch_schedule', schema: tools.updateDispatchScheduleSchema, handler: tools.updateDispatchSchedule },
     ];
 
     // Initialize the dynamic tool registry (internal) for dynamic enums

@@ -1225,6 +1225,10 @@ async function checkControlApiHealth(): Promise<void> {
 // Repost check frequency limiting configuration
 const WORKER_REPOST_CHECK_CYCLES = parseInt(process.env.WORKER_REPOST_CHECK_CYCLES || '10');
 
+// Venture watcher configuration (opt-in via ENABLE_VENTURE_WATCHER=1)
+const ENABLE_VENTURE_WATCHER = process.env.ENABLE_VENTURE_WATCHER === '1';
+const WORKER_VENTURE_CHECK_CYCLES = parseInt(process.env.WORKER_VENTURE_CHECK_CYCLES || '5');
+
 async function main() {
   workerLogger.info('Mech worker starting');
 
@@ -1244,6 +1248,7 @@ async function main() {
 
   // Repost check frequency limiting
   let cyclesSinceLastRepostCheck = 0;
+  let cyclesSinceLastVentureCheck = 0;
 
   for (; ;) {
     const cycleStart = Date.now();
@@ -1258,6 +1263,20 @@ async function main() {
       if (cyclesSinceLastRepostCheck >= WORKER_REPOST_CHECK_CYCLES) {
         await checkAndRepostCompletedChains();
         cyclesSinceLastRepostCheck = 0;
+      }
+
+      // Check venture dispatch schedules every Nth cycle (opt-in)
+      if (ENABLE_VENTURE_WATCHER) {
+        cyclesSinceLastVentureCheck++;
+        if (cyclesSinceLastVentureCheck >= WORKER_VENTURE_CHECK_CYCLES) {
+          try {
+            const { checkAndDispatchScheduledVentures } = await import('./ventures/ventureWatcher.js');
+            await checkAndDispatchScheduledVentures();
+          } catch (ventureErr: any) {
+            workerLogger.error({ error: ventureErr?.message }, 'Venture watcher error (non-fatal)');
+          }
+          cyclesSinceLastVentureCheck = 0;
+        }
       }
 
       const jobProcessed = await processOnce();

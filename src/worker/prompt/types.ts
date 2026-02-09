@@ -117,6 +117,19 @@ export interface BooleanInvariant {
 export type Invariant = FloorInvariant | CeilingInvariant | RangeInvariant | BooleanInvariant;
 
 /**
+ * Venture invariant — homeostatic, continuous monitoring.
+ * Only FLOOR/CEILING/RANGE types (not BOOLEAN, which is task-completion oriented).
+ * Used for venture-level goals that persist across workstreams.
+ */
+export type VentureInvariant = FloorInvariant | CeilingInvariant | RangeInvariant;
+
+/**
+ * Workstream invariant — task completion, finite scope.
+ * All invariant types are valid for workstream goals.
+ */
+export type WorkstreamInvariant = Invariant;
+
+/**
  * Type guard for FloorInvariant
  */
 export function isFloorInvariant(inv: Invariant): inv is FloorInvariant {

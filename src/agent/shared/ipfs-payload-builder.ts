@@ -72,6 +72,16 @@ export interface BuildIpfsPayloadOptions {
     workstreamId?: string;
 
     /**
+     * Venture ID for scheduled dispatches. Propagates to child jobs.
+     */
+    ventureId?: string;
+
+    /**
+     * Template ID that generated this dispatch. Propagates to child jobs.
+     */
+    templateId?: string;
+
+    /**
      * Additional context overrides for multi-tenant products.
      * Only available to human-initiated dispatches, not agent tools.
      * 
@@ -120,6 +130,8 @@ export async function buildIpfsPayload(
         allowedModels: explicitAllowedModels,
         cyclic = false,
         workstreamId,
+        ventureId,
+        templateId,
         additionalContextOverrides,
         inputSchema,
     } = options;
@@ -140,6 +152,14 @@ export async function buildIpfsPayload(
         lineageContext.workstreamId = workstreamId;
     } else if (context.workstreamId) {
         lineageContext.workstreamId = context.workstreamId;
+    }
+    if (ventureId) {
+        lineageContext.ventureId = ventureId;
+    } else if (context.ventureId) {
+        lineageContext.ventureId = context.ventureId;
+    }
+    if (templateId) {
+        lineageContext.templateId = templateId;
     }
 
     // Fetch job hierarchy for additionalContext

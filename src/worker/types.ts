@@ -170,6 +170,30 @@ export interface AdditionalContext {
   };
 
   /**
+   * Venture context for scheduled dispatches.
+   * Contains venture-level invariants and last measurements.
+   */
+  ventureContext?: {
+    ventureId: string;
+    ventureName: string;
+    ventureInvariants: Array<{
+      id: string;
+      type: 'FLOOR' | 'CEILING' | 'RANGE';
+      metric: string;
+      min?: number;
+      max?: number;
+      assessment: string;
+    }>;
+    lastMeasurements?: Array<{
+      invariantId: string;
+      type: string;
+      value: number | boolean;
+      passed: boolean;
+      measuredAt: string;
+    }>;
+  };
+
+  /**
    * Public environment variables to inject into the worker/agent process.
    * These are set before the agent spawns and available via process.env.
    * NOTE: Do NOT put secrets here (passwords, API keys) as this is stored on IPFS.
@@ -229,6 +253,8 @@ export interface IpfsMetadata {
   allowedModels?: string[];  // Cascaded model allowlist from blueprint/workstream
   recognition?: RecognitionPhaseResult | null;
   dependencies?: string[];  // Request IDs that must complete first
+  /** Venture ID if job was dispatched from a venture schedule */
+  ventureId?: string;
   /** Template ID if job was dispatched from a template */
   templateId?: string;
   /** OutputSpec for structured result extraction (passthrough from template) */

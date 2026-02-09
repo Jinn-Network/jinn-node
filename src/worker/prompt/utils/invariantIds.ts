@@ -5,7 +5,7 @@
  * System/coordination invariants (SYS-*, COORD-*) are infrastructure concerns, not measured by agents.
  */
 
-const MISSION_PREFIXES = ['JOB', 'GOAL', 'OUT', 'STRAT'];
+const MISSION_PREFIXES = ['JOB', 'GOAL', 'OUT', 'STRAT', 'VENTURE', 'MEAS'];
 
 /**
  * Extract mission-relevant invariant IDs from a blueprint JSON string.
