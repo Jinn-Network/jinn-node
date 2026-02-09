@@ -3,7 +3,6 @@ import {
   TELEGRAM_TOOLS,
   FIREFLIES_TOOLS,
   RAILWAY_TOOLS,
-  NANO_BANANA_TOOLS,
 } from '../agent/toolPolicy.js';
 
 export type TemplateToolSpec = {
@@ -110,9 +109,7 @@ function expandMetaTools(tools: string[]): string[] {
     if (tool === 'railway_deployment') {
       expanded.push(...RAILWAY_TOOLS);
     }
-    if (tool === 'nano_banana') {
-      expanded.push(...NANO_BANANA_TOOLS);
-    }
+    // nano_banana: deprecated — silently ignored
   }
 
   return expanded;

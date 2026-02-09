@@ -164,15 +164,7 @@ const CORE_CLI_TOOLS: ToolInfo[] = [
       'The 3 expanded tools accept: fireflies_get_transcripts(limit?: number), fireflies_search(query: string), fireflies_get_summary(transcript_id: string)'
     ]
   },
-  {
-    name: 'nano_banana',
-    description: 'Meta-tool that enables Nano Banana image generation tools. When included in enabledTools, activates 7 tools: generate_image (text-to-image with style variations), edit_image (modify images with natural language), restore_image (enhance/repair photos), generate_icon (app icons and favicons), generate_pattern (seamless textures), generate_story (sequential visual storytelling), generate_diagram (technical diagrams and flowcharts). Uses Gemini image models (gemini-2.5-flash-image by default).',
-    parameters: {},
-    examples: [
-      'Enable image generation for a content job: enabledTools: ["nano_banana"]',
-      'The 7 expanded tools: generate_image(prompt), edit_image(image_path, instructions), restore_image(image_path), generate_icon(prompt, sizes), generate_pattern(prompt), generate_story(prompt, count), generate_diagram(prompt)'
-    ]
-  },
+  // nano_banana: deprecated
   {
     name: 'telegram_messaging',
     description: 'Meta-tool that enables Telegram messaging capabilities. When included in enabledTools, activates the telegram_send_message tool for broadcasting messages to Telegram channels/groups. Write-only: can send messages but cannot read replies. Requires TELEGRAM_BOT_TOKEN env var and optionally TELEGRAM_CHAT_ID/TELEGRAM_TOPIC_ID for default targets.',

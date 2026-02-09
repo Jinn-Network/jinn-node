@@ -122,24 +122,15 @@ export function hasBrowserAutomation(enabledTools: string[]): boolean {
 }
 
 /**
- * Nano Banana image generation tools (Gemini CLI extension)
- * Provides image generation, editing, and manipulation using Gemini image models
+ * @deprecated nano_banana is deprecated — Gemini CLI extension unreliable on Railway.
  */
-export const NANO_BANANA_TOOLS = [
-  'generate_image',
-  'edit_image',
-  'restore_image',
-  'generate_icon',
-  'generate_pattern',
-  'generate_story',
-  'generate_diagram',
-] as const;
+export const NANO_BANANA_TOOLS = [] as const;
 
 /**
- * Check if nano banana image generation is enabled in the tools list
+ * @deprecated nano_banana is deprecated.
  */
-export function hasNanoBanana(enabledTools: string[]): boolean {
-  return enabledTools.includes('nano_banana');
+export function hasNanoBanana(_enabledTools: string[]): boolean {
+  return false;
 }
 
 /**
@@ -209,12 +200,7 @@ export const EXTENSION_META_TOOLS = {
     requiredEnv: [],
     tools: [...BROWSER_AUTOMATION_TOOLS] as string[],
   },
-  nano_banana: {
-    installUrl: 'https://github.com/gemini-cli-extensions/nanobanana',
-    extensionName: 'nanobanana',
-    requiredEnv: ['GEMINI_API_KEY'],
-    tools: [...NANO_BANANA_TOOLS] as string[],
-  },
+  // nano_banana: deprecated — Gemini CLI extension unreliable on Railway
 workstream_analysis: {
     installUrl: 'local:gemini-extension',
     extensionName: 'jinn-extensions',
@@ -441,13 +427,8 @@ export function computeToolPolicy(
     ];
   }
 
-  // Expand nano_banana meta-tool to Nano Banana image tools
-  if (expandedTools.includes('nano_banana')) {
-    expandedTools = [
-      ...expandedTools.filter(t => t !== 'nano_banana'),
-      ...NANO_BANANA_TOOLS
-    ];
-  }
+  // nano_banana: deprecated — silently strip from enabledTools
+  expandedTools = expandedTools.filter(t => t !== 'nano_banana');
 
   // Expand ventures_registry meta-tool to Ventures MCP tools
   if (expandedTools.includes('ventures_registry')) {
