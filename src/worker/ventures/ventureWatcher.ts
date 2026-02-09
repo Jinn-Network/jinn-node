@@ -130,11 +130,7 @@ export async function hasRecentDispatch(
       url: PONDER_GRAPHQL_URL,
       query: `query HasRecentDispatch($ventureId: String!, $templateId: String!, $since: BigInt!) {
         requests(
-          where: {
-            ventureId: { equals: $ventureId }
-            templateId: { equals: $templateId }
-            blockTimestamp: { gte: $since }
-          }
+          where: { ventureId: $ventureId, templateId: $templateId, blockTimestamp_gte: $since }
           limit: 1
         ) {
           items { id }
