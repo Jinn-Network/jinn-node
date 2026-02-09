@@ -1,10 +1,9 @@
 import { z } from 'zod';
 import { graphQLRequest } from '../../../http/client.js';
-import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
 import { getCurrentJobContext } from './shared/context.js';
 import { getJobContextForDispatch } from './shared/job-context-utils.js';
-import { getMechAddress, getMechChainConfig, getServicePrivateKey } from '../../../env/operate-profile.js';
 import { getPonderGraphqlUrl } from './shared/env.js';
+import { proxyDispatch } from '../../shared/signing-proxy-client.js';
 import { collectLocalCodeMetadata, ensureJobBranch } from '../../shared/code_metadata.js';
 import { getCodeMetadataDefaultBaseBranch } from '../../../config/index.js';
 import { ensureUniversalTools, BASE_UNIVERSAL_TOOLS } from '../../toolPolicy.js';
@@ -441,25 +440,11 @@ export async function dispatchExistingJob(args: unknown) {
   }
 
   try {
-    const priorityMech = getMechAddress();
-    const privateKey = getServicePrivateKey();
-    const chainConfig = getMechChainConfig();
-
-    if (!priorityMech) {
-      throw new Error('Service target mech address not configured. Check .operate service config (MECH_TO_CONFIG).');
-    }
-
-    if (!privateKey) {
-      throw new Error('Service agent private key not found. Check .operate/keys directory.');
-    }
-
-    const result = await marketplaceInteract({
+    // Dispatch via signing proxy — private key never leaves the worker process
+    const result = await proxyDispatch({
       prompts: [finalBlueprint],
-      priorityMech,
       tools: finalTools,
       ipfsJsonContents,
-      chainConfig,
-      keyConfig: { source: 'value', value: privateKey },
       postOnly: true,
       responseTimeout,
     });

@@ -8,6 +8,7 @@ import { agentLogger } from '../logging/index.js';
 import { getOptionalCodeMetadataRepoRoot, getSandboxMode } from '../config/index.js';
 import { getRepoRoot } from '../shared/repo_utils.js';
 import { computeToolPolicy, UNIVERSAL_TOOLS, hasBrowserAutomation, BROWSER_AUTOMATION_TOOLS, hasRailwayDeployment, RAILWAY_TOOLS, hasFirefliesMeetings, FIREFLIES_TOOLS, getEnabledExtensions, EXTENSION_META_TOOLS, getExtensionExcludedTools, type ToolPolicyResult } from './toolPolicy.js';
+import { startSigningProxy } from './signing-proxy.js';
 
 dotenv.config({ path: join(process.cwd(), '.env') });
 
@@ -447,6 +448,7 @@ export class Agent {
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-background-networking',
+      '--disable-file-url-allow-file-access',
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${userDataDir}`,
       'about:blank'
@@ -601,7 +603,12 @@ export class Agent {
     }
   }
 
-  private runGeminiWithTelemetry(prompt: string): Promise<{ output: string; telemetryFile: string; stderr: string; exitCode: number }> {
+  private async runGeminiWithTelemetry(prompt: string): Promise<{ output: string; telemetryFile: string; stderr: string; exitCode: number }> {
+    // Start the signing proxy before spawning the agent subprocess.
+    // The proxy mediates all private key operations so the agent never has direct key access.
+    const signingProxy = await startSigningProxy();
+    agentLogger.info({ url: signingProxy.url }, 'Signing proxy started');
+
     return new Promise((resolvePromise) => {
       // Initialize CLI args
       // NOTE: Gemini CLI no longer accepts --approval-mode or --allowed-tools flags
@@ -692,6 +699,19 @@ export class Agent {
       // Propagate job context to the MCP server via environment variables so the separate
       // MCP process can read them on startup
       const envWithJob: NodeJS.ProcessEnv = { ...process.env };
+
+      // Strip sensitive credentials from agent subprocess environment
+      // The agent uses the signing proxy instead of direct key access
+      delete envWithJob.JINN_SERVICE_PRIVATE_KEY;
+      delete envWithJob.OPERATE_PASSWORD;
+      delete envWithJob.OPERATE_PROFILE_DIR;
+      delete envWithJob.OPERATE_DIR;
+      delete envWithJob.OPERATE_HOME;
+
+      // Inject signing proxy configuration so agent-side code can delegate signing
+      envWithJob.JINN_SIGNING_PROXY_URL = signingProxy.url;
+      envWithJob.JINN_SIGNING_PROXY_SECRET = signingProxy.secret;
+
       // Configure telemetry via environment variables (CLI 0.11+ no longer accepts telemetry flags)
       envWithJob.GEMINI_TELEMETRY_ENABLED = 'true';
       envWithJob.GEMINI_TELEMETRY_TARGET = envWithJob.GEMINI_TELEMETRY_TARGET || 'local';
@@ -975,6 +995,11 @@ export class Agent {
       geminiProcess.on('close', (code) => {
         clearTimeout(processTimeout);
 
+        // Shut down signing proxy now that agent has exited
+        if (signingProxy) {
+          signingProxy.close().catch(() => {});
+        }
+
         // Inspect stderr for API/tool errors even if process exits 0
         let hasApiError = (stderr && (
           stderr.includes('Error when talking to Gemini API') ||
@@ -1005,6 +1030,7 @@ export class Agent {
 
       geminiProcess.on('error', (err) => {
         clearTimeout(processTimeout);
+        signingProxy.close().catch(() => {});
 
         // Surface as a synthetic non-zero exit with captured streams
         const exitCode = 1;

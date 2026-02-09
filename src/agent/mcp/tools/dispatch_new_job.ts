@@ -1,10 +1,9 @@
 import { z } from 'zod';
 import { graphQLRequest } from '../../../http/client.js';
 import { randomUUID } from 'node:crypto';
-import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
 import { getCurrentJobContext } from './shared/context.js';
-import { getMechAddress, getMechChainConfig, getServicePrivateKey } from '../../../env/operate-profile.js';
 import { getPonderGraphqlUrl } from './shared/env.js';
+import { proxyDispatch } from '../../shared/signing-proxy-client.js';
 import { buildIpfsPayload } from '../../shared/ipfs-payload-builder.js';
 import { validateInvariantsStrict } from '../../../worker/prompt/invariant-validator.js';
 import { buildAnnotatedTools, normalizeToolArray, extractModelPolicyFromBlueprint } from '../../../shared/template-tools.js';
@@ -582,27 +581,11 @@ export async function dispatchNewJob(args: unknown) {
     }
 
     try {
-      const mechAddress = getMechAddress();
-      const chainConfig = getMechChainConfig();
-      const privateKey = getServicePrivateKey();
-
-      if (!mechAddress) {
-        throw new Error('Service target mech address not configured. Check .operate service config (MECH_TO_CONFIG).');
-      }
-
-      if (!privateKey) {
-        throw new Error('Service agent private key not found. Check .operate/keys directory.');
-      }
-
-      // Note: marketplaceInteract still expects 'prompts' parameter for on-chain data field
-      // But the actual job specification comes from blueprint in IPFS metadata
-      const result = await marketplaceInteract({
+      // Dispatch via signing proxy — private key never leaves the worker process
+      const result = await proxyDispatch({
         prompts: [finalBlueprint],
-        priorityMech: mechAddress,
         tools: mergedRequestedTools,
         ipfsJsonContents,
-        chainConfig,
-        keyConfig: { source: 'value', value: privateKey },
         postOnly: true,
         responseTimeout,
       });

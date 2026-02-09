@@ -1,15 +1,16 @@
 /**
  * Credential Client
  *
- * Agent-side client for the Credential Bridge. Signs requests with
- * the agent's private key and fetches fresh OAuth tokens from the gateway.
+ * Agent-side client for the Credential Bridge. Delegates all signing to
+ * the signing proxy running in the worker process.
  *
  * Environment variables:
  * - CREDENTIAL_BRIDGE_URL: URL of the x402-gateway (e.g., https://gateway.example.com)
- * - WORKER_PRIVATE_KEY: Agent's private key (or loaded from operate profile)
+ * - JINN_SIGNING_PROXY_URL: Signing proxy base URL
+ * - JINN_SIGNING_PROXY_SECRET: Signing proxy bearer token
  */
 
-import { getServicePrivateKey } from '../../env/operate-profile.js';
+import { proxySign, proxySignTypedData, proxyGetAddress } from './signing-proxy-client.js';
 
 interface CredentialResponse {
   access_token: string;
@@ -25,38 +26,86 @@ interface CredentialError {
 // In-memory cache: provider → { token, expiresAt }
 const tokenCache = new Map<string, { token: string; expiresAt: number }>();
 
-/**
- * Get the agent's private key from environment or operate profile.
- */
-function getPrivateKey(): string {
-  const envKey = process.env.WORKER_PRIVATE_KEY;
-  if (envKey) return envKey;
-
-  const profileKey = getServicePrivateKey();
-  if (profileKey) return profileKey;
-
-  throw new Error('No private key available (WORKER_PRIVATE_KEY or operate profile)');
-}
+// USDC contract addresses (6 decimals) — must match x402-verify.ts
+const USDC_ADDRESSES: Record<string, string> = {
+  'base': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  'base-sepolia': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+};
 
 /**
- * Sign a message with EIP-191 personal_sign using the agent's private key.
- * Returns the signature and derived address.
+ * Build an x402 payment header by signing a USDC transferWithAuthorization
+ * via the signing proxy (EIP-712 typed data).
  */
-async function signMessage(message: string, privateKey: string): Promise<{ signature: string; address: string }> {
-  const { privateKeyToAccount } = await import('viem/accounts');
-  const account = privateKeyToAccount(privateKey as `0x${string}`);
+async function createPaymentHeader(opts: {
+  amount: string;
+  payTo: string;
+  network: string;
+}): Promise<string> {
+  const usdcAddress = USDC_ADDRESSES[opts.network] || USDC_ADDRESSES['base'];
+  const nonce = '0x' + Array.from(crypto.getRandomValues(new Uint8Array(32)))
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+  const validBefore = String(Math.floor(Date.now() / 1000) + 3600);
+  const from = await proxyGetAddress();
 
-  const signature = await account.signMessage({ message });
-  return {
-    signature,
-    address: account.address.toLowerCase(),
+  const domain = {
+    name: 'USD Coin',
+    version: '2',
+    chainId: opts.network === 'base-sepolia' ? 84532 : 8453,
+    verifyingContract: usdcAddress,
   };
+
+  const types = {
+    TransferWithAuthorization: [
+      { name: 'from', type: 'address' },
+      { name: 'to', type: 'address' },
+      { name: 'value', type: 'uint256' },
+      { name: 'validAfter', type: 'uint256' },
+      { name: 'validBefore', type: 'uint256' },
+      { name: 'nonce', type: 'bytes32' },
+    ],
+  };
+
+  const message = {
+    from,
+    to: opts.payTo,
+    value: opts.amount,
+    validAfter: '0',
+    validBefore,
+    nonce,
+  };
+
+  const { signature } = await proxySignTypedData({
+    domain,
+    types,
+    primaryType: 'TransferWithAuthorization',
+    message,
+  });
+
+  const payload = {
+    x402Version: 1,
+    scheme: 'exact',
+    network: opts.network,
+    payload: {
+      signature,
+      authorization: {
+        from,
+        to: opts.payTo,
+        value: opts.amount,
+        validAfter: '0',
+        validBefore,
+        nonce,
+      },
+    },
+  };
+
+  return Buffer.from(JSON.stringify(payload)).toString('base64');
 }
 
 /**
  * Get a fresh OAuth access token for a provider via the Credential Bridge.
  *
  * Caches tokens in memory with a 5-minute safety buffer before expiry.
+ * Handles x402 payment if the provider requires it.
  */
 export async function getCredential(provider: string): Promise<string> {
   // Check cache (with 5-minute buffer)
@@ -69,8 +118,6 @@ export async function getCredential(provider: string): Promise<string> {
   if (!bridgeUrl) {
     throw new Error('CREDENTIAL_BRIDGE_URL environment variable is required');
   }
-
-  const privateKey = getPrivateKey();
 
   // Build request body (include requestId for job-bound credentials)
   const body: {
@@ -88,20 +135,54 @@ export async function getCredential(provider: string): Promise<string> {
     body.requestId = jobId;
   }
 
-  // Sign the request body
+  // Sign the request body via proxy
   const message = JSON.stringify(body);
-  const { signature, address } = await signMessage(message, privateKey);
+  const { signature, address } = await proxySign(message);
 
-  // Call credential bridge
-  const response = await fetch(`${bridgeUrl.replace(/\/$/, '')}/credentials/${provider}`, {
+  const credentialUrl = `${bridgeUrl.replace(/\/$/, '')}/credentials/${provider}`;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Agent-Signature': signature,
+    'X-Agent-Address': address,
+  };
+
+  // First attempt
+  let response = await fetch(credentialUrl, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Agent-Signature': signature,
-      'X-Agent-Address': address,
-    },
+    headers,
     body: JSON.stringify(body),
   });
+
+  // Handle x402 payment required
+  if (response.status === 402) {
+    const errorData = await response.json().catch(() => ({})) as Record<string, string>;
+    const amount = errorData.error?.match(/(\d+)/)?.[1];
+    const network = process.env.X402_NETWORK || 'base';
+    const payTo = process.env.GATEWAY_PAYMENT_ADDRESS;
+
+    if (amount && payTo) {
+      const paymentHeader = await createPaymentHeader({ amount, payTo, network });
+      // Rebuild body with fresh nonce/timestamp for the retry
+      const retryBody = {
+        timestamp: Math.floor(Date.now() / 1000),
+        nonce: crypto.randomUUID(),
+        ...(jobId ? { requestId: jobId } : {}),
+      };
+      const retryMessage = JSON.stringify(retryBody);
+      const retrySig = await proxySign(retryMessage);
+
+      response = await fetch(credentialUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Agent-Signature': retrySig.signature,
+          'X-Agent-Address': retrySig.address,
+          'X-Payment': paymentHeader,
+        },
+        body: JSON.stringify(retryBody),
+      });
+    }
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Unknown error', code: 'UNKNOWN' })) as CredentialError;
