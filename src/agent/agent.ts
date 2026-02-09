@@ -437,7 +437,10 @@ export class Agent {
     for (const p of candidates) {
       if (existsSync(p)) { execPath = p; break; }
     }
-    if (!execPath) throw new Error('Chrome not found');
+    if (!execPath) {
+      agentLogger.warn('Chrome not found on system — browser_automation tools will be unavailable');
+      return 0;
+    }
 
     this.chromeProcess = spawn(execPath, [
       '--headless',
