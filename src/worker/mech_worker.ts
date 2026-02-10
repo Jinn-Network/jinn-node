@@ -34,6 +34,11 @@ import {
 } from '../config/index.js';
 import { recordIdleCycle, recordExecutionTime } from './healthcheck.js';
 import { getMechAddressesForStakingContract } from './filters/stakingFilter.js';
+import {
+  getWorkerCredentialInfo,
+  isJobEligibleForWorker,
+  jobRequiresCredentials,
+} from './filters/credentialFilter.js';
 
 export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
 
@@ -46,6 +51,7 @@ type UnclaimedRequest = {
   dependencies?: string[];  // job definition IDs or names that must be delivered first
   ipfsHash?: string;
   delivered?: boolean;
+  enabledTools?: string[];  // MCP tools required by this job (from Ponder)
 };
 
 type JobDefinitionStatus = {
@@ -486,6 +492,7 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       blockTimestamp
       delivered
       dependencies
+      enabledTools
     }
   }
 }`;
@@ -518,7 +525,8 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       ipfsHash: r?.ipfsHash ? String(r.ipfsHash) : undefined,
       blockTimestamp: Number(r.blockTimestamp),
       delivered: Boolean(r?.delivered === true),
-      dependencies: Array.isArray(r?.dependencies) ? r.dependencies.map((dep: any) => String(dep)) : undefined
+      dependencies: Array.isArray(r?.dependencies) ? r.dependencies.map((dep: any) => String(dep)) : undefined,
+      enabledTools: Array.isArray(r?.enabledTools) ? r.enabledTools : undefined
     })) as UnclaimedRequest[];
   } catch (e) {
     workerLogger.warn({ error: e instanceof Error ? e.message : String(e) }, 'Ponder GraphQL not reachable; returning empty set');
@@ -1047,6 +1055,7 @@ async function fetchSpecificRequest(requestId: string): Promise<UnclaimedRequest
       blockTimestamp
       delivered
       dependencies
+      enabledTools
     }
   }
 }`;
@@ -1066,7 +1075,8 @@ async function fetchSpecificRequest(requestId: string): Promise<UnclaimedRequest
       ipfsHash: r?.ipfsHash ? String(r.ipfsHash) : undefined,
       blockTimestamp: Number(r.blockTimestamp),
       delivered: Boolean(r?.delivered === true),
-      dependencies: Array.isArray(r?.dependencies) ? r.dependencies.map((dep: any) => String(dep)) : undefined
+      dependencies: Array.isArray(r?.dependencies) ? r.dependencies.map((dep: any) => String(dep)) : undefined,
+      enabledTools: Array.isArray(r?.enabledTools) ? r.enabledTools : undefined
     };
   } catch (e: any) {
     workerLogger.warn({ error: serializeError(e) }, 'Error fetching specific request');
@@ -1134,6 +1144,26 @@ async function processOnce(): Promise<boolean> {
       lastStuckRequestIds = [];
       workerLogger.info('No requests with met dependencies found');
       return false;
+    }
+
+    // Filter by credential capability (discovered via bridge probe at startup)
+    const credInfo = await getWorkerCredentialInfo();
+    if (credInfo.providers.size > 0) {
+      candidates = candidates.filter(c => isJobEligibleForWorker(c.enabledTools, credInfo.providers));
+      if (candidates.length === 0) {
+        consecutiveStuckCycles = 0;
+        lastStuckRequestIds = [];
+        workerLogger.info('No eligible requests after credential filter');
+        return false;
+      }
+      // Trusted operators: process credential jobs first, leaving non-credential jobs for public pool
+      if (credInfo.isTrusted) {
+        candidates.sort((a, b) => {
+          const aPriority = jobRequiresCredentials(a.enabledTools) ? 0 : 1;
+          const bPriority = jobRequiresCredentials(b.enabledTools) ? 0 : 1;
+          return aPriority - bPriority;
+        });
+      }
     }
   }
 
