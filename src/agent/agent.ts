@@ -34,8 +34,11 @@ export interface GeminiSettings {
   mcpServers?: {
     [serverName: string]: MCPServerConfig;
   };
-  coreTools?: string[];
-  excludeTools?: string[];
+  tools?: {
+    core?: string[];
+    exclude?: string[];
+    [key: string]: unknown;
+  };
 }
 
 interface ToolCall {
@@ -1125,11 +1128,13 @@ export class Agent {
       // templateSettings.excludeTools = toolPolicy.mcpExcludeTools;
 
       // Collect all excluded tools from enabled extensions (e.g., telegram's 'read' tool)
-      // These are added to global excludeTools to prevent prompt injection risks
+      // These are added to global tools.exclude to prevent prompt injection risks
+      // Gemini CLI reads this from settings.tools.exclude (not top-level excludeTools)
+      if (!templateSettings.tools) templateSettings.tools = {};
       const extensionExcludedTools = getExtensionExcludedTools(this.enabledTools);
       if (extensionExcludedTools.length > 0) {
-        templateSettings.excludeTools = [
-          ...(templateSettings.excludeTools || []),
+        templateSettings.tools.exclude = [
+          ...(templateSettings.tools.exclude || []),
           ...extensionExcludedTools
         ];
         agentLogger.debug({ extensionExcludedTools }, 'Added extension excluded tools to settings');
@@ -1138,15 +1143,17 @@ export class Agent {
       // Block browser automation tools when browser_automation meta-tool is not enabled
       // This prevents agents from accidentally using browser tools without explicit permission
       if (!hasBrowserAutomation(this.enabledTools)) {
-        templateSettings.excludeTools = [
-          ...(templateSettings.excludeTools || []),
+        templateSettings.tools.exclude = [
+          ...(templateSettings.tools.exclude || []),
           ...BROWSER_AUTOMATION_TOOLS
         ];
         agentLogger.debug('Blocked browser automation tools (browser_automation not enabled)');
       }
 
       // Whitelist native tools at the CLI level (write_file, replace, etc.)
-      templateSettings.coreTools = toolPolicy.cliAllowedTools;
+      // Gemini CLI reads this from settings.tools.core (not top-level coreTools)
+      if (!templateSettings.tools) templateSettings.tools = {};
+      templateSettings.tools.core = toolPolicy.cliAllowedTools;
 
       // Ensure directory exists
       const settingsDir = dirname(this.settingsPath);

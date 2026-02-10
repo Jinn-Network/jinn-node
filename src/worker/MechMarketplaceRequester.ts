@@ -28,11 +28,14 @@ export interface MarketplaceRequestParams {
   agentEoaPrivateKey: string;
   mechContractAddress: string;
   mechMarketplaceAddress: string;
-  
+
   // Request parameters
   prompt: string;
   requestPriceWei?: string; // Optional, defaults to mech's maxDeliveryRate
-  
+
+  // Optional extra attributes to include in IPFS payload (e.g. workstreamId, jobName)
+  ipfsExtraAttributes?: Record<string, unknown>;
+
   // Network configuration
   rpcUrl: string;
   chainId?: number;
@@ -111,6 +114,7 @@ export async function submitMarketplaceRequest(
     const [digestHex, ipfsHash] = await pushMetadataToIpfs(prompt, 'openai-gpt-4', {
       requestTimestamp: Date.now(),
       mechAddress: mechContractAddress,
+      ...params.ipfsExtraAttributes,
     });
     // digestHex already includes 0x prefix from pushMetadataToIpfs
     const requestData = digestHex;
