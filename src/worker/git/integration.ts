@@ -3,9 +3,11 @@
  *
  * Shared functions for checking child job integration status via git.
  * Used by JobContextProvider (prompt building) and autoDispatch (verification gating).
+ *
+ * SECURITY: All git commands use execFileSync (array form) to prevent shell injection.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { workerLogger } from '../../logging/index.js';
 
 /**
@@ -20,7 +22,7 @@ export function isChildIntegrated(childBranchName: string, parentBranch: string)
 
     try {
         // Check if branch exists on remote
-        const lsRemote = execSync(`git ls-remote --heads origin ${childBranchName}`, {
+        const lsRemote = execFileSync('git', ['ls-remote', '--heads', 'origin', childBranchName], {
             cwd: repoRoot,
             encoding: 'utf-8',
             timeout: 10000,
@@ -32,16 +34,16 @@ export function isChildIntegrated(childBranchName: string, parentBranch: string)
         }
 
         // Get child's HEAD commit
-        const childHead = execSync(`git rev-parse origin/${childBranchName}`, {
+        const childHead = execFileSync('git', ['rev-parse', `origin/${childBranchName}`], {
             cwd: repoRoot,
             encoding: 'utf-8',
             timeout: 10000,
         }).trim();
 
         // Check if child HEAD is ancestor of parent branch
-        execSync(`git merge-base --is-ancestor ${childHead} ${parentBranch}`, {
+        execFileSync('git', ['merge-base', '--is-ancestor', childHead, parentBranch], {
             cwd: repoRoot,
-            stdio: 'ignore',
+            stdio: 'pipe',
             timeout: 10000,
         });
         return true; // Exit 0 = is ancestor = integrated
@@ -59,9 +61,9 @@ export function batchFetchBranches(branchNames: string[], parentBranch: string =
     if (!repoRoot || branchNames.length === 0) return;
 
     try {
-        execSync(`git fetch origin ${parentBranch} ${branchNames.join(' ')} 2>/dev/null || true`, {
+        execFileSync('git', ['fetch', 'origin', parentBranch, ...branchNames], {
             cwd: repoRoot,
-            stdio: 'ignore',
+            stdio: 'pipe',
             timeout: 60000,
         });
     } catch (error) {

@@ -48,6 +48,44 @@ export interface RepoCloneResult {
 }
 
 /**
+ * Validate that a clone URL is safe (GitHub HTTPS or GitHub SSH only).
+ * Rejects file://, ssh://attacker.com, and other arbitrary URL schemes
+ * to prevent SSRF, token leakage, and malicious hook execution.
+ */
+function validateCloneUrl(url: string): void {
+  if (!url || typeof url !== 'string') {
+    throw new Error('Clone URL is required');
+  }
+
+  const trimmed = url.trim();
+
+  // Allow: https://github.com/owner/repo[.git]
+  if (/^https:\/\/github\.com\/[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+(\.git)?\/?$/.test(trimmed)) {
+    return;
+  }
+
+  // Allow: git@github.com:owner/repo[.git]
+  if (/^git@github\.com:[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+(\.git)?$/.test(trimmed)) {
+    return;
+  }
+
+  // Allow: SSH host alias format (e.g., git@ritsukai:owner/repo.git)
+  const sshHostAlias = process.env.SSH_HOST_ALIAS;
+  if (sshHostAlias) {
+    const escapedAlias = sshHostAlias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const aliasRegex = new RegExp(`^git@${escapedAlias}:[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+(\\.git)?$`);
+    if (aliasRegex.test(trimmed)) {
+      return;
+    }
+  }
+
+  throw new Error(
+    `Unsafe clone URL rejected: '${trimmed.slice(0, 100)}'. ` +
+    'Only https://github.com/ and git@github.com: URLs are allowed.'
+  );
+}
+
+/**
  * Ensure repository is cloned to the workspace directory
  * Clones if it doesn't exist, otherwise fetches latest refs
  * @returns Result indicating whether repo was already cloned and if fetch was performed
@@ -55,8 +93,8 @@ export interface RepoCloneResult {
 export async function ensureRepoCloned(remoteUrl: string, targetPath: string): Promise<RepoCloneResult> {
   const { execFileSync } = await import('node:child_process');
 
-  // URL should already be normalized at dispatch time (stored in IPFS metadata)
-  // Clone using the URL as-is from the job metadata
+  // Validate URL before any git operations
+  validateCloneUrl(remoteUrl);
   if (existsSync(targetPath)) {
     workerLogger.info({ targetPath }, 'Repository already cloned');
 

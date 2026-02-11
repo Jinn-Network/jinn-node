@@ -352,17 +352,17 @@ export async function fetchBranchDetails(params: {
   const { headBranch, baseBranch, repoPath } = params;
 
   try {
-    const { execSync } = await import('node:child_process');
+    const { execFileSync } = await import('node:child_process');
 
     // 1. Fetch the latest state of both branches from origin
     try {
-      execSync(`git fetch origin ${headBranch}`, {
+      execFileSync('git', ['fetch', 'origin', headBranch], {
         cwd: repoPath,
-        stdio: 'ignore',
+        stdio: 'pipe',
       });
-      execSync(`git fetch origin ${baseBranch}`, {
+      execFileSync('git', ['fetch', 'origin', baseBranch], {
         cwd: repoPath,
-        stdio: 'ignore',
+        stdio: 'pipe',
       });
     } catch (fetchError) {
       workerLogger.warn(
@@ -377,14 +377,13 @@ export async function fetchBranchDetails(params: {
     const GIT_SHA1_LENGTH = 40;
     let mergeStatus: 'mergeable' | 'conflict' | 'unknown' = 'unknown';
     try {
-      const mergeTreeOutput = execSync(
-        `git merge-tree --write-tree origin/${baseBranch} origin/${headBranch}`,
-        {
-          cwd: repoPath,
-          encoding: 'utf-8',
-          stdio: ['pipe', 'pipe', 'pipe'],
-        }
-      );
+      const mergeTreeOutput = execFileSync('git', [
+        'merge-tree', '--write-tree', `origin/${baseBranch}`, `origin/${headBranch}`
+      ], {
+        cwd: repoPath,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
       // If merge-tree succeeds without conflicts, status is mergeable
       // The output is just a tree hash if there are no conflicts
       const mergeTreeHash = mergeTreeOutput.trim();
@@ -401,14 +400,13 @@ export async function fetchBranchDetails(params: {
     // 3. Generate diff summary
     let diffSummary = '';
     try {
-      const diffText = execSync(
-        `git diff origin/${baseBranch}...origin/${headBranch}`,
-        {
-          cwd: repoPath,
-          encoding: 'utf-8',
-          maxBuffer: 5 * 1024 * 1024, // 5MB max
-        }
-      );
+      const diffText = execFileSync('git', [
+        'diff', `origin/${baseBranch}...origin/${headBranch}`
+      ], {
+        cwd: repoPath,
+        encoding: 'utf-8',
+        maxBuffer: 5 * 1024 * 1024, // 5MB max
+      });
       // Truncate diff if too large (e.g., 2000 chars) to avoid blowing up context
       diffSummary = diffText.length > 2000
         ? diffText.slice(0, 2000) + '\n... (diff truncated)'

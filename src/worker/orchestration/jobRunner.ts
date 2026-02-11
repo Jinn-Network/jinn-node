@@ -13,7 +13,8 @@
  */
 
 import { workerLogger } from '../../logging/index.js';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
+import { assertValidBranchName } from '../../shared/git-validation.js';
 import { WorkerTelemetryService } from '../worker_telemetry.js';
 import { serializeError } from '../logging/errors.js';
 import { snapshotEnvironment, restoreEnvironment } from './env.js';
@@ -113,19 +114,30 @@ export async function processOnce(
       }, 'Processing request');
 
       // Inject environment variables from additionalContext.env
-      // This enables multi-tenant products to pass per-job configuration
+      // Only vars matching JINN_JOB_* prefix are allowed to prevent env injection attacks
+      // (e.g. NODE_OPTIONS, GIT_SSH_COMMAND, HTTP_PROXY could hijack worker behavior)
       if (metadata?.additionalContext?.env) {
-        const protectedVars = ['PATH', 'NODE_ENV', 'HOME', 'USER', 'SHELL'];
+        const ALLOWED_ENV_PREFIX = /^JINN_JOB_[A-Z0-9_]+$/;
+        const filteredEnv: Record<string, string> = {};
+
         for (const [key, value] of Object.entries(metadata.additionalContext.env)) {
-          if (!protectedVars.includes(key)) {
+          if (typeof value !== 'string') {
+            workerLogger.warn({ key, type: typeof value }, 'Skipped non-string environment variable');
+            continue;
+          }
+          if (ALLOWED_ENV_PREFIX.test(key)) {
             process.env[key] = value;
+            filteredEnv[key] = value;
             workerLogger.info({ key }, 'Injected job environment variable from additionalContext.env');
           } else {
-            workerLogger.warn({ key }, 'Skipped protected environment variable');
+            workerLogger.warn({ key }, 'Skipped environment variable: does not match JINN_JOB_* prefix');
           }
         }
-        // Store as JSON for child job inheritance via dispatch_new_job
-        process.env.JINN_INHERITED_ENV = JSON.stringify(metadata.additionalContext.env);
+
+        // Store filtered vars as JSON for child job inheritance via dispatch_new_job
+        if (Object.keys(filteredEnv).length > 0) {
+          process.env.JINN_INHERITED_ENV = JSON.stringify(filteredEnv);
+        }
       }
 
       // Bootstrap workspace from additionalContext.workspaceRepo (root jobs only)
@@ -279,11 +291,9 @@ export async function processOnce(
                 // Commit the conflicted state so we can continue to next dependency
                 // Agent will see conflict markers in committed files and must resolve them
                 try {
-                  execSync('git add .', { cwd: repoRoot, encoding: 'utf8' });
-                  execSync(
-                    `git commit -m "WIP: Merge conflict from ${branchInfo.branchName} - agent must resolve"`,
-                    { cwd: repoRoot, encoding: 'utf8' }
-                  );
+                  assertValidBranchName(branchInfo.branchName);
+                  execFileSync('git', ['add', '.'], { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' });
+                  execFileSync('git', ['commit', '-m', `WIP: Merge conflict from ${branchInfo.branchName} - agent must resolve`], { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' });
                   workerLogger.info({
                     requestId: target.id,
                     dependency: branchInfo.branchName

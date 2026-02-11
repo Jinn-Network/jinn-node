@@ -12,7 +12,6 @@
  */
 
 import { readFileSync, readdirSync, existsSync, statSync } from 'fs';
-import { execSync } from 'child_process';
 import { join, dirname, parse, resolve, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
@@ -608,18 +607,11 @@ export function getMasterPrivateKey(): string | null {
   }
 
   try {
-    const result = execSync(
-      `python3 -c "
-import json
-from eth_account import Account
-ks = json.loads(open('${keystorePath}').read())
-print('0x' + Account.decrypt(ks, '${password.replace(/'/g, "\\'")}').hex())
-"`,
-      { encoding: 'utf-8', timeout: 30000 },
-    ).trim();
+    const keystoreJson = readFileSync(keystorePath, 'utf-8');
+    const result = decryptKeystoreV3(keystoreJson, password);
 
     if (/^0x[a-fA-F0-9]{64}$/.test(result)) {
-      configLogger.info(' Decrypted master EOA private key');
+      configLogger.info('Decrypted master EOA private key');
       return result;
     }
 

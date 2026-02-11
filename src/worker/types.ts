@@ -171,7 +171,7 @@ export interface AdditionalContext {
 
   /**
    * Public environment variables to inject into the worker/agent process.
-   * These are set before the agent spawns and available via process.env.
+   * Only keys matching /^JINN_JOB_[A-Z0-9_]+$/ are injected; all others are dropped.
    * NOTE: Do NOT put secrets here (passwords, API keys) as this is stored on IPFS.
    */
   env?: Record<string, string>;
