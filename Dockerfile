@@ -1,30 +1,83 @@
-# Build context should be the monorepo root:
-# docker build -f jinn-node/Dockerfile -t jinn-node .
+# Build context: standalone repo root
+# docker build -t jinn-node .
+#
+# From monorepo: docker build -f jinn-node/Dockerfile jinn-node/
 
-FROM node:22-alpine
+# =============================================================================
+# Stage 1: Build
+# =============================================================================
+FROM node:22-slim AS builder
 
 WORKDIR /app
 
-# Install dependencies for native modules
-RUN apk add --no-cache python3 make g++ git
+# Build tools for native modules
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ git \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy root package files for workspace resolution
+# Copy manifests and install dependencies
 COPY package.json yarn.lock ./
-COPY jinn-node/package.json ./jinn-node/
-
-# Install dependencies
 RUN yarn install --frozen-lockfile --production=false
 
-# Copy jinn-node source and assets
-COPY jinn-node/src/ ./jinn-node/src/
-COPY jinn-node/tsconfig.json jinn-node/tsconfig.build.json ./jinn-node/
+# Copy source and build config
+COPY src/ ./src/
+COPY tsconfig.json tsconfig.build.json ./
 
-# Build TypeScript
-WORKDIR /app/jinn-node
+# Compile TypeScript + copy JSON assets to dist/
 RUN yarn build
 
-# Set environment
-ENV NODE_ENV=production
+# Prune devDependencies so only production deps are copied to runtime
+RUN rm -rf node_modules && yarn install --frozen-lockfile --production
 
-# Set entrypoint
-ENTRYPOINT ["node", "dist/worker/mech_worker.js"]
+# =============================================================================
+# Stage 2: Runtime
+# =============================================================================
+FROM node:22-slim
+
+# Install runtime system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    fonts-liberation \
+    git \
+    dumb-init \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/chromium /usr/bin/chromium-browser
+
+# Pre-install Gemini CLI globally (avoids ~30s npx download per job)
+ARG GEMINI_CLI_VERSION=0.25.0
+RUN npm install -g @google/gemini-cli@${GEMINI_CLI_VERSION}
+
+# Create non-root user
+RUN groupadd -r jinn && useradd -r -g jinn -m -d /home/jinn -s /bin/bash jinn
+
+WORKDIR /app
+
+# Copy built artifacts and dependencies from builder
+COPY --from=builder /app/node_modules/ ./node_modules/
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/dist/ ./dist/
+
+# Create directories the worker writes to at runtime
+RUN mkdir -p /home/jinn/.operate /home/jinn/.gemini /app/jinn-repos /tmp/.gemini-worker \
+    && chown -R jinn:jinn /app /tmp/.gemini-worker /home/jinn
+
+# Persistent volume: home dir contains .operate/ (keystore) and .gemini/ (auth + extensions)
+VOLUME ["/home/jinn"]
+
+# Environment defaults for containerized operation
+ENV NODE_ENV=production \
+    GEMINI_SANDBOX=false \
+    OPERATE_PROFILE_DIR=/home/jinn/.operate \
+    JINN_WORKSPACE_DIR=/app/jinn-repos
+
+# Healthcheck endpoint (healthcheck defined in docker-compose.yml)
+EXPOSE 8080
+
+# Run as non-root
+USER jinn
+
+# dumb-init as PID 1 for proper signal forwarding
+# worker_launcher.js handles SIGTERM/SIGINT propagation to child processes
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "dist/worker/worker_launcher.js"]

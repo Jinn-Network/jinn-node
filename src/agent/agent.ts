@@ -1,5 +1,5 @@
 import { spawn, execSync } from 'child_process';
-import { writeFileSync, readFileSync, unlinkSync, mkdirSync, existsSync, statSync, symlinkSync } from 'fs';
+import { writeFileSync, readFileSync, unlinkSync, mkdirSync, existsSync, statSync, symlinkSync, lstatSync } from 'fs';
 import { join, dirname, resolve, isAbsolute, delimiter } from 'path';
 import { tmpdir, homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -276,22 +276,45 @@ export class Agent {
       const extensionsDir = join(this.geminiHome, 'extensions');
       mkdirSync(extensionsDir, { recursive: true });
 
-// Handle local extensions (symlink instead of install)
-      // Note: CLI always looks in ~/.gemini/extensions/ for skills, ignoring GEMINI_HOME
+// Handle local extensions — install directly to GEMINI_HOME (always writable)
+      // Avoids ~/.gemini/ conflicts when host directory is mounted in Docker
       if (extensionUrl.startsWith('local:')) {
         const localDir = extensionUrl.replace('local:', '');
         const sourcePath = resolve(this.agentRoot, '..', localDir);
-        // Install to ~/.gemini/extensions/ where CLI actually discovers extensions
-        const defaultGeminiHome = join(homedir(), '.gemini');
-        const targetPath = join(defaultGeminiHome, 'extensions', extensionName);
 
         if (!existsSync(sourcePath)) {
           throw new Error(`Local extension not found: ${sourcePath}`);
         }
 
+        const targetPath = join(this.geminiHome, 'extensions', extensionName);
+
+        // Check if already correctly installed (including stale symlinks)
+        try {
+          const stats = lstatSync(targetPath);
+          if (stats.isSymbolicLink() && existsSync(targetPath)) {
+            agentLogger.debug({ extensionName }, 'Local extension already installed in GEMINI_HOME');
+            return;
+          }
+          // Stale or broken — remove
+          unlinkSync(targetPath);
+        } catch (e: any) {
+          if (e.code !== 'ENOENT') throw e;
+        }
+
         mkdirSync(dirname(targetPath), { recursive: true });
         symlinkSync(sourcePath, targetPath);
-        agentLogger.info({ sourcePath, targetPath, extensionName }, `Linked local extension ${extensionName}`);
+        agentLogger.info({ sourcePath, targetPath, extensionName }, `Linked local extension ${extensionName} to GEMINI_HOME`);
+
+        // Clean up any broken symlink in ~/.gemini/extensions/ (best effort)
+        try {
+          const legacyPath = join(homedir(), '.gemini', 'extensions', extensionName);
+          const legacyStats = lstatSync(legacyPath);
+          if (legacyStats.isSymbolicLink() && !existsSync(legacyPath)) {
+            unlinkSync(legacyPath);
+            agentLogger.debug({ legacyPath }, 'Cleaned up broken legacy extension symlink');
+          }
+        } catch { }
+
         return;
       }
 
@@ -445,15 +468,21 @@ export class Agent {
       return 0;
     }
 
-    this.chromeProcess = spawn(execPath, [
+    const chromeArgs = [
       '--headless',
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-background-networking',
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${userDataDir}`,
-      'about:blank'
-    ], { stdio: 'pipe' });
+    ];
+    // In containers (GEMINI_SANDBOX=false), Chrome needs --no-sandbox
+    if (process.env.GEMINI_SANDBOX === 'false') {
+      chromeArgs.push('--no-sandbox');
+    }
+    chromeArgs.push('about:blank');
+
+    this.chromeProcess = spawn(execPath, chromeArgs, { stdio: 'pipe' });
 
     // Wait for Chrome to be ready (DevTools listening message on stderr)
     await new Promise<void>((resolve, reject) => {
