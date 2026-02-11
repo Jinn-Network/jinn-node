@@ -3,17 +3,13 @@
  *
  * Called by the venture watcher when a schedule entry is due.
  * Loads the template from Supabase, merges input, builds the IPFS payload,
- * and posts to the marketplace.
+ * and posts to the marketplace via the shared dispatch core.
  */
 
 import { randomUUID } from 'node:crypto';
 import { workerLogger } from '../../logging/index.js';
 import { getTemplate } from '../../scripts/templates/crud.js';
-import { buildIpfsPayload } from '../../agent/shared/ipfs-payload-builder.js';
-import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
-import { getMechAddress, getServicePrivateKey, getMechChainConfig } from '../../env/operate-profile.js';
-import { getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
-import { ensureUniversalTools } from '../../agent/toolPolicy.js';
+import { dispatchToMarketplace } from '../../agent/shared/dispatch-core.js';
 import { extractToolPolicyFromBlueprint } from '../../shared/template-tools.js';
 import type { Venture } from '../../data/ventures.js';
 import type { ScheduleEntry } from '../../data/types/scheduleEntry.js';
@@ -73,8 +69,13 @@ export async function dispatchFromTemplate(
     ? `${venture.name} — ${entry.label}`
     : `${venture.name} — ${template.name}`;
 
-  // 8. Build IPFS payload
-  const { ipfsJsonContents } = await buildIpfsPayload({
+  workerLogger.info(
+    { ventureId: venture.id, templateId: template.id, jobName, jobDefinitionId },
+    'Venture dispatch: posting to marketplace'
+  );
+
+  // 8. Dispatch via shared core with payload transform for venture context
+  const result = await dispatchToMarketplace({
     blueprint: blueprintStr,
     jobName,
     jobDefinitionId,
@@ -86,57 +87,29 @@ export async function dispatchFromTemplate(
     additionalContextOverrides: {
       env: mergedInput.env || undefined,
     },
+    transformPayload: (payload) => {
+      // Inject ventureContext into additionalContext
+      if (payload.additionalContext) {
+        payload.additionalContext.ventureContext = ventureContext;
+      } else {
+        payload.additionalContext = { ventureContext };
+      }
+
+      // Include outputSpec from template if available
+      if (template.output_spec && typeof template.output_spec === 'object') {
+        payload.outputSpec = template.output_spec;
+      }
+
+      return payload;
+    },
   });
 
-  // Inject ventureContext into additionalContext
-  if (ipfsJsonContents[0].additionalContext) {
-    ipfsJsonContents[0].additionalContext.ventureContext = ventureContext;
-  } else {
-    ipfsJsonContents[0].additionalContext = { ventureContext };
-  }
-
-  // Include outputSpec from template if available
-  if (template.output_spec && typeof template.output_spec === 'object') {
-    ipfsJsonContents[0].outputSpec = template.output_spec;
-  }
-
-  // 9. Post to marketplace
-  const mechAddress = getMechAddress();
-  const privateKey = getServicePrivateKey();
-  const chainConfig = getMechChainConfig();
-  const rpcHttpUrl = getRequiredRpcUrl();
-
-  if (!mechAddress || !privateKey) {
-    throw new Error('Missing mech credentials for venture dispatch');
-  }
-
   workerLogger.info(
-    { ventureId: venture.id, templateId: template.id, jobName, jobDefinitionId },
-    'Venture dispatch: posting to marketplace'
-  );
-
-  const result = await (marketplaceInteract as any)({
-    prompts: [blueprintStr],
-    priorityMech: mechAddress,
-    tools: enabledTools,
-    ipfsJsonContents,
-    chainConfig,
-    keyConfig: { source: 'value', value: privateKey },
-    postOnly: true,
-    responseTimeout: 300,
-    rpcHttpUrl,
-  });
-
-  const requestIds = Array.isArray(result?.requestIds)
-    ? result.requestIds.map((id: any) => String(id))
-    : [];
-
-  workerLogger.info(
-    { ventureId: venture.id, templateId: template.id, requestIds },
+    { ventureId: venture.id, templateId: template.id, requestIds: result.requestIds },
     'Venture dispatch: marketplace request posted'
   );
 
-  return { requestIds };
+  return { requestIds: result.requestIds };
 }
 
 /**

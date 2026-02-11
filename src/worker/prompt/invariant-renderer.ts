@@ -42,7 +42,7 @@ const LAYER_CONFIG: Record<SemanticLayer, LayerConfig> = {
     includeAssessment: true,
   },
   mission: {
-    prefixes: ['JOB', 'GOAL', 'OUT', 'STRAT'],
+    prefixes: ['JOB', 'GOAL', 'OUT', 'STRAT', 'ORCH', 'DAO'],
     header: 'MISSION: Your Goals',
     description: 'What you must achieve or delegate:',
     includeAssessment: true,
@@ -274,6 +274,8 @@ function getPrefixHeader(prefix: string): string {
     TOOL: 'Tooling',
     CYCLE: 'Cycle',
     OUT: 'Output',
+    ORCH: 'Orchestration',
+    DAO: 'DAO Goals',
   };
 
   return headers[prefix] || prefix;
@@ -366,8 +368,9 @@ export function renderInvariantsByLayer(
     const rendered = layers[layer]
       .map((inv) => {
         if (layer === 'mission') {
+          // Directive-based rendering: concise status (IN BOUNDS/VIOLATED/UNMEASURED)
           const measurement = measurementMap.get(inv.id);
-          return renderInvariantWithMeasurement(inv, measurement);
+          return renderInvariantAsDirective(inv, measurement);
         }
         return renderInvariantForLayer(inv, config.includeAssessment);
       })
@@ -417,7 +420,72 @@ export const TypeRenderers = {
 };
 
 // =============================================================================
-// Measurement-Aware Rendering
+// Directive-Based Rendering
+// =============================================================================
+
+/**
+ * Render a single invariant as a concise directive with status.
+ *
+ * Output format:
+ * ```
+ * GOAL-001
+ * content_quality must be at least 70
+ * Status: IN BOUNDS (82, measured 6h ago)
+ * ```
+ *
+ * When violated:
+ * ```
+ * GOAL-002
+ * weekly_posts must be at least 1
+ * Status: VIOLATED (0, measured 2d ago)
+ * ```
+ *
+ * When unmeasured:
+ * ```
+ * GOAL-003
+ * SEO coverage must be satisfied
+ * Status: UNMEASURED
+ * ```
+ */
+export function renderInvariantAsDirective(
+  inv: Invariant,
+  measurement?: MeasurementInfo
+): string {
+  const lines: string[] = [];
+
+  // Line 1: ID
+  lines.push(inv.id);
+
+  // Line 2: Constraint statement
+  lines.push(renderConstraintStatement(inv));
+
+  // Line 3: Status
+  if (measurement) {
+    const statusLabel = measurement.passed ? 'IN BOUNDS' : 'VIOLATED';
+    const valueStr = renderMeasurementValue(inv, measurement);
+    const ageStr = measurement.age ? `, measured ${measurement.age}` : '';
+    lines.push(`Status: ${statusLabel} (${valueStr}${ageStr})`);
+  } else {
+    lines.push('Status: UNMEASURED');
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Render measurement value for directive status line
+ */
+function renderMeasurementValue(inv: Invariant, m: MeasurementInfo): string {
+  switch (inv.type) {
+    case 'BOOLEAN':
+      return m.passed ? 'PASSED' : 'FAILED';
+    default:
+      return typeof m.value === 'number' ? String(m.value) : '?';
+  }
+}
+
+// =============================================================================
+// Measurement-Aware Rendering (legacy, used by non-layer renders)
 // =============================================================================
 
 /**

@@ -1,11 +1,9 @@
 import { z } from 'zod';
 import { graphQLRequest } from '../../../http/client.js';
 import { randomUUID } from 'node:crypto';
-import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
 import { getCurrentJobContext } from './shared/context.js';
-import { getMechAddress, getMechChainConfig, getServicePrivateKey } from '../../../env/operate-profile.js';
 import { getPonderGraphqlUrl } from './shared/env.js';
-import { buildIpfsPayload } from '../../shared/ipfs-payload-builder.js';
+import { dispatchToMarketplace } from '../../shared/dispatch-core.js';
 import { validateInvariantsStrict } from '../../../worker/prompt/invariant-validator.js';
 import { buildAnnotatedTools, normalizeToolArray, extractModelPolicyFromBlueprint } from '../../../shared/template-tools.js';
 import { blueprintStructureSchema } from '../../shared/blueprint-schema.js';
@@ -541,15 +539,15 @@ export async function dispatchNewJob(args: unknown) {
       }
     }
 
-    // Build IPFS payload using shared helper
+    // Build IPFS payload + post to marketplace via shared dispatch core
     // Note: Agents cannot set cyclic or additionalContextOverrides
-    let ipfsJsonContents: any[];
     try {
       const toolPolicy = availableTools && availableTools.length > 0
         ? { requiredTools, availableTools }
         : (requiredTools.length > 0 ? { requiredTools, availableTools: requiredTools } : null);
       const tools = toolPolicy ? buildAnnotatedTools(toolPolicy) : undefined;
-      const payloadResult = await buildIpfsPayload({
+
+      const dispatchResult = await dispatchToMarketplace({
         blueprint: finalBlueprint,
         jobName,
         jobDefinitionId,
@@ -561,58 +559,17 @@ export async function dispatchNewJob(args: unknown) {
         message,
         inputSchema,
         allowedModels: parentAllowedModels || (modelPolicy.allowedModels.length > 0 ? modelPolicy.allowedModels : undefined),
+        responseTimeout,
         // cyclic and additionalContextOverrides intentionally NOT passed
         // These are only available to human-initiated dispatches
       });
-      ipfsJsonContents = payloadResult.ipfsJsonContents;
-    } catch (payloadError: any) {
-      return {
-        content: [{
-          type: 'text' as const,
-          text: JSON.stringify({
-            data: null,
-            meta: {
-              ok: false,
-              code: 'PAYLOAD_BUILD_ERROR',
-              message: payloadError.message || String(payloadError),
-            },
-          }),
-        }],
-      };
-    }
 
-    try {
-      const mechAddress = getMechAddress();
-      const chainConfig = getMechChainConfig();
-      const privateKey = getServicePrivateKey();
-
-      if (!mechAddress) {
-        throw new Error('Service target mech address not configured. Check .operate service config (MECH_TO_CONFIG).');
-      }
-
-      if (!privateKey) {
-        throw new Error('Service agent private key not found. Check .operate/keys directory.');
-      }
-
-      // Note: marketplaceInteract still expects 'prompts' parameter for on-chain data field
-      // But the actual job specification comes from blueprint in IPFS metadata
-      const result = await marketplaceInteract({
-        prompts: [finalBlueprint],
-        priorityMech: mechAddress,
-        tools: mergedRequestedTools,
-        ipfsJsonContents,
-        chainConfig,
-        keyConfig: { source: 'value', value: privateKey },
-        postOnly: true,
-        responseTimeout,
-      });
-
-      if (!result || !Array.isArray(result.request_ids) || result.request_ids.length === 0) {
+      if (dispatchResult.requestIds.length === 0) {
         return {
           content: [{
             type: 'text' as const,
             text: JSON.stringify({
-              data: result ?? null,
+              data: dispatchResult.rawResult ?? null,
               meta: {
                 ok: false,
                 code: 'DISPATCH_FAILED',
@@ -623,9 +580,10 @@ export async function dispatchNewJob(args: unknown) {
         };
       }
 
+      // Best-effort IPFS gateway URL enrichment
       let ipfsGatewayUrl: string | null = null;
       try {
-        const firstRequestId = Array.isArray(result?.request_ids) ? result.request_ids[0] : undefined;
+        const firstRequestId = dispatchResult.requestIds[0];
         if (firstRequestId && gqlUrl) {
           const query = `query ($id: String!) { request(id: $id) { ipfsHash } }`;
           for (let attempt = 0; attempt < 5; attempt++) {
@@ -657,7 +615,7 @@ export async function dispatchNewJob(args: unknown) {
       }
 
       const enriched = {
-        ...result,
+        ...dispatchResult.rawResult,
         jobDefinitionId,
         ipfs_gateway_url: ipfsGatewayUrl,
       };

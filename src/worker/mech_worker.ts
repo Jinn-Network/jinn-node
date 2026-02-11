@@ -130,6 +130,29 @@ const WORKSTREAM_FILTERS: string[] = (() => {
   return raw.split(',').map(s => s.trim()).filter(Boolean);
 })();
 
+// Venture filtering: parse --venture=<id> flag or VENTURE_FILTER env var
+// Same parsing conventions as WORKSTREAM_FILTERS
+const VENTURE_FILTERS: string[] = (() => {
+  const arg = process.argv.find(arg => arg.startsWith('--venture='));
+  const raw = arg ? arg.split('=')[1] : process.env.VENTURE_FILTER;
+  if (!raw) return [];
+
+  // Try parsing as JSON array first
+  if (raw.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed.map(s => String(s).trim()).filter(Boolean);
+      }
+    } catch {
+      // Not valid JSON, fall through to comma-separated parsing
+    }
+  }
+
+  // Parse as comma-separated or single value
+  return raw.split(',').map(s => s.trim()).filter(Boolean);
+})();
+
 // Legacy single-value alias for backward compatibility in logging
 const WORKSTREAM_FILTER = WORKSTREAM_FILTERS.length === 1 ? WORKSTREAM_FILTERS[0] : undefined;
 
@@ -435,7 +458,8 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       mechFilterMode: mechFilter.mode,
       mechFilterAddresses: mechFilter.mode === 'any' ? 'any' : mechFilter.addresses,
       stakingContract: mechFilter.stakingContract,
-      workstreamFilter: WORKSTREAM_FILTERS.length > 0 ? WORKSTREAM_FILTERS : 'none'
+      workstreamFilter: WORKSTREAM_FILTERS.length > 0 ? WORKSTREAM_FILTERS : 'none',
+      ventureFilter: VENTURE_FILTERS.length > 0 ? VENTURE_FILTERS : 'none'
     }, 'Fetching requests from Ponder');
 
     // Build where conditions based on filter mode
@@ -454,6 +478,13 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
     } else if (WORKSTREAM_FILTERS.length > 1) {
       whereConditions.push('workstreamId_in: $workstreamIds');
     }
+
+    // Venture filtering: single vs multiple
+    if (VENTURE_FILTERS.length === 1) {
+      whereConditions.push('ventureId: $ventureId');
+    } else if (VENTURE_FILTERS.length > 1) {
+      whereConditions.push('ventureId_in: $ventureIds');
+    }
     const whereClause = `{ ${whereConditions.join(', ')} }`;
 
     // Build query variables definition
@@ -467,6 +498,11 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       varDefs.push('$workstreamId: String!');
     } else if (WORKSTREAM_FILTERS.length > 1) {
       varDefs.push('$workstreamIds: [String!]!');
+    }
+    if (VENTURE_FILTERS.length === 1) {
+      varDefs.push('$ventureId: String!');
+    } else if (VENTURE_FILTERS.length > 1) {
+      varDefs.push('$ventureIds: [String!]!');
     }
 
     // Query our local Ponder GraphQL (custom schema) - FILTER BY MECH AND UNDELIVERED (and optionally WORKSTREAM)
@@ -482,6 +518,7 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       mech
       sender
       workstreamId
+      ventureId
       ipfsHash
       blockTimestamp
       delivered
@@ -500,6 +537,11 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       variables.workstreamId = WORKSTREAM_FILTERS[0];
     } else if (WORKSTREAM_FILTERS.length > 1) {
       variables.workstreamIds = WORKSTREAM_FILTERS;
+    }
+    if (VENTURE_FILTERS.length === 1) {
+      variables.ventureId = VENTURE_FILTERS[0];
+    } else if (VENTURE_FILTERS.length > 1) {
+      variables.ventureIds = VENTURE_FILTERS;
     }
 
     const data = await graphQLRequest<{ requests: { items: any[] } }>({

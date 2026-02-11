@@ -39,6 +39,7 @@ export {
   renderInvariantsByLayer,
   renderInvariant,
   renderInvariantCompact,
+  renderInvariantAsDirective,
 } from './invariant-renderer.js';
 
 // Context providers
