@@ -19,7 +19,7 @@ Before collecting any credentials or running setup, inform the human:
 > - Major LLM providers (Google, Anthropic, OpenAI) **do not train on API inputs**. Your data is processed for the session and not retained for model training.
 > - The agent needs your password to write it to `.env` — there is no way around this. And the seed phrase is printed to the terminal by the setup script, which the agent captures.
 > - This wallet is purpose-built for node operations (gas fees + staking). **Do not use it as a personal wallet or store significant funds in it.** Keep only the operational amounts needed.
-> - You can export your private key at any time and import it into a self-custody wallet (MetaMask, hardware wallet) for direct control. See [Wallet Recovery](#wallet-recovery).
+> - You can export your keys at any time using `yarn wallet:export-keys`. See [Wallet Management](#wallet-management).
 >
 > **If you're not comfortable with this**, you can run `yarn setup` manually without a coding agent — the setup script works standalone. You'll need to fill in `.env` yourself (see the `.env.example` template) and watch the terminal output for your seed phrase when it appears.
 
@@ -197,7 +197,7 @@ Please save the mnemonic phrase for the Master EOA: word1 word2 word3 word4 word
 
 5. Wait for the human to confirm before proceeding.
 
-**On subsequent runs**, the wallet already exists and the mnemonic is NOT printed. If the human missed it and needs their keys, see [Wallet Recovery](#wallet-recovery) below.
+**On subsequent runs**, the wallet already exists and the mnemonic is NOT printed. If the human missed it and needs their keys, use `yarn wallet:export-keys` (see [Wallet Management](#wallet-management)).
 
 ### Running Setup
 
@@ -261,61 +261,27 @@ The worker will:
 
 ---
 
-## Wallet Recovery
+## Wallet Management
 
-If the human missed their mnemonic or needs their private key later, the wallet keystore is at:
+All wallet commands require `OPERATE_PASSWORD` and `RPC_URL` in `.env` (unless noted).
 
-```
-jinn-node/.operate/wallets/ethereum.txt
-```
+| Command | Purpose |
+|---------|---------|
+| `yarn wallet:info` | Show addresses, ETH/OLAS balances, staking status |
+| `yarn wallet:backup` | Timestamped `.tar.gz` of `.operate` directory (no password needed) |
+| `yarn wallet:export-keys` | Display BIP-39 mnemonic — **confirm with human first** |
+| `yarn wallet:withdraw --to <addr>` | Transfer funds from Safe to external address |
+| `yarn wallet:unstake` | Unstake service (72-hour cooldown applies) |
+| `yarn wallet:recover --to <addr>` | Terminate service + withdraw all — **confirm with human first** |
 
-This is a standard V3 JSON keystore encrypted with `OPERATE_PASSWORD`. To extract the private key:
+**Destructive operations** (`recover`, `export-keys`): Always pause and get human confirmation before executing. Use `--dry-run` where available to preview first.
 
-```python
-# Run with: poetry run python
-from eth_account import Account
-import json
+**Key flags:**
+- `withdraw`: `--to <addr>` (required), `--asset ETH|OLAS|all` (default: all), `--dry-run`
+- `recover`: `--to <addr>` (required), `--dry-run`, `--skip-terminate` (if already unstaked)
+- `unstake`: `--service-id <id>` (optional, reads from config), `--dry-run`
 
-with open('.operate/wallets/ethereum.txt') as f:
-    keystore = json.load(f)
-
-password = "the_operate_password"  # Ask the human
-private_key = Account.decrypt(keystore, password)
-print(f"Private key: 0x{private_key.hex()}")
-print(f"Address: {Account.from_key(private_key).address}")
-```
-
-**Important:** The JavaScript `web3-eth-accounts` library has scrypt compatibility issues with these keystores. Use the Python `eth_account` library instead.
-
-The human can import this private key into MetaMask or any other wallet to manage the node's funds directly.
-
----
-
-## CLI Options
-
-```
---chain=NETWORK     base, gnosis, mode, optimism (default: base)
---no-mech           Disable mech deployment
---no-staking        Disable staking
---unattended        Non-interactive mode (default)
-```
-
----
-
-## Mech Filtering (Multi-Operator)
-
-By default the worker uses **single mech mode** — it reads `JINN_SERVICE_MECH_ADDRESS` (or falls back to the operate profile) and only processes requests for that one mech.
-
-For multi-operator deployments where multiple services are staked in the same staking contract, use **staking-based filtering**:
-
-```
-WORKER_MECH_FILTER_MODE=staking
-WORKER_STAKING_CONTRACT=0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139
-```
-
-This queries Ponder for all mechs whose services are staked in the given contract and filters requests accordingly.
-
-**Gotcha:** Setting `JINN_SERVICE_MECH_ADDRESS` alone does NOT enable staking-based filtering. Without `WORKER_MECH_FILTER_MODE=staking` and `WORKER_STAKING_CONTRACT`, the worker falls back to single mech mode using `JINN_SERVICE_MECH_ADDRESS` directly.
+**72-hour staking cooldown**: OLAS requires minimum 72 hours staked before unstake. Recovery will fail if cooldown has not elapsed.
 
 ---
 

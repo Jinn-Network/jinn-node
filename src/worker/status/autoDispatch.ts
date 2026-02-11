@@ -377,7 +377,9 @@ async function dispatchForVerification(
           }),
           workstreamId,
           additionalContext: verificationContext,
-          enabledTools: ['browser_automation']  // Enable browser automation for visual verification
+          // Use the job's own tools — don't override with browser_automation
+          // (the chrome-devtools-mcp extension repo was deleted; verification
+          //  should use the same toolset as the original job execution)
         })
     );
 

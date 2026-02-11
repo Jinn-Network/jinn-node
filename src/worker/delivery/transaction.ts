@@ -78,10 +78,15 @@ export async function isUndeliveredOnChain(params: {
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
       const agentMechArtifact = await import('@jinn-network/mech-client-ts/dist/abis/AgentMech.json', { with: { type: 'json' } });
-      const abi: any = (agentMechArtifact as any)?.abi || (agentMechArtifact as any);
+      const raw = (agentMechArtifact as any)?.default || agentMechArtifact;
+      const abi: any = raw?.abi || (Array.isArray(raw) ? raw : null);
+      if (!abi) {
+        workerLogger.warn({ keys: Object.keys(raw || {}) }, 'Could not extract ABI from AgentMech artifact');
+        return false;
+      }
       const web3 = new Web3(rpcHttpUrl);
       const contract = new (web3 as any).eth.Contract(abi, mechAddress);
-      
+
       const BATCH_SIZE = 100;
       let offset = 0;
       let isUndelivered = false;
@@ -162,9 +167,14 @@ export async function wasRequestRevoked(params: {
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
     const agentMechArtifact = await import('@jinn-network/mech-client-ts/dist/abis/AgentMech.json', { with: { type: 'json' } });
-    const abi: any = (agentMechArtifact as any)?.abi || (agentMechArtifact as any);
+    const raw = (agentMechArtifact as any)?.default || agentMechArtifact;
+    const abi: any = raw?.abi || (Array.isArray(raw) ? raw : null);
+    if (!abi) {
+      workerLogger.warn({ keys: Object.keys(raw || {}) }, 'Could not extract ABI from AgentMech artifact');
+      return false;
+    }
     const web3 = new Web3(rpcHttpUrl);
-    
+
     // Get transaction receipt
     const receipt = await web3.eth.getTransactionReceipt(txHash);
     if (!receipt || !receipt.logs) {
