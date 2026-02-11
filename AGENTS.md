@@ -261,6 +261,64 @@ The worker will:
 
 ---
 
+## Phase 5: Deploy to Railway (Optional)
+
+If the operator wants to run their worker 24/7 without keeping a local machine on, [Railway](https://railway.com?referralCode=vEDcil) is the easiest cloud option. New accounts get **$5 free credit**, and using [this link](https://railway.com?referralCode=vEDcil) gives an **additional $5 credit**.
+
+### Prerequisites
+
+- Phases 1-3 completed locally (`.operate/` directory exists with encrypted keystore)
+- A GitHub account with a fork of [jinn-node](https://github.com/Jinn-Network/jinn-node)
+
+### Steps
+
+1. **Create a Railway account** at [railway.com](https://railway.com?referralCode=vEDcil)
+2. **Create a new project** → "Deploy from GitHub Repo" → select the jinn-node fork
+3. Railway auto-detects `railway.toml` and the Dockerfile — no build config needed
+4. **Add a persistent volume** in the service settings:
+   - Mount path: `/home/jinn`
+   - This stores the encrypted keystore (`.operate/`) and Gemini credentials (`.gemini/`)
+   - **Loss of this volume means loss of signing keys** — enable Railway backups
+5. **Set environment variables** in the Railway dashboard (Variables tab):
+
+   Copy the values from your local `.env` file. The required variables are:
+
+   | Variable | Description |
+   |----------|-------------|
+   | `RPC_URL` | Base chain RPC endpoint |
+   | `CHAIN_ID` | `8453` |
+   | `OPERATE_PASSWORD` | Decrypts `.operate/` keystore |
+   | `GEMINI_API_KEY` | Gemini API key |
+   | `GITHUB_TOKEN` | For code task repo cloning |
+   | `GIT_AUTHOR_NAME` | Git commit identity |
+   | `GIT_AUTHOR_EMAIL` | Git commit identity |
+
+   Service endpoints (`PONDER_GRAPHQL_URL`, `CONTROL_API_URL`, `X402_GATEWAY_URL`) are pre-filled in `.env.example` and can be copied as-is.
+
+6. **Import `.operate/` into the volume.** Use `railway shell` to access the running container, then copy your local `.operate/` directory contents into `/home/jinn/.operate/`. Alternatively, use `railway volume` commands or the Railway CLI.
+
+7. **Deploy.** Railway builds and deploys automatically on push. The healthcheck at `/health` confirms the worker is running.
+
+### CLI Deploy (Alternative)
+
+If the operator prefers the Railway CLI over the dashboard:
+
+```bash
+cd jinn-node
+railway login
+railway link    # Link to your Railway project
+railway up      # Deploy
+railway logs -f # Watch logs
+```
+
+### Monitoring
+
+- **Logs**: Railway dashboard → Deployments → Logs, or `railway logs -f`
+- **Health**: The worker exposes `GET /health` — Railway monitors this automatically
+- **Restarts**: `railway.toml` configures automatic restart on failure (up to 10 retries)
+
+---
+
 ## Wallet Management
 
 All wallet commands require `OPERATE_PASSWORD` and `RPC_URL` in `.env` (unless noted).

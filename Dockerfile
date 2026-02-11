@@ -39,6 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
     fonts-liberation \
     git \
+    openssh-client \
     dumb-init \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
@@ -57,6 +58,9 @@ WORKDIR /app
 COPY --from=builder /app/node_modules/ ./node_modules/
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/dist/ ./dist/
+
+# Copy init script (used by Railway startCommand and standalone docker run)
+COPY scripts/init.sh ./scripts/
 
 # Create directories the worker writes to at runtime
 RUN mkdir -p /home/jinn/.operate /home/jinn/.gemini /app/jinn-repos /tmp/.gemini-worker \
