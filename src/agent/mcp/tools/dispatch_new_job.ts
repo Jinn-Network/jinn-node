@@ -560,6 +560,8 @@ export async function dispatchNewJob(args: unknown) {
         inputSchema,
         allowedModels: parentAllowedModels || (modelPolicy.allowedModels.length > 0 ? modelPolicy.allowedModels : undefined),
         responseTimeout,
+        // Propagate venture lineage from parent context
+        ventureId: context.ventureId || undefined,
         // cyclic and additionalContextOverrides intentionally NOT passed
         // These are only available to human-initiated dispatches
       });

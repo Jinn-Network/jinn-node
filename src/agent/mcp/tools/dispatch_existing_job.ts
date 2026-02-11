@@ -240,6 +240,7 @@ export async function dispatchExistingJob(args: unknown) {
   // This ensures proper hierarchy tracking even when workstreamId is preserved
   if (context.requestId) lineageContext.sourceRequestId = context.requestId;
   if (context.jobDefinitionId) lineageContext.sourceJobDefinitionId = context.jobDefinitionId;
+  if (context.ventureId) lineageContext.ventureId = context.ventureId;
 
   // Fetch job context for the existing job being dispatched
   const jobContext = await getJobContextForDispatch(jobDefinitionId, 3);

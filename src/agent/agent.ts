@@ -709,6 +709,9 @@ export class Agent {
           envWithJob.JINN_JOB_DEFINITION_ID = this.jobContext.jobDefinitionId || '';
           envWithJob.JINN_JOB_NAME = this.jobContext.jobName || '';
           envWithJob.JINN_WORKSTREAM_ID = this.jobContext.workstreamId || envWithJob.JINN_WORKSTREAM_ID || '';
+          if (this.jobContext.ventureId) {
+            envWithJob.JINN_VENTURE_ID = this.jobContext.ventureId;
+          }
           envWithJob.JINN_PROJECT_RUN_ID = this.jobContext.projectRunId || '';
           envWithJob.JINN_SOURCE_EVENT_ID = this.jobContext.sourceEventId || '';
           envWithJob.JINN_PROJECT_DEFINITION_ID = this.jobContext.projectDefinitionId || '';
@@ -1075,6 +1078,8 @@ export class Agent {
         const tsxBinaryName = process.platform === 'win32' ? 'tsx.cmd' : 'tsx';
         const tsxCandidates = [
           resolve(this.agentRoot, '..', 'node_modules', '.bin', tsxBinaryName),
+          resolve(this.agentRoot, '..', '..', 'node_modules', '.bin', tsxBinaryName),
+          resolve(this.agentRoot, '..', '..', '..', 'node_modules', '.bin', tsxBinaryName),
           resolve(this.agentRoot, 'node_modules', '.bin', tsxBinaryName)
         ];
         const tsxExecutable = tsxCandidates.find(candidate => existsSync(candidate));
