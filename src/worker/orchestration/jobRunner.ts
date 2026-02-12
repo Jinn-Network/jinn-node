@@ -43,6 +43,7 @@ import type { UnclaimedRequest, IpfsMetadata, AgentExecutionResult, FinalStatus,
 import { getDependencyBranchInfo } from '../mech_worker.js';
 import { getBlueprintEnableContextPhases, getBlueprintEnableBeads } from '../../config/index.js';
 import { waitForGeminiQuota, isGeminiQuotaError } from '../llm/geminiQuota.js';
+import { validateTemplateAuthorized } from './templateValidation.js';
 
 const DEFAULT_BASE_BRANCH = process.env.CODE_METADATA_DEFAULT_BASE_BRANCH || 'main';
 
@@ -119,24 +120,16 @@ export async function processOnce(
         templateId: metadata?.templateId,
       });
 
-      // Template ownership check: reject jobs with unknown templateId
-      // This prevents the worker from executing template-dispatched jobs that don't
-      // belong to our venture's allowed template set.
-      const ventureTemplateIds = process.env.VENTURE_TEMPLATE_IDS;
-      if (metadata?.templateId && ventureTemplateIds) {
-        const allowedIds = ventureTemplateIds.split(',').map(s => s.trim()).filter(Boolean);
-        if (allowedIds.length > 0 && !allowedIds.includes(metadata.templateId)) {
-          workerLogger.warn({
-            templateId: metadata.templateId,
-            requestId: target.id,
-            allowedTemplateCount: allowedIds.length,
-          }, 'Rejecting job: templateId not in VENTURE_TEMPLATE_IDS allowlist');
+      // Dynamic template validation: check Supabase instead of env var allowlist
+      if (metadata?.templateId) {
+        const isValid = await validateTemplateAuthorized(metadata.templateId);
+        if (!isValid) {
+          workerLogger.warn({ templateId: metadata.templateId, requestId: target.id },
+            'Rejecting job: template not published or not OLAS-registered');
           return;
         }
-        workerLogger.info({
-          templateId: metadata.templateId,
-          requestId: target.id,
-        }, 'Template-based job pickup: templateId verified');
+        workerLogger.info({ templateId: metadata.templateId, requestId: target.id },
+          'Template-based job: validated via Supabase');
       }
 
       const resolvedWorkstreamId = metadata?.workstreamId || target.workstreamId || target.id;
