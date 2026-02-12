@@ -2,7 +2,7 @@
 /**
  * Add Service - Provision an additional OLAS service for multi-service rotation
  *
- * Usage: yarn service:add [--staking-contract <address>] [--dry-run]
+ * Usage: yarn service:add [--staking-contract <address>] [--no-mech] [--dry-run]
  *
  * Prerequisites:
  * - OPERATE_PASSWORD env var set
@@ -28,10 +28,11 @@ const OLAS_TOKEN_BASE = '0x54330d28ca3357F294334BDC454a032e7f353416';
 const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
 const STAKING_ABI = ['function getServiceIds() view returns (uint256[])'];
 
-function parseArgs(): { stakingContract?: string; dryRun: boolean; mechMarketplace?: string; mechPrice?: string } {
+function parseArgs(): { stakingContract?: string; dryRun: boolean; noMech: boolean; mechMarketplace?: string; mechPrice?: string } {
   const args = process.argv.slice(2);
   let stakingContract: string | undefined;
   let dryRun = false;
+  let noMech = false;
   let mechMarketplace: string | undefined;
   let mechPrice: string | undefined;
 
@@ -42,16 +43,18 @@ function parseArgs(): { stakingContract?: string; dryRun: boolean; mechMarketpla
       mechMarketplace = args[++i];
     } else if (args[i] === '--mech-price' && args[i + 1]) {
       mechPrice = args[++i];
+    } else if (args[i] === '--no-mech') {
+      noMech = true;
     } else if (args[i] === '--dry-run') {
       dryRun = true;
     }
   }
 
-  return { stakingContract, dryRun, mechMarketplace, mechPrice };
+  return { stakingContract, dryRun, noMech, mechMarketplace, mechPrice };
 }
 
 async function main() {
-  const { stakingContract: stakingContractArg, dryRun, mechMarketplace, mechPrice } = parseArgs();
+  const { stakingContract: stakingContractArg, dryRun, noMech, mechMarketplace, mechPrice } = parseArgs();
 
   printHeader('Add OLAS Service');
 
@@ -189,12 +192,14 @@ async function main() {
     serviceConfig.configurations.base.use_staking = true;
     serviceConfig.configurations.base.rpc = rpcUrl;
 
-    // Enable mech marketplace
-    enableMechMarketplaceInConfig(
-      serviceConfig,
-      mechMarketplace || '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020',
-      mechPrice || '10000000000000000',
-    );
+    // Enable mech marketplace (skip with --no-mech to save VNet write quota)
+    if (!noMech) {
+      enableMechMarketplaceInConfig(
+        serviceConfig,
+        mechMarketplace || '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020',
+        mechPrice || '10000000000000000',
+      );
+    }
 
     printStep('done', 'Service configuration created');
 

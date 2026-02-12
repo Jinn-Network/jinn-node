@@ -197,7 +197,8 @@ export async function cleanupUndeployedConfigs(
       const multisig = chainData?.multisig;
 
       // If token and multisig are both absent → never deployed on-chain
-      if (!token && !multisig) {
+      // Note: middleware uses token=-1 as "unminted" placeholder, which is truthy in JS
+      if ((!token || token === -1) && !multisig) {
         configLogger.info({ service: dir.name }, 'Removing undeployed service config');
         await fs.rm(servicePath, { recursive: true, force: true });
         removed.push(dir.name);

@@ -4,7 +4,7 @@ Tests: Setup → Service management scripts → Add 2nd service → Multi-servic
 
 **Prerequisite**: Complete the shared steps (Infrastructure + Setup) from SKILL.md first. Do NOT dispatch a job or run the worker for job execution — this session conserves VNet quota for service provisioning.
 
-**Quota budget**: First service setup uses ~3-4 write transactions. Adding a 2nd service uses ~5-6 more (mint, activate, register agents, deploy Safe, approve NFT, stake). Total: ~8-10 writes, which is at the VNet free-tier limit.
+**Quota budget**: First service setup uses ~3-4 write transactions. Adding a 2nd service uses ~5-6 more (mint, activate, register agents, deploy Safe, approve NFT, stake). Total: ~8-10 writes, which is at the VNet free-tier limit. Use `--no-mech` with `service:add` to save 1 write transaction per service (mech deployment is not needed for operator testing).
 
 ## Validate Single-Service Scripts
 
@@ -33,7 +33,7 @@ All three must exit 0.
 ## Add a Second Service
 
 ```bash
-cd "$CLONE_DIR" && yarn service:add
+cd "$CLONE_DIR" && yarn service:add --no-mech
 ```
 
 The script will:
@@ -48,7 +48,7 @@ yarn test:e2e:vnet fund <new-service-safe-address> --eth <amount> --olas <amount
 
 Then re-run to continue deployment:
 ```bash
-cd "$CLONE_DIR" && yarn service:add
+cd "$CLONE_DIR" && yarn service:add --no-mech
 ```
 
 Repeat the fund + re-run cycle until the service is fully deployed and staked.

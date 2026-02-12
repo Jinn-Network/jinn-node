@@ -54,7 +54,9 @@ export class ServiceRotator {
    * Initialize: load all services and select the first active service
    */
   async initialize(): Promise<RotationDecision> {
-    this.services = await listServiceConfigs(this.middlewarePath);
+    // Load configs and filter out incomplete services that can't participate in rotation
+    this.services = (await listServiceConfigs(this.middlewarePath))
+      .filter(s => s.serviceSafeAddress && s.agentPrivateKey && s.serviceId != null && s.serviceId !== -1);
 
     const stakedServices = this.services.filter(s => s.stakingContractAddress);
     rotationLogger.info({
