@@ -9,6 +9,8 @@
  * - JINN_SIGNING_PROXY_SECRET: Bearer token for auth
  */
 
+import type { EthHttpSigner, Hex } from '@slicekit/erc8128';
+
 function getConfig(): { url: string; secret: string } {
   const url = process.env.JINN_SIGNING_PROXY_URL;
   const secret = process.env.JINN_SIGNING_PROXY_SECRET;
@@ -55,6 +57,18 @@ export async function proxySign(message: string): Promise<{ signature: string; a
   return proxyRequest<{ signature: string; address: string }>('POST', '/sign', { message });
 }
 
+function bytesToHex(input: Uint8Array): `0x${string}` {
+  return `0x${Buffer.from(input).toString('hex')}` as `0x${string}`;
+}
+
+/**
+ * Sign raw bytes (as EIP-191 raw message) via signing proxy.
+ */
+export async function proxySignRaw(message: Uint8Array | `0x${string}`): Promise<{ signature: string; address: string }> {
+  const hexMessage = typeof message === 'string' ? message : bytesToHex(message);
+  return proxyRequest<{ signature: string; address: string }>('POST', '/sign-raw', { message: hexMessage });
+}
+
 /**
  * Sign EIP-712 typed data via the signing proxy.
  */
@@ -88,4 +102,20 @@ export interface DispatchResult {
  */
 export async function proxyDispatch(params: DispatchParams): Promise<DispatchResult> {
   return proxyRequest<DispatchResult>('POST', '/dispatch', params);
+}
+
+/**
+ * Build an ERC-8128 signer backed by the signing proxy.
+ * Keeps private key usage in the worker-owned proxy process.
+ */
+export async function createProxyHttpSigner(chainId: number): Promise<EthHttpSigner> {
+  const address = (await proxyGetAddress()).toLowerCase() as `0x${string}`;
+  return {
+    address,
+    chainId,
+    signMessage: async (message: Uint8Array) => {
+      const { signature } = await proxySignRaw(message);
+      return signature as Hex;
+    },
+  };
 }

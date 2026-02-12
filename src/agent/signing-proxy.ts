@@ -8,6 +8,7 @@
  * Endpoints:
  * - GET  /address          — Derive and return the agent's address
  * - POST /sign             — EIP-191 personal_sign
+ * - POST /sign-raw         — EIP-191 sign raw bytes (0x-prefixed hex)
  * - POST /sign-typed-data  — EIP-712 typed data sign
  * - POST /dispatch         — Full marketplaceInteract() call
  */
@@ -68,6 +69,23 @@ async function handleSign(req: IncomingMessage, res: ServerResponse): Promise<vo
   const { privateKeyToAccount } = await import('viem/accounts');
   const account = privateKeyToAccount(loadPrivateKey() as `0x${string}`);
   const signature = await account.signMessage({ message: body.message });
+
+  json(res, 200, {
+    signature,
+    address: account.address.toLowerCase(),
+  });
+}
+
+async function handleSignRaw(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const body = JSON.parse(await readBody(req));
+  if (!body.message || typeof body.message !== 'string' || !/^0x[0-9a-fA-F]*$/.test(body.message) || body.message.length % 2 !== 0) {
+    json(res, 400, { error: 'Missing or invalid "message" field (expected 0x-prefixed even-length hex)', code: 'BAD_REQUEST' });
+    return;
+  }
+
+  const { privateKeyToAccount } = await import('viem/accounts');
+  const account = privateKeyToAccount(loadPrivateKey() as `0x${string}`);
+  const signature = await account.signMessage({ message: { raw: body.message as `0x${string}` } });
 
   json(res, 200, {
     signature,
@@ -149,6 +167,8 @@ export async function startSigningProxy(): Promise<{
         await handleAddress(req, res);
       } else if (method === 'POST' && url === '/sign') {
         await handleSign(req, res);
+      } else if (method === 'POST' && url === '/sign-raw') {
+        await handleSignRaw(req, res);
       } else if (method === 'POST' && url === '/sign-typed-data') {
         await handleSignTypedData(req, res);
       } else if (method === 'POST' && url === '/dispatch') {
