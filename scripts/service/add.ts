@@ -15,6 +15,8 @@
  */
 
 import 'dotenv/config';
+import { promises as fsPromises } from 'fs';
+import { join } from 'path';
 import { OlasOperateWrapper } from '../../src/worker/OlasOperateWrapper.js';
 import { createDefaultServiceConfig, SERVICE_CONSTANTS } from '../../src/worker/config/ServiceConfig.js';
 import { enableMechMarketplaceInConfig } from '../../src/worker/config/MechConfig.js';
@@ -202,6 +204,19 @@ async function main() {
     }
     printStep('done', 'Service created', `Config ID: ${serviceConfigId}`);
 
+    // Clean up partial config if interrupted before deployment completes
+    const cleanupPartial = async () => {
+      console.log('\n  Cleaning up partial service config...');
+      try {
+        const servicePath = join(middlewarePath, '.operate', 'services', serviceConfigId);
+        await fsPromises.rm(servicePath, { recursive: true, force: true });
+        console.log('  Cleaned up.');
+      } catch {}
+      process.exit(130);
+    };
+    process.on('SIGINT', cleanupPartial);
+    process.on('SIGTERM', cleanupPartial);
+
     if (dryRun) {
       console.log('\n  --dry-run: Service config created but not deployed.');
       console.log(`  Config ID: ${serviceConfigId}`);
@@ -310,6 +325,10 @@ async function main() {
     }
 
     printStep('done', 'Service deployed');
+
+    // Deployment complete — no longer need cleanup handler
+    process.removeListener('SIGINT', cleanupPartial);
+    process.removeListener('SIGTERM', cleanupPartial);
 
     // --- Show result ---
     const totalServices = existingServices.length + 1;

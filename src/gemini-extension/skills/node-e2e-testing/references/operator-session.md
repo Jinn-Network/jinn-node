@@ -79,13 +79,11 @@ Expected: Per-service breakdown shows **both services** with individual accrued 
 
 ## Verify Rotation Initialization
 
-Test that the worker initializes multi-service rotation with 2 services. We only need to see the rotation init — not run a full job:
+Test that the worker initializes multi-service rotation with 2 services. The `--single` flag makes the worker exit after one poll cycle:
 
 ```bash
-cd "$CLONE_DIR" && WORKER_MULTI_SERVICE=true timeout 30 yarn worker --single 2>&1 || true
+cd "$CLONE_DIR" && WORKER_MULTI_SERVICE=true yarn worker --single 2>&1
 ```
-
-The `timeout 30` kills the worker after 30 seconds (it will be waiting for a job to appear since we didn't dispatch one).
 
 Look for in the output:
 - `Multi-service rotation active` — confirms `ServiceRotator` initialized

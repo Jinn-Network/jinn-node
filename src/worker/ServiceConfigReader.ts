@@ -121,13 +121,25 @@ export async function readServiceConfig(
       }
     }
     
-    // Read agent private key from deployment/agent_keys/agent_0/ethereum_private_key.txt
+    // Read agent private key — try keys.json first (middleware daemon format),
+    // fall back to deployment/agent_keys path (Docker/AEA format)
     let agentPrivateKey: string | undefined;
     try {
-      const privateKeyPath = join(servicesDir, targetServiceId, 'deployment', 'agent_keys', 'agent_0', 'ethereum_private_key.txt');
-      agentPrivateKey = (await fs.readFile(privateKeyPath, 'utf-8')).trim();
-    } catch (error) {
-      configLogger.debug({ error: error instanceof Error ? error.message : String(error) }, 'Could not read agent private key');
+      const keysJsonPath = join(servicesDir, targetServiceId, 'keys.json');
+      const keysJson = JSON.parse(await fs.readFile(keysJsonPath, 'utf-8'));
+      if (Array.isArray(keysJson) && keysJson.length > 0 && keysJson[0].private_key) {
+        agentPrivateKey = keysJson[0].private_key;
+      }
+    } catch {
+      // keys.json not found or invalid — try legacy path
+    }
+    if (!agentPrivateKey) {
+      try {
+        const privateKeyPath = join(servicesDir, targetServiceId, 'deployment', 'agent_keys', 'agent_0', 'ethereum_private_key.txt');
+        agentPrivateKey = (await fs.readFile(privateKeyPath, 'utf-8')).trim();
+      } catch (error) {
+        configLogger.debug({ error: error instanceof Error ? error.message : String(error) }, 'Could not read agent private key');
+      }
     }
     
     const serviceInfo: ServiceInfo = {
