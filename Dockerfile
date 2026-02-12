@@ -65,11 +65,17 @@ RUN mkdir -p /home/jinn/.operate /home/jinn/.gemini /app/jinn-repos /tmp/.gemini
 # Persistent volume: home dir contains .operate/ (keystore) and .gemini/ (auth + extensions)
 VOLUME ["/home/jinn"]
 
+# Cap V8 heap to force earlier GC — without this, Node uses up to ~50% of container
+# memory (4GB in 8GB container), inflating baseline RAM. Override at runtime via
+# NODE_OPTIONS env var or docker-compose environment section.
+ARG NODE_MAX_OLD_SPACE_SIZE=2048
+
 # Environment defaults for containerized operation
 ENV NODE_ENV=production \
     GEMINI_SANDBOX=false \
     OPERATE_PROFILE_DIR=/home/jinn/.operate \
-    JINN_WORKSPACE_DIR=/app/jinn-repos
+    JINN_WORKSPACE_DIR=/app/jinn-repos \
+    NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE}"
 
 # Healthcheck endpoint (healthcheck defined in docker-compose.yml)
 EXPOSE 8080

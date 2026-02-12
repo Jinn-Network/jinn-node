@@ -63,7 +63,8 @@ const USE_CONTROL_API = getUseControlApi();
 
 // Track jobs executed in this session to prevent re-execution on delivery failure
 // This prevents infinite loops when delivery fails but Control API allows re-claiming
-const executedJobsThisSession = new Set<string>();
+// Uses Map<id, timestamp> instead of Set for TTL-based eviction
+const executedJobsThisSession = new Map<string, number>();
 let consecutiveStuckCycles = 0;
 let lastStuckRequestIds: string[] = [];
 
@@ -173,6 +174,39 @@ const ENABLE_DEPENDENCY_AUTOFAIL = process.env.WORKER_DEPENDENCY_AUTOFAIL !== '0
 
 const dependencyRedispatchAttempts = new Map<string, number>();
 const dependencyCancelAttempts = new Map<string, number>();
+
+// Periodic cleanup of global maps to prevent unbounded growth over weeks of uptime
+const MAP_CLEANUP_INTERVAL_CYCLES = 50;
+const EXECUTED_JOBS_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+const REPOST_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
+const DEPENDENCY_MAP_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+function cleanupGlobalMaps(): void {
+  const now = Date.now();
+  let cleaned = 0;
+
+  for (const [id, ts] of executedJobsThisSession) {
+    if (now - ts > EXECUTED_JOBS_MAX_AGE_MS) { executedJobsThisSession.delete(id); cleaned++; }
+  }
+  for (const [id, ts] of recentReposts) {
+    if (now - ts > REPOST_MAX_AGE_MS) { recentReposts.delete(id); cleaned++; }
+  }
+  for (const [key, ts] of dependencyRedispatchAttempts) {
+    if (now - ts > DEPENDENCY_MAP_MAX_AGE_MS) { dependencyRedispatchAttempts.delete(key); cleaned++; }
+  }
+  for (const [key, ts] of dependencyCancelAttempts) {
+    if (now - ts > DEPENDENCY_MAP_MAX_AGE_MS) { dependencyCancelAttempts.delete(key); cleaned++; }
+  }
+
+  if (cleaned > 0) {
+    workerLogger.debug({ cleaned, sizes: {
+      executedJobs: executedJobsThisSession.size,
+      reposts: recentReposts.size,
+      redispatch: dependencyRedispatchAttempts.size,
+      cancel: dependencyCancelAttempts.size,
+    }}, 'Cleaned up stale global map entries');
+  }
+}
 
 // Job processing logic has been moved to worker/orchestration/jobRunner.ts
 // This file now serves as a CLI wrapper that handles request discovery, claiming, and orchestration delegation
@@ -526,6 +560,26 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
   }
 }
 
+// Cached Web3/contract instances — avoids re-creation on every poll cycle
+let cachedWeb3: InstanceType<typeof Web3> | null = null;
+let cachedWeb3RpcUrl: string | null = null;
+let cachedMarketplaceContract: any = null;
+const MARKETPLACE_ADDRESS = '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020';
+
+function getWeb3Singleton(rpcUrl: string): InstanceType<typeof Web3> {
+  if (cachedWeb3 && cachedWeb3RpcUrl === rpcUrl) return cachedWeb3;
+  cachedWeb3 = new Web3(rpcUrl);
+  cachedWeb3RpcUrl = rpcUrl;
+  cachedMarketplaceContract = null; // Invalidate contract on new provider
+  return cachedWeb3;
+}
+
+function getMarketplaceContract(web3: InstanceType<typeof Web3>): any {
+  if (cachedMarketplaceContract) return cachedMarketplaceContract;
+  cachedMarketplaceContract = new (web3 as any).eth.Contract(marketplaceAbi, MARKETPLACE_ADDRESS);
+  return cachedMarketplaceContract;
+}
+
 async function filterUnclaimed(requests: UnclaimedRequest[]): Promise<UnclaimedRequest[]> {
   if (requests.length === 0) return [];
   // Filter out already delivered requests first (from indexer)
@@ -539,9 +593,8 @@ async function filterUnclaimed(requests: UnclaimedRequest[]): Promise<UnclaimedR
       return notDelivered;
     }
 
-    const web3 = new Web3(rpcHttpUrl);
-    const MARKETPLACE_ADDRESS = '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020';
-    const marketplace = new (web3 as any).eth.Contract(marketplaceAbi, MARKETPLACE_ADDRESS);
+    const web3 = getWeb3Singleton(rpcHttpUrl);
+    const marketplace = getMarketplaceContract(web3);
 
     const filtered: UnclaimedRequest[] = [];
 
@@ -1181,7 +1234,7 @@ async function processOnce(): Promise<boolean> {
     await processJobOnce(target, workerAddress);
   } finally {
     // Mark as executed even if delivery fails to prevent re-execution loop
-    executedJobsThisSession.add(target.id);
+    executedJobsThisSession.set(target.id, Date.now());
     workerLogger.debug({ requestId: target.id }, 'Marked job as executed this session');
   }
 
@@ -1244,6 +1297,7 @@ async function main() {
 
   // Repost check frequency limiting
   let cyclesSinceLastRepostCheck = 0;
+  let cyclesSinceLastCleanup = 0;
 
   for (; ;) {
     const cycleStart = Date.now();
@@ -1258,6 +1312,13 @@ async function main() {
       if (cyclesSinceLastRepostCheck >= WORKER_REPOST_CHECK_CYCLES) {
         await checkAndRepostCompletedChains();
         cyclesSinceLastRepostCheck = 0;
+      }
+
+      // Evict stale entries from global maps to prevent unbounded growth
+      cyclesSinceLastCleanup++;
+      if (cyclesSinceLastCleanup >= MAP_CLEANUP_INTERVAL_CYCLES) {
+        cleanupGlobalMaps();
+        cyclesSinceLastCleanup = 0;
       }
 
       const jobProcessed = await processOnce();
