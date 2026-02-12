@@ -10,7 +10,8 @@
  * - JINN_SIGNING_PROXY_SECRET: Signing proxy bearer token
  */
 
-import { proxySign, proxySignTypedData, proxyGetAddress } from './signing-proxy-client.js';
+import { proxySignTypedData, proxyGetAddress, createProxyHttpSigner } from './signing-proxy-client.js';
+import { resolveChainId, signRequestWithErc8128, type Erc8128Signer } from '../../http/erc8128.js';
 
 interface CredentialResponse {
   access_token: string;
@@ -23,6 +24,10 @@ interface CredentialError {
   code: string;
 }
 
+interface BridgeCredentialRequest {
+  requestId?: string;
+}
+
 // In-memory cache: provider → { token, expiresAt }
 const tokenCache = new Map<string, { token: string; expiresAt: number }>();
 
@@ -31,6 +36,43 @@ const USDC_ADDRESSES: Record<string, string> = {
   'base': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
   'base-sepolia': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
 };
+
+let bridgeSignerPromise: Promise<Erc8128Signer> | null = null;
+
+async function getBridgeSigner(): Promise<Erc8128Signer> {
+  if (!bridgeSignerPromise) {
+    const chainId = resolveChainId(process.env.CHAIN_ID || process.env.CHAIN_CONFIG || 'base');
+    bridgeSignerPromise = createProxyHttpSigner(chainId);
+  }
+  return bridgeSignerPromise;
+}
+
+async function signedBridgePost(
+  url: string,
+  body: BridgeCredentialRequest,
+  headers: Record<string, string> = {},
+): Promise<Response> {
+  const signer = await getBridgeSigner();
+  const request = await signRequestWithErc8128({
+    signer,
+    input: url,
+    init: {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(body),
+    },
+    signOptions: {
+      label: 'eth',
+      binding: 'request-bound',
+      replay: 'non-replayable',
+      ttlSeconds: 60,
+    },
+  });
+  return fetch(request);
+}
 
 /**
  * Build an x402 payment header by signing a USDC transferWithAuthorization
@@ -119,39 +161,12 @@ export async function getCredential(provider: string): Promise<string> {
     throw new Error('CREDENTIAL_BRIDGE_URL environment variable is required');
   }
 
-  // Build request body (include requestId for job-bound credentials)
-  const body: {
-    timestamp: number;
-    nonce: string;
-    requestId?: string;
-  } = {
-    timestamp: Math.floor(Date.now() / 1000),
-    nonce: crypto.randomUUID(),
-  };
-
-  // Include job context if available (JINN_JOB_ID set by worker)
-  const jobId = process.env.JINN_JOB_ID;
-  if (jobId) {
-    body.requestId = jobId;
-  }
-
-  // Sign the request body via proxy
-  const message = JSON.stringify(body);
-  const { signature, address } = await proxySign(message);
+  // Include requestId for job-bound credentials when available
+  const requestId = process.env.JINN_REQUEST_ID || process.env.JINN_JOB_ID;
+  const body: BridgeCredentialRequest = requestId ? { requestId } : {};
 
   const credentialUrl = `${bridgeUrl.replace(/\/$/, '')}/credentials/${provider}`;
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'X-Agent-Signature': signature,
-    'X-Agent-Address': address,
-  };
-
-  // First attempt
-  let response = await fetch(credentialUrl, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  let response = await signedBridgePost(credentialUrl, body);
 
   // Handle x402 payment required
   if (response.status === 402) {
@@ -162,24 +177,8 @@ export async function getCredential(provider: string): Promise<string> {
 
     if (amount && payTo) {
       const paymentHeader = await createPaymentHeader({ amount, payTo, network });
-      // Rebuild body with fresh nonce/timestamp for the retry
-      const retryBody = {
-        timestamp: Math.floor(Date.now() / 1000),
-        nonce: crypto.randomUUID(),
-        ...(jobId ? { requestId: jobId } : {}),
-      };
-      const retryMessage = JSON.stringify(retryBody);
-      const retrySig = await proxySign(retryMessage);
-
-      response = await fetch(credentialUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Agent-Signature': retrySig.signature,
-          'X-Agent-Address': retrySig.address,
-          'X-Payment': paymentHeader,
-        },
-        body: JSON.stringify(retryBody),
+      response = await signedBridgePost(credentialUrl, body, {
+        'X-Payment': paymentHeader,
       });
     }
   }

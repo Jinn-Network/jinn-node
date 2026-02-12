@@ -14,6 +14,11 @@
 
 import { workerLogger } from '../../logging/index.js';
 import { getServicePrivateKey } from '../../env/operate-profile.js';
+import {
+  createPrivateKeyHttpSigner,
+  resolveChainId,
+  signRequestWithErc8128,
+} from '../../http/erc8128.js';
 
 /**
  * Maps MCP tool names to the credential providers they require.
@@ -131,27 +136,32 @@ export async function probeCredentialBridge(): Promise<WorkerCredentialInfo> {
   }
 
   try {
-    const { privateKeyToAccount } = await import('viem/accounts');
-    const account = privateKeyToAccount(privateKey as `0x${string}`);
-
-    const body = {
-      timestamp: Math.floor(Date.now() / 1000),
-      nonce: crypto.randomUUID(),
-    };
-    const message = JSON.stringify(body);
-    const signature = await account.signMessage({ message });
+    const signer = createPrivateKeyHttpSigner(
+      privateKey as `0x${string}`,
+      resolveChainId(process.env.CHAIN_ID || process.env.CHAIN_CONFIG || 'base'),
+    );
+    const body = {};
 
     const url = `${bridgeUrl.replace(/\/$/, '')}/credentials/capabilities`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Agent-Signature': signature,
-        'X-Agent-Address': account.address.toLowerCase(),
+    const request = await signRequestWithErc8128({
+      signer,
+      input: url,
+      init: {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(10_000),
       },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10_000),
+      signOptions: {
+        label: 'eth',
+        binding: 'request-bound',
+        replay: 'non-replayable',
+        ttlSeconds: 60,
+      },
     });
+    const response = await fetch(request);
 
     if (!response.ok) {
       workerLogger.warn(
