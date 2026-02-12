@@ -10,7 +10,7 @@ import { parseAnnotatedTools, normalizeToolArray, extractModelPolicyFromBlueprin
 import { didDispatchChild } from '../status/dispatchUtils.js';
 import { updateJobStatus } from '../control_api_client.js';
 import type { UnclaimedRequest, IpfsMetadata, AdditionalContext, AgentExecutionResult } from '../types.js';
-import { DEFAULT_WORKER_MODEL, normalizeGeminiModel } from '../../shared/gemini-models.js';
+import { DEFAULT_WORKER_MODEL, selectGeminiModelWithPolicy } from '../../shared/gemini-models.js';
 
 /**
  * Execution context for agent run
@@ -53,15 +53,27 @@ export async function runAgentForRequest(
   request: UnclaimedRequest,
   metadata: IpfsMetadata
 ): Promise<AgentExecutionResult> {
-  // Model comes from job metadata (set at dispatch time), fallback to flash
-  const modelNormalization = normalizeGeminiModel(metadata?.model, DEFAULT_WORKER_MODEL);
-  const model = modelNormalization.normalized;
   // Normalize tools to string array (handles both string and object formats from IPFS metadata)
   const enabledTools = normalizeToolArray(metadata?.enabledTools);
   const toolPolicy = Array.isArray(metadata?.tools) ? parseAnnotatedTools(metadata.tools) : null;
   const requiredTools = toolPolicy?.requiredTools ?? undefined;
   const availableTools = toolPolicy?.availableTools ?? undefined;
   const completedChildRequestIds = extractCompletedChildRequestIds(metadata?.additionalContext);
+
+  // Extract model policy: IPFS-level allowedModels (from parent cascade) takes precedence over blueprint
+  const blueprintObj = (() => { try { return JSON.parse(metadata?.blueprint || '{}'); } catch { return {}; } })();
+  const blueprintModelPolicy = extractModelPolicyFromBlueprint(blueprintObj);
+  const modelPolicy = {
+    allowedModels: Array.isArray(metadata?.allowedModels) && metadata.allowedModels.length > 0
+      ? metadata.allowedModels
+      : blueprintModelPolicy.allowedModels,
+    defaultModel: blueprintModelPolicy.defaultModel,
+  };
+
+  // Choose effective model under policy (fallback if deprecated/disallowed).
+  const modelSelection = selectGeminiModelWithPolicy(metadata?.model, modelPolicy, DEFAULT_WORKER_MODEL);
+  const model = modelSelection.selected;
+  metadata.model = model;
 
   // Determine if this is a coding job based on presence of code metadata
   const isCodingJob = !!metadata?.codeMetadata;
@@ -102,16 +114,6 @@ export async function runAgentForRequest(
 
   // Extract mission invariant IDs from blueprint for downstream validation
   const blueprintInvariantIds = extractMissionInvariantIds(metadata?.blueprint);
-
-  // Extract model policy: IPFS-level allowedModels (from parent cascade) takes precedence over blueprint
-  const blueprintObj = (() => { try { return JSON.parse(metadata?.blueprint || '{}'); } catch { return {}; } })();
-  const blueprintModelPolicy = extractModelPolicyFromBlueprint(blueprintObj);
-  const modelPolicy = {
-    allowedModels: Array.isArray(metadata?.allowedModels) && metadata.allowedModels.length > 0
-      ? metadata.allowedModels
-      : blueprintModelPolicy.allowedModels,
-    defaultModel: blueprintModelPolicy.defaultModel,
-  };
 
   // Snapshot and set job context for downstream tools
   const prevContext = snapshotJobContext();

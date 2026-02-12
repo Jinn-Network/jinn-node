@@ -37,7 +37,8 @@ import { createArtifact as apiCreateArtifact } from '../control_api_client.js';
 import { safeParseToolResponse } from '../tool_utils.js';
 import { getJinnWorkspaceDir, extractRepoName, getRepoRoot, normalizeSshUrl } from '../../shared/repo_utils.js';
 import { extractMemoryArtifacts } from '../reflection/memoryArtifacts.js';
-import { DEFAULT_WORKER_MODEL, normalizeGeminiModel, validateModelAllowed } from '../../shared/gemini-models.js';
+import { DEFAULT_WORKER_MODEL, selectGeminiModelWithPolicy } from '../../shared/gemini-models.js';
+import { extractModelPolicyFromBlueprint } from '../../shared/template-tools.js';
 import type { UnclaimedRequest, IpfsMetadata, AgentExecutionResult, FinalStatus, ExecutionSummaryDetails, RecognitionPhaseResult, ReflectionResult, AdditionalContext } from '../types.js';
 import { getDependencyBranchInfo } from '../mech_worker.js';
 import { getBlueprintEnableContextPhases, getBlueprintEnableBeads } from '../../config/index.js';
@@ -77,29 +78,68 @@ export async function processOnce(
       if (!metadata) {
         metadata = {};
       }
-      // Use model from job metadata if available, otherwise fall back to default
-      const normalized = normalizeGeminiModel(metadata.model, DEFAULT_WORKER_MODEL);
-      if (normalized.changed) {
-        workerLogger.info({ requested: normalized.requested, normalized: normalized.normalized }, 'Normalized Gemini model');
+      // Enforce model policy: normalize legacy names and fall back when disallowed/deprecated.
+      // IPFS-level allowedModels (from parent cascade) takes precedence over blueprint policy.
+      let blueprintObj: any = {};
+      try {
+        blueprintObj = JSON.parse(metadata?.blueprint || '{}');
+      } catch {
+        blueprintObj = {};
       }
+      const blueprintModelPolicy = extractModelPolicyFromBlueprint(blueprintObj);
+      const effectivePolicy = {
+        allowedModels: Array.isArray(metadata?.allowedModels) && metadata.allowedModels.length > 0
+          ? metadata.allowedModels
+          : blueprintModelPolicy.allowedModels,
+        defaultModel: blueprintModelPolicy.defaultModel,
+      };
 
-      // Check for deprecated models and fallback to default
-      const modelValidation = validateModelAllowed(normalized.normalized);
-      if (!modelValidation.ok) {
-        workerLogger.warn(
-          { deprecatedModel: normalized.normalized, fallback: DEFAULT_WORKER_MODEL, reason: modelValidation.reason },
-          'Deprecated model detected, falling back to default'
+      const modelSelection = selectGeminiModelWithPolicy(metadata.model, effectivePolicy, DEFAULT_WORKER_MODEL);
+      if (modelSelection.changed) {
+        const logFn =
+          modelSelection.reason === 'policy_fallback' || modelSelection.reason === 'deprecated_fallback'
+            ? workerLogger.warn
+            : workerLogger.info;
+        logFn(
+          {
+            requestedModel: metadata.model,
+            normalizedRequested: modelSelection.normalizedRequested,
+            selectedModel: modelSelection.selected,
+            reason: modelSelection.reason,
+            policyDefaultModel: effectivePolicy.defaultModel,
+            policyAllowedModelsCount: effectivePolicy.allowedModels?.length ?? 0,
+          },
+          'Selected Gemini model'
         );
-        metadata.model = DEFAULT_WORKER_MODEL;
-      } else {
-        metadata.model = normalized.normalized;
       }
+      metadata.model = modelSelection.selected;
 
       telemetry.logCheckpoint('initialization', 'metadata_fetched', {
         hasJobName: !!metadata?.jobName,
         hasBlueprint: !!metadata?.blueprint,
         hasCodeMetadata: !!metadata?.codeMetadata,
+        templateId: metadata?.templateId,
       });
+
+      // Template ownership check: reject jobs with unknown templateId
+      // This prevents the worker from executing template-dispatched jobs that don't
+      // belong to our venture's allowed template set.
+      const ventureTemplateIds = process.env.VENTURE_TEMPLATE_IDS;
+      if (metadata?.templateId && ventureTemplateIds) {
+        const allowedIds = ventureTemplateIds.split(',').map(s => s.trim()).filter(Boolean);
+        if (allowedIds.length > 0 && !allowedIds.includes(metadata.templateId)) {
+          workerLogger.warn({
+            templateId: metadata.templateId,
+            requestId: target.id,
+            allowedTemplateCount: allowedIds.length,
+          }, 'Rejecting job: templateId not in VENTURE_TEMPLATE_IDS allowlist');
+          return;
+        }
+        workerLogger.info({
+          templateId: metadata.templateId,
+          requestId: target.id,
+        }, 'Template-based job pickup: templateId verified');
+      }
 
       const resolvedWorkstreamId = metadata?.workstreamId || target.workstreamId || target.id;
       if (metadata) {
