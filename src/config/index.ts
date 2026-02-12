@@ -395,6 +395,19 @@ const devTestingSchema = z.object({
   // Values: 'sandbox-exec' (macOS Seatbelt), 'docker', 'podman', 'false'
   // Default: 'sandbox-exec' for process-level isolation on macOS
   GEMINI_SANDBOX: z.enum(['sandbox-exec', 'docker', 'podman', 'false']).default('sandbox-exec'),
+
+  // WORKER_MULTI_SERVICE: Enable multi-service rotation
+  // When true, the worker enumerates all services in .operate/services/ and rotates
+  // between them based on on-chain activity requirements per staking epoch.
+  WORKER_MULTI_SERVICE: z.coerce.boolean().optional(),
+
+  // WORKER_ACTIVITY_POLL_MS: How often to check on-chain activity status (ms)
+  // Default: 60000 (1 minute). All calls are gas-free view calls.
+  WORKER_ACTIVITY_POLL_MS: z.coerce.number().int().positive().default(60000),
+
+  // WORKER_ACTIVITY_CACHE_TTL_MS: Cache TTL for per-service activity queries (ms)
+  // Default: 60000 (1 minute). Contract-level data (livenessRatio) is cached indefinitely.
+  WORKER_ACTIVITY_CACHE_TTL_MS: z.coerce.number().int().positive().default(60000),
 });
 
 /**
@@ -979,6 +992,22 @@ export function getWorkerStakingRefreshMs(): number {
 
 export function getOptionalWorkerMechFilterList(): string | undefined {
   return getConfig().WORKER_MECH_FILTER_LIST;
+}
+
+// ============================================================================
+// Public API: Multi-Service Rotation Configuration
+// ============================================================================
+
+export function getWorkerMultiServiceEnabled(): boolean {
+  return getConfig().WORKER_MULTI_SERVICE ?? false;
+}
+
+export function getWorkerActivityPollMs(): number {
+  return getConfig().WORKER_ACTIVITY_POLL_MS;
+}
+
+export function getWorkerActivityCacheTtlMs(): number {
+  return getConfig().WORKER_ACTIVITY_CACHE_TTL_MS;
 }
 
 export function getOptionalPlaywrightChannel(): string | undefined {

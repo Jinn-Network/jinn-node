@@ -18,6 +18,12 @@ import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { configLogger } from '../logging/index.js';
 import { decryptKeystoreV3 } from './keystore-decrypt.js';
+import {
+  getActiveMechAddress,
+  getActiveSafeAddress,
+  getActivePrivateKey,
+  getActiveChainConfig,
+} from '../worker/rotation/ActiveServiceContext.js';
 
 // Resolve repo root so this works from both src/ and dist/ builds
 const __filename = fileURLToPath(import.meta.url);
@@ -270,6 +276,12 @@ export function getMechAddress(): string | null {
     return envMech;
   }
 
+  // Check ActiveServiceContext (multi-service rotation)
+  const activeMech = getActiveMechAddress();
+  if (activeMech) {
+    return activeMech;
+  }
+
   // Fall back to service config
   const config = readServiceConfig();
   if (!config) {
@@ -320,6 +332,12 @@ export function getServiceSafeAddress(): string | null {
     return envSafe;
   }
 
+  // Check ActiveServiceContext (multi-service rotation)
+  const activeSafe = getActiveSafeAddress();
+  if (activeSafe) {
+    return activeSafe;
+  }
+
   // Fall back to service config
   const config = readServiceConfig();
   if (!config) {
@@ -368,6 +386,12 @@ export function getServicePrivateKey(): string | null {
   if (envKey && /^0x[a-fA-F0-9]{64}$/i.test(envKey)) {
     configLogger.info(' Using private key from JINN_SERVICE_PRIVATE_KEY');
     return envKey;
+  }
+
+  // Check ActiveServiceContext (multi-service rotation)
+  const activeKey = getActivePrivateKey();
+  if (activeKey) {
+    return activeKey;
   }
 
   // Fall back to service config to get agent address
@@ -502,6 +526,12 @@ export function resetPrivateKeyCache(): void {
  * @returns Chain config name (e.g., 'base', 'gnosis', 'ethereum')
  */
 export function getMechChainConfig(): string {
+  // Check ActiveServiceContext (multi-service rotation)
+  const activeChain = getActiveChainConfig();
+  if (activeChain) {
+    return activeChain;
+  }
+
   const config = readServiceConfig();
   if (!config || !config.chain_configs) {
     return 'base';
@@ -560,6 +590,16 @@ export function getMasterWallet(): { eoa: string; safes: Record<string, string> 
     configLogger.warn({ err: error }, 'Error reading master wallet config');
     return null;
   }
+}
+
+/**
+ * Get the middleware root path (parent of .operate directory)
+ * Used by ServiceConfigReader and ServiceRotator for multi-service enumeration.
+ */
+export function getMiddlewarePath(): string | null {
+  const operateDir = getOperateDir();
+  if (!operateDir) return null;
+  return dirname(operateDir);
 }
 
 /**

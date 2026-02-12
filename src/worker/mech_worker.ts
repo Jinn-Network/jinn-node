@@ -15,7 +15,7 @@ import marketplaceAbi from '@jinn-network/mech-client-ts/dist/abis/MechMarketpla
 import { workerLogger } from '../logging/index.js';
 import { claimRequest as apiClaimRequest } from './control_api_client.js';
 import { deliverViaSafe } from '@jinn-network/mech-client-ts/dist/post_deliver.js';
-import { getMechAddress, getServicePrivateKey, getMechChainConfig, getServiceSafeAddress } from '../env/operate-profile.js';
+import { getMechAddress, getServicePrivateKey, getMechChainConfig, getServiceSafeAddress, getMiddlewarePath } from '../env/operate-profile.js';
 import { dispatchExistingJob } from '../agent/mcp/tools/dispatch_existing_job.js';
 import { getInheritedEnv } from './status/autoDispatch.js';
 import { serializeError } from './logging/errors.js';
@@ -30,10 +30,16 @@ import {
   getOptionalWorkerMechFilterMode,
   getOptionalWorkerStakingContract,
   getOptionalWorkerMechFilterList,
+  getWorkerMultiServiceEnabled,
+  getWorkerActivityPollMs,
+  getWorkerActivityCacheTtlMs,
+  getRequiredRpcUrl as getConfigRpcUrl,
   type WorkerMechFilterMode,
 } from '../config/index.js';
 import { recordIdleCycle, recordExecutionTime } from './healthcheck.js';
 import { getMechAddressesForStakingContract } from './filters/stakingFilter.js';
+import { ServiceRotator } from './rotation/ServiceRotator.js';
+import { setActiveService } from './rotation/ActiveServiceContext.js';
 
 export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
 
@@ -1231,6 +1237,34 @@ async function main() {
   // Verify Control API is running before processing any jobs
   await checkControlApiHealth();
 
+  // Initialize multi-service rotation if enabled
+  let rotator: ServiceRotator | null = null;
+  if (getWorkerMultiServiceEnabled()) {
+    const middlewarePath = getMiddlewarePath();
+    if (middlewarePath) {
+      try {
+        rotator = new ServiceRotator({
+          rpcUrl: getConfigRpcUrl(),
+          middlewarePath,
+          activityPollMs: getWorkerActivityPollMs(),
+          activityCacheTtlMs: getWorkerActivityCacheTtlMs(),
+        });
+        const initial = await rotator.initialize();
+        setActiveService(rotator.buildIdentity(initial.service));
+        workerLogger.info({
+          activeService: initial.service.serviceConfigId,
+          serviceId: initial.service.serviceId,
+          reason: initial.reason,
+        }, 'Multi-service rotation active');
+      } catch (err: any) {
+        workerLogger.error({ error: err?.message || String(err) }, 'Failed to initialize multi-service rotation, falling back to single-service');
+        rotator = null;
+      }
+    } else {
+      workerLogger.warn('WORKER_MULTI_SERVICE enabled but no middleware path found');
+    }
+  }
+
   if (SINGLE_SHOT) {
     await processOnce();
     return;
@@ -1282,6 +1316,24 @@ async function main() {
       if (shouldStop()) {
         workerLogger.info('Stop signal detected after job processing - exiting worker loop');
         return;
+      }
+
+      // Multi-service rotation check (no-op when rotator is null)
+      if (rotator) {
+        try {
+          const decision = await rotator.reevaluate();
+          if (decision.switched) {
+            setActiveService(rotator.buildIdentity(decision.service));
+            workerLogger.info({
+              activeService: decision.service.serviceConfigId,
+              serviceId: decision.service.serviceId,
+              reason: decision.reason,
+              rotationState: rotator.getState(),
+            }, 'Rotated to new service');
+          }
+        } catch (rotErr: any) {
+          workerLogger.warn({ error: rotErr?.message || String(rotErr) }, 'Service rotation check failed');
+        }
       }
 
       // Check if we've reached the max runs limit
