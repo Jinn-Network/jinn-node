@@ -1,8 +1,46 @@
 # Worker Session
 
-Tests: Setup → Dispatch (with blueprint + tools) → Worker claim → Agent execution with tool use → IPFS upload → On-chain delivery.
+Tests: Setup → Operator script validation → Dispatch (with blueprint + tools) → Worker claim → Agent execution with tool use (with multi-service rotation) → IPFS upload → On-chain delivery.
 
 **Prerequisite**: Complete the shared steps (Infrastructure + Setup) from SKILL.md first.
+
+## Validate Operator Scripts
+
+After setup completes, verify the operator management scripts work against the staked service. These are all **read-only** — no VNet quota consumed.
+
+### Service List
+
+```bash
+cd "$CLONE_DIR" && yarn service:list
+```
+
+Expected: Shows at least 1 service with config ID, service ID, safe address, and staking contract. With `RPC_URL` set, also shows on-chain activity status (requests needed, eligibility).
+
+### Service Status Dashboard
+
+```bash
+cd "$CLONE_DIR" && yarn service:status
+```
+
+Expected: Shows epoch info (epoch number, progress bar, time remaining), per-service status (eligible/needs requests, request count, rewards), staking health (slots, APY, deposit), and wallet balances (since `OPERATE_PASSWORD` is set).
+
+### Rewards Summary
+
+```bash
+cd "$CLONE_DIR" && yarn rewards:summary
+```
+
+Expected: Shows total accrued rewards (likely `0.0000 OLAS` for a freshly staked service), per-service breakdown, contract details (rewards rate, APY, epoch length), and health summary.
+
+### Add Service Dry Run
+
+```bash
+cd "$CLONE_DIR" && yarn service:add --dry-run
+```
+
+Expected: Detects the existing service, auto-inherits staking contract, checks slot availability, shows what would be created. Should exit 0 without deploying anything.
+
+**All four scripts must exit 0.** Non-zero exit indicates a bug in the operator tooling.
 
 ## Dispatch a Job
 
@@ -39,10 +77,12 @@ yarn test:e2e:vnet fund <agent-eoa-address> --eth 0.01
 
 ## Run the Worker
 
-Wait a few seconds for Ponder to index the marketplace request, then:
+Wait a few seconds for Ponder to index the marketplace request, then run the worker with **multi-service rotation enabled**. With a single service, the rotator initializes and runs the no-switch path — validating that rotation doesn't break single-service operation:
 ```bash
-cd "$CLONE_DIR" && yarn worker --single
+cd "$CLONE_DIR" && WORKER_MULTI_SERVICE=true yarn worker --single
 ```
+
+Look for `Multi-service rotation active` in the output with `activeService` and `reason`. This confirms the `ServiceRotator` initialized correctly.
 
 ## Verify Tool Use
 
@@ -209,6 +249,16 @@ Also check the worker stdout for tool evidence:
 6. **Upload** — Result uploaded to IPFS
 7. **Deliver** — On-chain delivery via Safe transaction
 
+## Debugging Sources
+
+Always report these paths at session end for investigation:
+
+- **Worker output**: stdout captured during `yarn worker --single` execution
+- **Telemetry file**: Path logged by worker early in execution (e.g., `/tmp/telemetry-*.json`)
+- **Ponder logs**: Background stack output (task output file)
+- **Clone directory**: `$CLONE_DIR` — contains `.env`, `.operate/`, service config
+- **VNet config**: `.env.e2e` — VNet RPC URL and session state
+
 ## Acceptable Failures
 
 - **Delivery fails with 403 (quota exhausted)**: OK — the key validation is agent execution with tool use + IPFS upload.
@@ -217,6 +267,11 @@ Also check the worker stdout for tool evidence:
 
 ## Success Criteria
 
+- [ ] `service:list` showed the staked service with on-chain activity status
+- [ ] `service:status` displayed epoch progress, eligibility, and staking health
+- [ ] `rewards:summary` displayed rewards breakdown and contract details
+- [ ] `service:add --dry-run` completed preflight checks without error
+- [ ] Worker initialized multi-service rotation (logged "Multi-service rotation active")
 - [ ] Worker found and claimed the dispatched request
 - [ ] IPFS metadata included `blueprint` and `enabledTools`
 - [ ] Agent called `google_web_search` at least once
