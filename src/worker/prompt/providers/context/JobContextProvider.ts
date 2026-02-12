@@ -103,11 +103,11 @@ export class JobContextProvider implements ContextProvider {
 
       // Only attempt to fetch summaries for completed children
       if (child.status === 'COMPLETED') {
-        const deliveryHash = deliveryHashes.get(child.jobDefinitionId);
+        const delivery = deliveryHashes.get(child.jobDefinitionId);
 
-        if (deliveryHash) {
+        if (delivery) {
           try {
-            const payload = await this.fetchDeliverySummary(deliveryHash, child.jobDefinitionId);
+            const payload = await this.fetchDeliverySummary(delivery.hash, delivery.onChainRequestId);
             summary = payload;
           } catch (error: any) {
             workerLogger.warn(
@@ -182,9 +182,10 @@ export class JobContextProvider implements ContextProvider {
 
   /**
    * Fetch deliveryIpfsHash for child job definitions (latest delivered request per jobDef).
+   * Returns both the IPFS hash and the on-chain requestId (needed as the IPFS filename).
    */
-  private async fetchChildDeliveryHashes(childJobDefIds: string[]): Promise<Map<string, string>> {
-    const map = new Map<string, string>();
+  private async fetchChildDeliveryHashes(childJobDefIds: string[]): Promise<Map<string, { hash: string; onChainRequestId: string }>> {
+    const map = new Map<string, { hash: string; onChainRequestId: string }>();
     if (!childJobDefIds || childJobDefIds.length === 0) return map;
 
     try {
@@ -225,7 +226,7 @@ export class JobContextProvider implements ContextProvider {
         if (!item.jobDefinitionId || !item.deliveryIpfsHash) continue;
         // First delivered item per jobDef (sorted desc) wins
         if (!map.has(item.jobDefinitionId)) {
-          map.set(item.jobDefinitionId, item.deliveryIpfsHash);
+          map.set(item.jobDefinitionId, { hash: item.deliveryIpfsHash, onChainRequestId: item.id });
         }
       }
     } catch (error: any) {

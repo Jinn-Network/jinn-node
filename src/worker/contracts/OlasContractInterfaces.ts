@@ -9,9 +9,61 @@
 
 import { Interface, keccak256, AbiCoder } from 'ethers';
 
+// RegistriesManager ABI — the ONLY way to create components and agents.
+// Direct calls to ComponentRegistry.create() or AgentRegistry.create() revert with ManagerOnly.
+// UnitType enum: 0 = Component, 1 = Agent
+export const REGISTRIES_MANAGER_ABI = [
+  {
+    "inputs": [
+      { "internalType": "enum IRegistry.UnitType", "name": "unitType", "type": "uint8" },
+      { "internalType": "address", "name": "unitOwner", "type": "address" },
+      { "internalType": "bytes32", "name": "unitHash", "type": "bytes32" },
+      { "internalType": "uint32[]", "name": "dependencies", "type": "uint32[]" }
+    ],
+    "name": "create",
+    "outputs": [
+      { "internalType": "uint256", "name": "unitId", "type": "uint256" }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": false, "internalType": "uint256", "name": "unitId", "type": "uint256" },
+      { "indexed": false, "internalType": "uint256", "name": "uType", "type": "uint256" },
+      { "indexed": false, "internalType": "bytes32", "name": "unitHash", "type": "bytes32" }
+    ],
+    "name": "CreateUnit",
+    "type": "event"
+  },
+  {
+    "inputs": [
+      { "internalType": "enum IRegistry.UnitType", "name": "unitType", "type": "uint8" },
+      { "internalType": "uint256", "name": "unitId", "type": "uint256" },
+      { "internalType": "bytes32", "name": "unitHash", "type": "bytes32" }
+    ],
+    "name": "updateHash",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": false, "internalType": "uint256", "name": "unitId", "type": "uint256" },
+      { "indexed": false, "internalType": "uint256", "name": "uType", "type": "uint256" },
+      { "indexed": false, "internalType": "bytes32", "name": "unitHash", "type": "bytes32" }
+    ],
+    "name": "UpdateUnitHash",
+    "type": "event"
+  }
+];
+
 // AgentRegistry ABI - focusing on the create function and events
+// NOTE: create() requires uint32[] dependencies (component IDs). See blood-written rule #67.
 export const AGENT_REGISTRY_ABI = [
-  // create function
+  // create function (called internally by RegistriesManager, NOT directly)
   {
     "inputs": [
       {
@@ -23,6 +75,11 @@ export const AGENT_REGISTRY_ABI = [
         "internalType": "bytes32",
         "name": "agentHash",
         "type": "bytes32"
+      },
+      {
+        "internalType": "uint32[]",
+        "name": "dependencies",
+        "type": "uint32[]"
       }
     ],
     "name": "create",
@@ -312,6 +369,136 @@ export const SERVICE_REGISTRY_ABI = [
   }
 ];
 
+// ServiceRegistryL2 ABI — L2 (Base) version with AgentParams struct (uint32 slots, uint96 bond)
+// Address on Base: 0x3C1fF68f5aa342D296d4DEe4Bb1cACCA912D95fE
+// NOTE: create() does NOT include `token` param — that's on ServiceManager.
+export const SERVICE_REGISTRY_L2_ABI = [
+  // create function — direct registry call (no token param)
+  {
+    "inputs": [
+      { "internalType": "address", "name": "serviceOwner", "type": "address" },
+      { "internalType": "bytes32", "name": "configHash", "type": "bytes32" },
+      { "internalType": "uint32[]", "name": "agentIds", "type": "uint32[]" },
+      {
+        "components": [
+          { "internalType": "uint32", "name": "slots", "type": "uint32" },
+          { "internalType": "uint96", "name": "bond", "type": "uint96" }
+        ],
+        "internalType": "struct AgentParams[]",
+        "name": "agentParams",
+        "type": "tuple[]"
+      },
+      { "internalType": "uint32", "name": "threshold", "type": "uint32" }
+    ],
+    "name": "create",
+    "outputs": [
+      { "internalType": "uint256", "name": "serviceId", "type": "uint256" }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  // CreateService event
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "internalType": "uint256", "name": "serviceId", "type": "uint256" },
+      { "indexed": false, "internalType": "bytes32", "name": "configHash", "type": "bytes32" }
+    ],
+    "name": "CreateService",
+    "type": "event"
+  },
+  // getService function
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "serviceId", "type": "uint256" }
+    ],
+    "name": "getService",
+    "outputs": [
+      {
+        "components": [
+          { "internalType": "uint96", "name": "securityDeposit", "type": "uint96" },
+          { "internalType": "address", "name": "multisig", "type": "address" },
+          { "internalType": "bytes32", "name": "configHash", "type": "bytes32" },
+          { "internalType": "uint32", "name": "threshold", "type": "uint32" },
+          { "internalType": "uint32", "name": "maxNumAgentInstances", "type": "uint32" },
+          { "internalType": "uint32", "name": "numAgentInstances", "type": "uint32" },
+          { "internalType": "enum ServiceRegistryL2.ServiceState", "name": "state", "type": "uint8" },
+          { "internalType": "uint32[]", "name": "agentIds", "type": "uint32[]" }
+        ],
+        "internalType": "struct ServiceRegistryL2.Service",
+        "name": "service",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  // ownerOf function
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "id", "type": "uint256" }
+    ],
+    "name": "ownerOf",
+    "outputs": [
+      { "internalType": "address", "name": "owner", "type": "address" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  // exists function
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "unitId", "type": "uint256" }
+    ],
+    "name": "exists",
+    "outputs": [
+      { "internalType": "bool", "name": "", "type": "bool" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  // totalSupply function
+  {
+    "inputs": [],
+    "name": "totalSupply",
+    "outputs": [
+      { "internalType": "uint256", "name": "", "type": "uint256" }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  }
+];
+
+// ServiceManager ABI — L2 wrapper that handles token bonds
+// Address on Base: 0x1262136cac6a06A782DC94eb3a3dF0b4d09FF6A6
+// Use this when token-based bonding is needed (includes `token` param).
+export const SERVICE_MANAGER_L2_ABI = [
+  {
+    "inputs": [
+      { "internalType": "address", "name": "serviceOwner", "type": "address" },
+      { "internalType": "address", "name": "token", "type": "address" },
+      { "internalType": "bytes32", "name": "configHash", "type": "bytes32" },
+      { "internalType": "uint32[]", "name": "agentIds", "type": "uint32[]" },
+      {
+        "components": [
+          { "internalType": "uint32", "name": "slots", "type": "uint32" },
+          { "internalType": "uint96", "name": "bond", "type": "uint96" }
+        ],
+        "internalType": "struct AgentParams[]",
+        "name": "agentParams",
+        "type": "tuple[]"
+      },
+      { "internalType": "uint32", "name": "threshold", "type": "uint32" }
+    ],
+    "name": "create",
+    "outputs": [
+      { "internalType": "uint256", "name": "serviceId", "type": "uint256" }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
+];
+
 // OLAS Staking Contract ABI - based on OLAS protocol staking patterns
 export const OLAS_STAKING_ABI = [
   // stake function
@@ -495,11 +682,58 @@ export enum StakingState {
 // Contract interaction helper functions
 export class OlasContractHelpers {
   /**
-   * Encode agent creation transaction data
+   * Encode component creation via RegistriesManager (unitType=0).
+   * Components can have empty dependencies.
+   */
+  static encodeComponentCreation(
+    componentOwner: string,
+    componentHash: string,
+    dependencies: number[] = [],
+  ): string {
+    const iface = new Interface(REGISTRIES_MANAGER_ABI);
+    return iface.encodeFunctionData('create', [0, componentOwner, componentHash, dependencies]);
+  }
+
+  /**
+   * Encode agent creation via RegistriesManager (unitType=1).
+   * Agents MUST have at least one component dependency.
+   */
+  static encodeAgentCreationViaManager(
+    agentOwner: string,
+    agentHash: string,
+    componentDependencies: number[],
+  ): string {
+    const iface = new Interface(REGISTRIES_MANAGER_ABI);
+    return iface.encodeFunctionData('create', [1, agentOwner, agentHash, componentDependencies]);
+  }
+
+  /**
+   * Parse CreateUnit event from RegistriesManager transaction receipt.
+   * Returns the unitId.
+   */
+  static parseCreateUnitEvent(receipt: any): number | null {
+    return this.parseEventFromReceipt(receipt, REGISTRIES_MANAGER_ABI, 'CreateUnit', 'unitId');
+  }
+
+  /**
+   * Encode hash update via RegistriesManager.
+   * unitType: 0 = Component, 1 = Agent
+   */
+  static encodeUpdateHash(
+    unitType: number,
+    unitId: number,
+    newHash: string,
+  ): string {
+    const iface = new Interface(REGISTRIES_MANAGER_ABI);
+    return iface.encodeFunctionData('updateHash', [unitType, unitId, newHash]);
+  }
+
+  /**
+   * @deprecated Use encodeAgentCreationViaManager() instead — direct calls revert with ManagerOnly
    */
   static encodeAgentCreation(agentOwner: string, agentHash: string): string {
     const iface = new Interface(AGENT_REGISTRY_ABI);
-    return iface.encodeFunctionData('create', [agentOwner, agentHash]);
+    return iface.encodeFunctionData('create', [agentOwner, agentHash, []]);
   }
 
   /**
@@ -618,8 +852,11 @@ export class OlasContractHelpers {
 }
 
 export default {
+  REGISTRIES_MANAGER_ABI,
   AGENT_REGISTRY_ABI,
   SERVICE_REGISTRY_ABI,
+  SERVICE_REGISTRY_L2_ABI,
+  SERVICE_MANAGER_L2_ABI,
   OLAS_STAKING_ABI,
   ServiceState,
   StakingState,
