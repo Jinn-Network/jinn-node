@@ -1,8 +1,7 @@
-import { getCurrentJobContext } from './context.js';
 import { mcpLogger } from '../../../../logging/index.js';
 import { postJson } from '../../../../http/client.js';
+import { signControlApiHeaders } from '../../../../http/erc8128.js';
 import { getOptionalControlApiUrl, getUseControlApi } from './env.js';
-import { getMechAddress } from '../../../../env/operate-profile.js';
 
 type RequestClaim = {
   request_id: string;
@@ -38,23 +37,9 @@ const CONTROL_API_URL = getOptionalControlApiUrl();
 const RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1000; // 1 second
 
-function getWorkerAddress(): string {
-  const context = getCurrentJobContext();
-  if (context.mechAddress) {
-    return context.mechAddress;
-  }
-
-  const addr = getMechAddress();
-  if (!addr) {
-    throw new Error('Service target mech address not configured. Check .operate service config (MECH_TO_CONFIG).');
-  }
-  return addr;
-}
-
 function buildHeaders(requestId: string, operationType: string): Record<string, string> {
   return {
     'Content-Type': 'application/json',
-    'X-Worker-Address': getWorkerAddress(),
     'Idempotency-Key': `${requestId}-${operationType}-${Date.now()}`, // Simple idempotency key
   };
 }
@@ -72,11 +57,14 @@ async function fetchWithRetry(
     try {
       mcpLogger.debug({ attempt: i + 1, totalAttempts: attempts, operation }, 'Control API request attempt');
 
+      // Sign with ERC-8128 on every attempt (fresh nonce + timestamp per retry)
+      const signedHeaders = await signControlApiHeaders(CONTROL_API_URL, body, headers);
+
       const json = await postJson<any>(
         CONTROL_API_URL,
         body,
         {
-          headers,
+          headers: signedHeaders,
           timeoutMs: 10_000,
           maxRetries: 0,
           context: {
@@ -149,7 +137,7 @@ export function isControlApiEnabled(): boolean {
 
 export function shouldUseControlApi(tableName: string): boolean {
   if (!isControlApiEnabled()) return false;
-  
+
   const onchainTables = ['onchain_request_claims', 'onchain_job_reports', 'onchain_artifacts', 'onchain_messages'];
   return onchainTables.includes(tableName);
 }
