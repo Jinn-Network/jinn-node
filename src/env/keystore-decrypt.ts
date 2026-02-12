@@ -234,7 +234,9 @@ export function decryptKeystoreV3(keystoreJson: string, password: string): strin
   }
 
   // Decrypt using AES-128-CTR
-  const iv = Buffer.from(cryptoSection.cipherparams.iv, 'hex');
+  // Some Python AEA keystores produce IVs shorter than 16 bytes; left-pad with zeros.
+  const ivHex = cryptoSection.cipherparams.iv.replace(/^0x/, '').padStart(32, '0');
+  const iv = Buffer.from(ivHex, 'hex');
   const decipher = createDecipheriv('aes-128-ctr', key.slice(0, 16), iv);
   const privateKeyBytes = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
 
