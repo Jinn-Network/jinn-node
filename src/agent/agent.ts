@@ -311,7 +311,8 @@ export class Agent {
       }
     }
 
-    // Set GEMINI_HOME to /tmp for writable storage (avoids macOS extended attributes)
+    // Set Gemini CLI home to /tmp for writable storage (avoids macOS extended attributes)
+    // Note: Gemini CLI respects GEMINI_CLI_HOME (not GEMINI_HOME) for extension discovery
     this.geminiHome = join('/tmp', '.gemini-worker');
 
     // Log protection limits
@@ -331,11 +332,11 @@ export class Agent {
       if (existsSync(workspacePath)) return true;
     }
 
-    // Check GEMINI_HOME scope (runtime location)
+    // Check geminiHome scope (runtime location — exported as GEMINI_CLI_HOME)
     const homePath = join(this.geminiHome, 'extensions', extensionName);
     if (existsSync(homePath)) return true;
 
-    // Check ~/.gemini/ scope (where CLI actually installs, ignoring GEMINI_HOME)
+    // Check ~/.gemini/ scope (legacy — CLI uses GEMINI_CLI_HOME when set)
     const defaultHomePath = join(homedir(), '.gemini', 'extensions', extensionName);
     if (existsSync(defaultHomePath)) return true;
 
@@ -411,7 +412,7 @@ export class Agent {
           cwd: this.codeWorkspace || this.agentRoot,
           stdio: 'pipe',
           input: 'y\n',
-          env: { ...process.env, GEMINI_HOME: this.geminiHome },
+          env: { ...process.env, GEMINI_CLI_HOME: this.geminiHome },
         }
       );
       agentLogger.info({ extensionUrl, extensionName }, `Installed ${extensionName} extension`);
@@ -858,14 +859,15 @@ export class Agent {
         }, 'Prompt too large for argv; piping via stdin and disabling sandbox');
       }
 
-      // GEMINI_HOME is used for extensions and CLI config (not OAuth credentials)
+      // GEMINI_CLI_HOME controls where Gemini CLI looks for extensions and config
+      // (CLI respects GEMINI_CLI_HOME, not GEMINI_HOME — see gemini-cli-core/utils/paths.js)
       const geminiHome = join('/tmp', '.gemini-worker');
-      // OAuth credentials must be in ~/.gemini/ - CLI ignores GEMINI_HOME for auth
+      // OAuth credentials must be in ~/.gemini/ — CLI ignores GEMINI_CLI_HOME for auth
       const userGeminiDir = join(homedir(), '.gemini');
       try {
         mkdirSync(geminiHome, { recursive: true });
         mkdirSync(userGeminiDir, { recursive: true });
-        envWithJob.GEMINI_HOME = geminiHome; // For extensions only
+        envWithJob.GEMINI_CLI_HOME = geminiHome;
 
         // OAuth credentials (oauth_creds.json, google_accounts.json, settings.json) are now
         // written to ~/.gemini/ by geminiQuota.ts during credential selection before job runs
@@ -896,8 +898,8 @@ export class Agent {
         })(),
         env: {
           ...envWithJob,
-          // Set GEMINI_HOME to a writable directory within the project to avoid EPERM errors
-          GEMINI_HOME: geminiHome,
+          // Set GEMINI_CLI_HOME so CLI discovers extensions in /tmp/.gemini-worker/
+          GEMINI_CLI_HOME: geminiHome,
           // Expose workspace directory for native tools even when cwd is stable
           ...(this.codeWorkspace && this.codeWorkspace.trim() !== '' ? { JINN_WORKSPACE_DIR: this.codeWorkspace } : {}),
           // Enable sandbox mode (default: 'sandbox-exec' for macOS Seatbelt isolation)

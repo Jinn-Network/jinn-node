@@ -1,6 +1,7 @@
 {
   "name": "jinn-node",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "main": "dist/worker/mech_worker.js",
   "types": "dist/worker/mech_worker.d.ts",
