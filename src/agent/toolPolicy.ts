@@ -382,6 +382,24 @@ export const VALID_JOB_TOOLS: ReadonlySet<string> = new Set([
   'inspect_workstream',
   'inspect_job_run',
   'inspect_job',
+  // Credential-requiring tools (need credential bridge at runtime)
+  // GitHub (github_tools.ts → getCredential('github'))
+  'get_file_contents',
+  'search_code',
+  'list_commits',
+  // Blog analytics (blog-analytics.ts → getCredential('umami'))
+  'blog_get_stats',
+  'blog_get_top_pages',
+  'blog_get_referrers',
+  'blog_get_metrics',
+  'blog_get_pageviews',
+  'blog_get_performance_summary',
+  // OpenAI (shared/openai.ts → getCredential('openai'))
+  'embed_text',
+  // Civitai (shared/civitai.ts → getCredential('civitai'))
+  'civitai_generate_image',
+  // Twitter (twitter-social.ts → getCredential('twitter'))
+  'verify_trade_ideas',
 ]);
 
 /**
