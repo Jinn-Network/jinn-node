@@ -25,6 +25,7 @@ import { fetchIpfsMetadata } from './metadata/fetchIpfsMetadata.js';
 import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
 import { shouldStop } from './cycleControl.js';
 import { waitForGeminiQuota } from './llm/geminiQuota.js';
+import { signControlApiHeaders } from '../http/erc8128.js';
 import {
   getOptionalWorkerJobDelayMs,
   getOptionalWorkerMechFilterMode,
@@ -1204,14 +1205,28 @@ async function checkControlApiHealth(): Promise<void> {
   }
 
   try {
-    // Simple health check query
-    const query = `query { __typename }`;
-    await graphQLRequest({
+    // Control API requires ERC-8128 signatures for all GraphQL operations.
+    const body = {
+      query: `query { __typename }`,
+      variables: {},
+    };
+    const baseHeaders = {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': `healthcheck:${Date.now()}`,
+    };
+    const headers = await signControlApiHeaders(CONTROL_API_URL, body, baseHeaders);
+
+    const result = await graphQLRequest<{ __typename: string }>({
       url: CONTROL_API_URL,
-      query,
+      query: body.query,
+      variables: body.variables,
+      headers,
       maxRetries: 0,
       context: { operation: 'healthCheck' }
     });
+    if (!result?.__typename) {
+      throw new Error('Control API health check returned empty payload');
+    }
     workerLogger.info({ controlApiUrl: CONTROL_API_URL }, 'Control API health check passed');
   } catch (e: any) {
     workerLogger.error({
