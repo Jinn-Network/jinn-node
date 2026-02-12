@@ -8,6 +8,7 @@ export {
 export {
   ActivityMonitor,
   type ServiceActivityStatus,
+  type ServiceDashboardStatus,
   type ServiceCheckInput,
 } from './ActivityMonitor.js';
 

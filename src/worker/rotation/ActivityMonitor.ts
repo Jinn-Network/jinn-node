@@ -34,6 +34,14 @@ const STAKING_ABI = [
   'function activityChecker() view returns (address)',
   'function rewardsPerSecond() view returns (uint256)',
   'function getServiceIds() view returns (uint256[])',
+  // Dashboard extensions (from Pearl olas-operate-app STAKING_TOKEN_PROXY_ABI)
+  'function calculateStakingReward(uint256 serviceId) view returns (uint256 reward)',
+  'function epochCounter() view returns (uint256)',
+  'function getNextRewardCheckpointTimestamp() view returns (uint256 tsNext)',
+  'function getStakingState(uint256 serviceId) view returns (uint8 stakingState)',
+  'function minStakingDeposit() view returns (uint256)',
+  'function maxNumServices() view returns (uint256)',
+  'function maxNumInactivityPeriods() view returns (uint256)',
 ];
 
 const ACTIVITY_CHECKER_ABI = [
@@ -72,12 +80,42 @@ export interface ServiceCheckInput {
   stakingContract: string;
 }
 
+export interface ServiceDashboardStatus extends ServiceActivityStatus {
+  // Rewards
+  accruedRewards: bigint;
+  rewardsPerSecond: bigint;
+  estimatedEpochReward: bigint;
+
+  // Epoch
+  currentEpoch: number;
+  epochEndTimestamp: number;
+  epochProgressPct: number;
+
+  // Staking health
+  stakingState: number;          // 0=NotStaked, 1=Staked, 2=Evicted
+  inactivityCount: number;
+  maxInactivityPeriods: number;
+  tsStart: number;               // When service was staked
+
+  // Contract info
+  minStakingDeposit: bigint;
+  maxNumServices: number;
+  currentStakedCount: number;
+}
+
 // Contract-level cache (immutable data cached permanently)
 interface ContractLevelCache {
   livenessPeriod: number;
   livenessRatio: bigint;
   activityCheckerAddress: string;
   rewardsPerSecond: bigint;
+}
+
+// Extended immutable contract data (for dashboard)
+interface ContractDashboardCache {
+  minStakingDeposit: bigint;
+  maxNumServices: number;
+  maxInactivityPeriods: number;
 }
 
 // Checkpoint-level cache (changes once per epoch)
@@ -95,6 +133,9 @@ export class ActivityMonitor {
 
   // TTL cache for checkpoint data (keyed by staking contract address)
   private checkpointCache = new Map<string, CheckpointCache>();
+
+  // Permanent cache for extended dashboard data (keyed by staking contract address)
+  private dashboardCache = new Map<string, ContractDashboardCache>();
 
   constructor(rpcUrl: string, cacheTtlMs: number = 60_000) {
     this.provider = new ethers.JsonRpcProvider(rpcUrl);
@@ -265,11 +306,147 @@ export class ActivityMonitor {
   }
 
   /**
+   * Get extended contract data for dashboard (immutable, cached permanently)
+   */
+  private async getContractDashboardData(stakingContract: string): Promise<ContractDashboardCache> {
+    const key = stakingContract.toLowerCase();
+    const cached = this.dashboardCache.get(key);
+    if (cached) return cached;
+
+    const contract = new ethers.Contract(stakingContract, STAKING_ABI, this.provider);
+
+    const [minStakingDeposit, maxNumServices, maxInactivityPeriods] = await Promise.all([
+      contract.minStakingDeposit(),
+      contract.maxNumServices(),
+      contract.maxNumInactivityPeriods(),
+    ]);
+
+    const data: ContractDashboardCache = {
+      minStakingDeposit: BigInt(minStakingDeposit),
+      maxNumServices: Number(maxNumServices),
+      maxInactivityPeriods: Number(maxInactivityPeriods),
+    };
+
+    this.dashboardCache.set(key, data);
+    return data;
+  }
+
+  /**
+   * Get enriched dashboard data for a service (activity + rewards + staking health)
+   */
+  async getDashboardData(input: ServiceCheckInput): Promise<ServiceDashboardStatus> {
+    const { serviceConfigId, serviceId, multisig, stakingContract } = input;
+    const now = Math.floor(Date.now() / 1000);
+
+    // Get base activity status first
+    const activity = await this.checkService(input);
+
+    if (activity.error) {
+      // Return with zeroed dashboard fields on error
+      return {
+        ...activity,
+        accruedRewards: 0n,
+        rewardsPerSecond: 0n,
+        estimatedEpochReward: 0n,
+        currentEpoch: 0,
+        epochEndTimestamp: 0,
+        epochProgressPct: 0,
+        stakingState: 0,
+        inactivityCount: 0,
+        maxInactivityPeriods: 0,
+        tsStart: 0,
+        minStakingDeposit: 0n,
+        maxNumServices: 0,
+        currentStakedCount: 0,
+      };
+    }
+
+    try {
+      const contractData = await this.getContractData(stakingContract);
+      const dashboardData = await this.getContractDashboardData(stakingContract);
+      const contract = new ethers.Contract(stakingContract, STAKING_ABI, this.provider);
+
+      // Fetch dashboard-specific data (parallel)
+      const [accruedRewards, epochCounter, nextCheckpointTs, stakingState, serviceIds, serviceInfo] = await Promise.all([
+        contract.calculateStakingReward(serviceId).catch(() => 0n),
+        contract.epochCounter().catch(() => 0n),
+        contract.getNextRewardCheckpointTimestamp().catch(() => 0n),
+        contract.getStakingState(serviceId).catch(() => 0),
+        contract.getServiceIds().catch(() => []),
+        contract.getServiceInfo(serviceId),
+      ]);
+
+      const tsCheckpoint = activity.tsCheckpoint;
+      const livenessPeriod = activity.livenessPeriod;
+      const epochEndTs = Number(nextCheckpointTs) || (tsCheckpoint + livenessPeriod);
+      const elapsed = now - tsCheckpoint;
+      const epochProgressPct = livenessPeriod > 0
+        ? Math.min(100, Math.round((elapsed / livenessPeriod) * 100))
+        : 0;
+
+      return {
+        ...activity,
+        accruedRewards: BigInt(accruedRewards),
+        rewardsPerSecond: contractData.rewardsPerSecond,
+        estimatedEpochReward: contractData.rewardsPerSecond * BigInt(livenessPeriod),
+        currentEpoch: Number(epochCounter),
+        epochEndTimestamp: epochEndTs,
+        epochProgressPct,
+        stakingState: Number(stakingState),
+        inactivityCount: Number(serviceInfo.inactivity ?? 0),
+        maxInactivityPeriods: dashboardData.maxInactivityPeriods,
+        tsStart: Number(serviceInfo.tsStart ?? 0),
+        minStakingDeposit: dashboardData.minStakingDeposit,
+        maxNumServices: dashboardData.maxNumServices,
+        currentStakedCount: Array.isArray(serviceIds) ? serviceIds.length : 0,
+      };
+    } catch (error: any) {
+      rotationLogger.error({
+        serviceId,
+        error: error?.message || String(error),
+      }, 'Dashboard data fetch failed');
+
+      return {
+        ...activity,
+        accruedRewards: 0n,
+        rewardsPerSecond: 0n,
+        estimatedEpochReward: 0n,
+        currentEpoch: 0,
+        epochEndTimestamp: 0,
+        epochProgressPct: 0,
+        stakingState: 0,
+        inactivityCount: 0,
+        maxInactivityPeriods: 0,
+        tsStart: 0,
+        minStakingDeposit: 0n,
+        maxNumServices: 0,
+        currentStakedCount: 0,
+      };
+    }
+  }
+
+  /**
+   * Get dashboard data for all services
+   */
+  async getAllDashboardData(inputs: ServiceCheckInput[]): Promise<ServiceDashboardStatus[]> {
+    if (inputs.length === 0) return [];
+
+    // Pre-warm caches
+    const uniqueContracts = [...new Set(inputs.map(i => i.stakingContract.toLowerCase()))];
+    await Promise.all(uniqueContracts.map(c => this.getContractData(c).catch(() => null)));
+    await Promise.all(uniqueContracts.map(c => this.getContractDashboardData(c).catch(() => null)));
+    await Promise.all(uniqueContracts.map(c => this.getCheckpointTs(c).catch(() => 0)));
+
+    return Promise.all(inputs.map(input => this.getDashboardData(input)));
+  }
+
+  /**
    * Clear all caches (for testing or when staking state changes)
    */
   clearCache(): void {
     this.contractCache.clear();
     this.checkpointCache.clear();
+    this.dashboardCache.clear();
     rotationLogger.debug('Activity monitor caches cleared');
   }
 }
