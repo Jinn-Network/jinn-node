@@ -164,8 +164,68 @@ export async function readServiceConfig(
 }
 
 /**
+ * Remove service directories that were created but never deployed on-chain.
+ * A config is "undeployed" if chain_data.token and chain_data.multisig are both absent.
+ * Also removes directories with missing or malformed config.json.
+ */
+export async function cleanupUndeployedConfigs(
+  middlewarePath: string
+): Promise<{ removed: string[]; errors: string[] }> {
+  const removed: string[] = [];
+  const errors: string[] = [];
+  const servicesDir = join(middlewarePath, '.operate', 'services');
+
+  let entries;
+  try {
+    entries = await fs.readdir(servicesDir, { withFileTypes: true });
+  } catch {
+    return { removed, errors };
+  }
+
+  const serviceDirs = entries.filter(e => e.isDirectory() && e.name.startsWith('sc-'));
+
+  for (const dir of serviceDirs) {
+    const servicePath = join(servicesDir, dir.name);
+    const configPath = join(servicePath, 'config.json');
+
+    try {
+      const raw = await fs.readFile(configPath, 'utf-8');
+      const config = JSON.parse(raw);
+      const homeChain = config.home_chain || 'base';
+      const chainData = config.chain_configs?.[homeChain]?.chain_data;
+      const token = chainData?.token;
+      const multisig = chainData?.multisig;
+
+      // If token and multisig are both absent → never deployed on-chain
+      if (!token && !multisig) {
+        configLogger.info({ service: dir.name }, 'Removing undeployed service config');
+        await fs.rm(servicePath, { recursive: true, force: true });
+        removed.push(dir.name);
+      }
+    } catch (err: any) {
+      if (err.code === 'ENOENT' || err instanceof SyntaxError) {
+        // Missing or malformed config.json → remove
+        configLogger.info({ service: dir.name }, 'Removing service config with missing/malformed config.json');
+        try {
+          await fs.rm(servicePath, { recursive: true, force: true });
+          removed.push(dir.name);
+        } catch (rmErr) {
+          errors.push(`${dir.name}: ${rmErr}`);
+        }
+      }
+    }
+  }
+
+  if (removed.length > 0) {
+    configLogger.info({ count: removed.length, services: removed }, 'Cleaned up undeployed service configs');
+  }
+
+  return { removed, errors };
+}
+
+/**
  * List all service configurations in middleware .operate directory
- * 
+ *
  * @param middlewarePath Path to olas-operate-middleware directory
  * @returns Array of ServiceInfo objects
  */

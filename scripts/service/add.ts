@@ -20,7 +20,7 @@ import { join } from 'path';
 import { OlasOperateWrapper } from '../../src/worker/OlasOperateWrapper.js';
 import { createDefaultServiceConfig, SERVICE_CONSTANTS } from '../../src/worker/config/ServiceConfig.js';
 import { enableMechMarketplaceInConfig } from '../../src/worker/config/MechConfig.js';
-import { listServiceConfigs } from '../../src/worker/ServiceConfigReader.js';
+import { listServiceConfigs, cleanupUndeployedConfigs } from '../../src/worker/ServiceConfigReader.js';
 import { printHeader, printStep, printFundingRequirements, printSuccess, printError } from '../../src/setup/display.js';
 import { ethers } from 'ethers';
 
@@ -114,9 +114,18 @@ async function main() {
     }
     printStep('done', 'Master Safe found', `Address: ${masterSafe}`);
 
+    // Clean up stale configs from previous interrupted runs
+    const middlewarePath = wrapper.getMiddlewarePath();
+    printStep('active', 'Cleaning up stale configs...');
+    const { removed } = await cleanupUndeployedConfigs(middlewarePath);
+    if (removed.length > 0) {
+      printStep('done', `Removed ${removed.length} stale config(s)`, removed.join(', '));
+    } else {
+      printStep('done', 'No stale configs found');
+    }
+
     // List existing services
     printStep('active', 'Listing existing services...');
-    const middlewarePath = wrapper.getMiddlewarePath();
     const existingServices = await listServiceConfigs(middlewarePath);
     printStep('done', `Found ${existingServices.length} existing service(s)`);
 
