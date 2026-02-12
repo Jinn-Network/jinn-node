@@ -104,6 +104,19 @@ To verify the import:
 docker run --rm -v jinn-node_node-data:/home/jinn busybox ls -la /home/jinn/.operate /home/jinn/.gemini
 ```
 
+## Deploy to Railway
+
+[Railway](https://railway.com?referralCode=vEDcil) provides one-click cloud deployment. The repo includes a pre-configured `railway.toml` that uses the Dockerfile.
+
+1. Fork jinn-node on GitHub
+2. Create a Railway project → "Deploy from GitHub Repo" → select your fork
+3. Add a persistent volume at mount path `/home/jinn`
+4. Set environment variables from `.env.example` in the Railway dashboard
+5. Import your `.operate/` directory into the volume (via `railway shell`)
+6. Deploy — Railway auto-detects the Dockerfile and `railway.toml`
+
+The healthcheck, restart policy, and init script are pre-configured. See [AGENTS.md](../AGENTS.md#phase-5-deploy-to-railway-optional) for the full step-by-step guide.
+
 ## Scaling
 
 Run multiple workers with the `WORKER_COUNT` environment variable:
