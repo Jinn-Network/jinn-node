@@ -41,6 +41,7 @@ export function getInheritedEnv(): Record<string, string> {
 
 const DISPATCH_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes - long enough for jobs to process
 const MAX_VERIFICATION_ATTEMPTS = 3;
+const MAX_PARENT_DISPATCHES = 5; // Max times a parent job def can be dispatched across all children
 
 /**
  * Check if parent was already dispatched for this child JOB DEFINITION by querying on-chain state.
@@ -104,6 +105,36 @@ async function wasRecentlyDispatched(
   } catch (error) {
     workerLogger.warn({ error: serializeError(error), parentJobDefId, childJobDefId }, 'Failed to check recent dispatch, allowing dispatch (fail-open)');
     return false;
+  }
+}
+
+/**
+ * Count total existing dispatches for a parent job definition.
+ * Used to enforce MAX_PARENT_DISPATCHES and prevent unbounded cascade (blood rule #65).
+ */
+async function countExistingDispatches(parentJobDefId: string): Promise<number> {
+  try {
+    const ponderUrl = getPonderGraphqlUrl();
+    const response = await graphQLRequest<{
+      requests: { items: Array<{ id: string }> }
+    }>({
+      url: ponderUrl,
+      query: `query CountParentDispatches($jobDefId: String!) {
+        requests(
+          where: { jobDefinitionId: $jobDefId },
+          limit: 20
+        ) {
+          items { id }
+        }
+      }`,
+      variables: { jobDefId: parentJobDefId },
+      context: { operation: 'countParentDispatches', parentJobDefId }
+    });
+    return response?.requests?.items?.length ?? 0;
+  } catch (error) {
+    workerLogger.warn({ error: serializeError(error), parentJobDefId },
+      'Failed to count existing dispatches - allowing dispatch (fail-open)');
+    return 0;
   }
 }
 
@@ -1319,6 +1350,31 @@ export async function dispatchParentIfNeeded(
       childJobDefId,
       claimingSibling
     }, 'Skipping parent dispatch (already claimed by sibling via atomic check)');
+    return;
+  }
+
+  // Guard 1: Cooldown - skip if parent was recently dispatched by this child's job def
+  if (childJobDefId) {
+    const recentlyDispatched = await wasRecentlyDispatched(parentJobDefId, childJobDefId);
+    if (recentlyDispatched) {
+      workerLogger.info({
+        parentJobDefId,
+        childJobDefId,
+        cooldownMs: DISPATCH_COOLDOWN_MS,
+      }, 'Skipping parent dispatch (cooldown - recently dispatched from this child job def)');
+      return;
+    }
+  }
+
+  // Guard 2: Max total dispatches - prevent unbounded cascade (blood rule #65)
+  const existingCount = await countExistingDispatches(parentJobDefId);
+  if (existingCount >= MAX_PARENT_DISPATCHES) {
+    workerLogger.warn({
+      parentJobDefId,
+      childJobDefId,
+      existingCount,
+      max: MAX_PARENT_DISPATCHES,
+    }, 'Skipping parent dispatch (max total dispatches reached for this parent job def)');
     return;
   }
 
