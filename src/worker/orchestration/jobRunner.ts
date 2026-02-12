@@ -96,21 +96,19 @@ export async function processOnce(
 
       const modelSelection = selectGeminiModelWithPolicy(metadata.model, effectivePolicy, DEFAULT_WORKER_MODEL);
       if (modelSelection.changed) {
-        const logFn =
-          modelSelection.reason === 'policy_fallback' || modelSelection.reason === 'deprecated_fallback'
-            ? workerLogger.warn
-            : workerLogger.info;
-        logFn(
-          {
-            requestedModel: metadata.model,
-            normalizedRequested: modelSelection.normalizedRequested,
-            selectedModel: modelSelection.selected,
-            reason: modelSelection.reason,
-            policyDefaultModel: effectivePolicy.defaultModel,
-            policyAllowedModelsCount: effectivePolicy.allowedModels?.length ?? 0,
-          },
-          'Selected Gemini model'
-        );
+        const logPayload = {
+          requestedModel: metadata.model,
+          normalizedRequested: modelSelection.normalizedRequested,
+          selectedModel: modelSelection.selected,
+          reason: modelSelection.reason,
+          policyDefaultModel: effectivePolicy.defaultModel,
+          policyAllowedModelsCount: effectivePolicy.allowedModels?.length ?? 0,
+        };
+        if (modelSelection.reason === 'policy_fallback' || modelSelection.reason === 'deprecated_fallback') {
+          workerLogger.warn(logPayload, 'Selected Gemini model');
+        } else {
+          workerLogger.info(logPayload, 'Selected Gemini model');
+        }
       }
       metadata.model = modelSelection.selected;
 
