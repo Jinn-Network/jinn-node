@@ -12,7 +12,7 @@ import type { UnclaimedRequest, FinalStatus, AgentExecutionResult, IpfsMetadata 
  */
 export async function storeOnchainReport(
   request: UnclaimedRequest,
-  workerAddress: string,
+  _workerAddress: string,
   result: AgentExecutionResult,
   finalStatus: FinalStatus,
   error?: any,
@@ -34,7 +34,7 @@ export async function storeOnchainReport(
         jobInstanceStatusUpdate: result.jobInstanceStatusUpdate // Include extracted status update string
       })
     };
-    await apiCreateJobReport(request.id, payload, workerAddress);
+    await apiCreateJobReport(request.id, payload);
   } catch (reportError: any) {
     workerLogger.warn({
       requestId: request.id,
