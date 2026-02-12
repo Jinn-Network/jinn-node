@@ -81,6 +81,7 @@
     "@modelcontextprotocol/sdk": "^1.11.0",
     "@octokit/rest": "^22.0.1",
     "@safe-global/protocol-kit": "^6.1.0",
+    "@slicekit/erc8128": "^0.1.0",
     "@supabase/supabase-js": "^2.53.0",
     "civitai": "^0.1.15",
     "cross-fetch": "^4.1.0",
