@@ -67,11 +67,18 @@ export function resolveChainId(chainConfig?: string | null, fallback = 8453): nu
 }
 
 export function createAccountHttpSigner(account: Account, chainId: number): EthHttpSigner {
+  const accountWithSigner = account as Account & {
+    signMessage?: (args: { message: { raw: Hex } }) => Promise<Hex>;
+  };
+  if (typeof accountWithSigner.signMessage !== 'function') {
+    throw new Error('Account does not support signMessage');
+  }
+
   return {
     address: normalizeAddress(account.address),
     chainId,
     signMessage: async (message: Uint8Array) =>
-      account.signMessage({ message: { raw: toHex(message) } }) as Promise<Hex>,
+      accountWithSigner.signMessage!({ message: { raw: toHex(message) } }),
   };
 }
 
@@ -182,4 +189,3 @@ export class InMemoryNonceStore implements NonceStore {
     }
   }
 }
-
