@@ -768,7 +768,7 @@ async function filterByDependencies(requests: UnclaimedRequest[]): Promise<Uncla
   return results.filter(r => r.canProceed).map(r => r.request);
 }
 
-async function tryClaim(request: UnclaimedRequest, workerAddress: string): Promise<boolean> {
+async function tryClaim(request: UnclaimedRequest): Promise<boolean> {
   const resolvedWorkstreamId = request.workstreamId || request.id;
 
   // Skip jobs already executed this session (prevents re-execution loop on delivery failure)
@@ -1090,6 +1090,8 @@ async function fetchSpecificRequest(requestId: string): Promise<UnclaimedRequest
  * @returns true if a job was processed, false if idle (no work found or claimed)
  */
 async function processOnce(): Promise<boolean> {
+  // This mech address is for request targeting/routing.
+  // Claim ownership in Control API is derived from the signed service EOA.
   const workerAddress = getMechAddress();
   if (!workerAddress) {
     workerLogger.error('Missing service mech address in .operate config or environment');
@@ -1193,7 +1195,7 @@ async function processOnce(): Promise<boolean> {
   // Try to claim a request
   let target: UnclaimedRequest | null = null;
   for (const c of candidates) {
-    const ok = await tryClaim(c, workerAddress);
+    const ok = await tryClaim(c);
     if (ok) {
       target = c;
       break;
