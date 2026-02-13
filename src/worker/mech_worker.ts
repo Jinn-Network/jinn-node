@@ -38,6 +38,7 @@ import {
   getWorkerCredentialInfo,
   isJobEligibleForWorker,
   jobRequiresCredentials,
+  reprobeWithRequestId,
 } from './filters/credentialFilter.js';
 
 export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
@@ -1203,6 +1204,25 @@ async function processOnce(): Promise<boolean> {
   }
 
   if (!target) return false;
+
+  // Re-probe credential bridge with requestId to discover venture-scoped credentials.
+  // The bridge resolves: requestId → workstream sender → venture → venture credentials.
+  // This doesn't affect the cached startup info — just logs what's available for this job.
+  try {
+    const jobCredInfo = await reprobeWithRequestId(target.id);
+    if (jobCredInfo.providers.size > 0) {
+      workerLogger.info(
+        { requestId: target.id, providers: [...jobCredInfo.providers] },
+        'Venture-scoped credential discovery complete',
+      );
+    }
+  } catch (err) {
+    // Non-fatal: bridge may be unavailable, agent can still try getCredential() at runtime
+    workerLogger.debug(
+      { requestId: target.id, error: err instanceof Error ? err.message : String(err) },
+      'Venture credential re-probe failed (non-fatal)',
+    );
+  }
 
   // Wait for quota only after successful claim (lazy quota check)
   // This eliminates quota API calls during idle periods

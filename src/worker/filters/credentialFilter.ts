@@ -115,9 +115,12 @@ export interface WorkerCredentialInfo {
  * ACL grants for. The worker signs the request directly with its private key
  * (no signing proxy needed — the worker has the key).
  *
+ * If requestId is provided, the probe also returns venture-scoped providers
+ * for the job's venture context (union of global + venture-scoped).
+ *
  * Returns empty providers on any failure (bridge down, no URL, no key).
  */
-export async function probeCredentialBridge(): Promise<WorkerCredentialInfo> {
+export async function probeCredentialBridge(requestId?: string): Promise<WorkerCredentialInfo> {
   const bridgeUrl = process.env.CREDENTIAL_BRIDGE_URL;
   if (!bridgeUrl) {
     return { providers: new Set(), isTrusted: false };
@@ -140,7 +143,8 @@ export async function probeCredentialBridge(): Promise<WorkerCredentialInfo> {
       privateKey as `0x${string}`,
       resolveChainId(process.env.CHAIN_ID || process.env.CHAIN_CONFIG || 'base'),
     );
-    const body = {};
+    const body: { requestId?: string } = {};
+    if (requestId) body.requestId = requestId;
 
     const url = `${bridgeUrl.replace(/\/$/, '')}/credentials/capabilities`;
     const request = await signRequestWithErc8128({
@@ -201,6 +205,17 @@ export async function getWorkerCredentialInfo(): Promise<WorkerCredentialInfo> {
     );
   }
   return _cachedInfo;
+}
+
+/**
+ * Re-probe the credential bridge with a specific requestId to discover
+ * venture-scoped credentials. Called after claiming a job when requestId is known.
+ *
+ * Returns the full set of providers (global + venture-scoped).
+ * Does NOT update the cached startup info — this is per-job.
+ */
+export async function reprobeWithRequestId(requestId: string): Promise<WorkerCredentialInfo> {
+  return probeCredentialBridge(requestId);
 }
 
 /** Reset cached info (for testing). */
