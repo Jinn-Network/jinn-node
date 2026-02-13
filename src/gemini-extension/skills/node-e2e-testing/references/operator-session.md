@@ -1,6 +1,6 @@
 # Operator Session
 
-Tests: Setup → Service management scripts → Add 2nd service → Multi-service validation → Dispatch job → Worker execution with rotation → Simulate activity → Verify automatic service switching.
+Tests: Setup → Operator scripts → Add 2nd service → Multi-service validation → Simulate activity → Dispatch job → Worker rotation switching + job execution.
 
 **Prerequisite**: Complete the shared steps (Infrastructure + Setup) from SKILL.md first.
 
@@ -82,44 +82,9 @@ cd "$CLONE_DIR" && yarn service:list 2>&1 | grep -i safe
 
 Save as `SERVICE_A_SAFE` (first service) and `SERVICE_B_SAFE` (second service).
 
-## Dispatch a Job
-
-From the monorepo root, dispatch a job for the worker to process:
-```bash
-yarn test:e2e:dispatch \
-  --workstream 0x9470f6f2bec6940c93fedebc0ea74bccaf270916f4693e96e8ccc586f26a89ac \
-  --cwd "$CLONE_DIR"
-```
-
-## Fund the Agent EOA
-
-The agent EOA needs ETH for gas. Get the address from the setup output:
-```bash
-yarn test:e2e:vnet fund <agent-eoa-address> --eth 0.01
-```
-
-## Run the Worker with Rotation
-
-Run the worker in the **background** with multi-service rotation and a short activity poll interval:
-```bash
-cd "$CLONE_DIR" && WORKER_MULTI_SERVICE=true WORKER_ACTIVITY_POLL_MS=15000 yarn worker --runs=3 > /tmp/worker-rotation.log 2>&1 &
-WORKER_PID=$!
-echo "Worker PID: $WORKER_PID"
-```
-
-Wait for the worker to process the job (check logs periodically):
-```bash
-tail -f /tmp/worker-rotation.log
-```
-
-Look for:
-- `Multi-service rotation active` — confirms ServiceRotator initialized with 2 services
-- `activeService` — which service was selected (both freshly staked, rotator picks first)
-- Worker claims and processes the dispatched job
-
-Once the job is processed (or after ~60s), move to the next step.
-
 ## Simulate Activity for Service A
+
+**Do this BEFORE dispatching or starting the worker.** This makes the rotator pick Service B from the start, so the dispatched job (which targets Service B's mech) gets processed immediately.
 
 **Key insight**: We can't wait for ~864 real requests per epoch. Instead, use Tenderly's `tenderly_setStorageAt` to manipulate on-chain activity counters, making Service A appear eligible while Service B still needs work.
 
@@ -191,24 +156,40 @@ main().catch(e => { console.error(e); process.exit(1); });
 "
 ```
 
-## Wait for Rotation Switch
+Expected output: `Verified nonces: [ '1000', '1000' ]`
 
-The worker's `WORKER_ACTIVITY_POLL_MS=15000` means it rechecks activity every 15 seconds. After the storage manipulation, the next reevaluation will see:
-- Service A: eligible (high request count)
-- Service B: needs work (still at 0)
-- Rotator switches to Service B
+## Fund Agent EOAs
 
-Watch the logs for the switch:
+Both agent EOAs need ETH for gas (marketplace request payment costs ~0.01 ETH). Get the addresses from `service:list` output, then fund from the monorepo root:
 ```bash
-grep -i "rotated\|rotation" /tmp/worker-rotation.log
+yarn test:e2e:vnet fund <agent-eoa-1> --eth 0.05
+yarn test:e2e:vnet fund <agent-eoa-2> --eth 0.05
 ```
 
-Expected log line: `Rotated to new service` with `activeService` set to service B's config ID.
+## Dispatch a Job
 
-After confirming (or after the worker exits with `--runs=3`), stop the worker:
+From the monorepo root, dispatch a job for the worker to process:
 ```bash
-kill $WORKER_PID 2>/dev/null
+yarn test:e2e:dispatch \
+  --workstream 0x9470f6f2bec6940c93fedebc0ea74bccaf270916f4693e96e8ccc586f26a89ac \
+  --cwd "$CLONE_DIR"
 ```
+
+The dispatch uses the active service's mech. Since the rotator will pick Service B (Service A is eligible from storage manipulation), the job is dispatched to Service B's mech.
+
+## Run the Worker with Rotation
+
+```bash
+cd "$CLONE_DIR" && WORKER_MULTI_SERVICE=true WORKER_ACTIVITY_POLL_MS=15000 yarn worker --single > /tmp/worker-rotation.log 2>&1
+```
+
+Using `--single` here because we only need one poll cycle: the rotator picks Service B at startup (Service A is already eligible), finds the dispatched job, and processes it.
+
+Look for in the output:
+- `Multi-service rotation active` — confirms ServiceRotator initialized with 2 services
+- `activeService` set to Service B's config ID (Service A is eligible, so rotator picks B)
+- `reason` — should say something like "service #N needs N more requests"
+- Worker claims and processes the dispatched job
 
 ## Debugging Sources
 
@@ -225,10 +206,10 @@ Always report these paths at session end for investigation:
 
 ## Acceptable Failures
 
-- **Delivery fails with 403 (quota exhausted)**: OK — the key validation is rotation switching.
-- **Worker times out before rotation**: OK if `tenderly_setStorageAt` hasn't been called yet. Call it, then verify the next reevaluation.
+- **Delivery fails with 403 (quota exhausted)**: OK — the key validation is rotation picking Service B and claiming the job.
 - **Rewards show `0.0000 OLAS`**: Expected for freshly staked services.
 - **`tenderly_setStorageAt` not available**: This is an admin RPC method. Ensure you're using the admin RPC URL (from VNet creation), not the public RPC URL.
+- **Dispatch fails with insufficient balance**: Fund the agent EOAs with ETH first (see "Fund Agent EOAs" step).
 
 ## Success Criteria
 
@@ -238,7 +219,7 @@ Always report these paths at session end for investigation:
 - [ ] `service:add` successfully provisioned and staked a 2nd service
 - [ ] `service:list` showed 2 services with distinct config IDs, service IDs, and safe addresses
 - [ ] `service:status` displayed data for both services
-- [ ] Worker initialized rotation with 2 services (logged "Multi-service rotation active")
-- [ ] Worker claimed and processed the dispatched job
 - [ ] `tenderly_setStorageAt` made service A appear eligible (verified via `getMultisigNonces`)
-- [ ] Worker rotation reevaluated and switched to service B (logged "Rotated to new service")
+- [ ] Worker initialized rotation with 2 services (logged "Multi-service rotation active")
+- [ ] Worker picked Service B as active (Service A eligible, B needs work)
+- [ ] Worker claimed and processed the dispatched job on Service B
