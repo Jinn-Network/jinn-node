@@ -189,3 +189,30 @@ export class InMemoryNonceStore implements NonceStore {
     }
   }
 }
+
+/**
+ * Redis-backed NonceStore for ERC-8128 replay protection.
+ * Uses atomic SET NX EX for race-safe nonce consumption.
+ * Fails closed (returns false) on Redis errors.
+ */
+export class RedisNonceStore implements NonceStore {
+  private readonly redis: { set(key: string, value: string, expiryMode: string, ttl: number, flag: string): Promise<string | null> };
+  private readonly keyPrefix: string;
+
+  constructor(redis: { set(key: string, value: string, expiryMode: string, ttl: number, flag: string): Promise<string | null> }, keyPrefix = 'erc8128:nonce:') {
+    this.redis = redis;
+    this.keyPrefix = keyPrefix;
+  }
+
+  async consume(key: string, ttlSeconds: number): Promise<boolean> {
+    try {
+      const redisKey = `${this.keyPrefix}${key}`;
+      const ttl = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? Math.ceil(ttlSeconds) : 300;
+      const result = await this.redis.set(redisKey, '1', 'EX', ttl, 'NX');
+      return result === 'OK';
+    } catch (err) {
+      console.error('[RedisNonceStore] consume failed:', err);
+      return false; // fail-closed
+    }
+  }
+}

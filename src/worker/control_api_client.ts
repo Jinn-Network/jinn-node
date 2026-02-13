@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import 'dotenv/config';
 import { getMechChainConfig, getServicePrivateKey } from '../env/operate-profile.js';
 import { getOptionalControlApiUrl } from '../agent/mcp/tools/shared/env.js';
@@ -185,13 +186,13 @@ export async function updateJobStatus(requestId: string, statusUpdate: string): 
     raw_telemetry: JSON.stringify({ jobInstanceStatusUpdate: statusUpdate })
   };
   try {
-    const idempotencyKey = buildIdempotencyKey([requestId, 'status-update', Date.now()]);
+    const statusHash = createHash('sha256').update(statusUpdate).digest('base64url').slice(0, 32);
+    const idempotencyKey = buildIdempotencyKey([requestId, 'status-update', statusHash]);
     const query = `mutation Report($requestId: String!, $data: JobReportInput!) { createJobReport(requestId: $requestId, reportData: $data) { id } }`;
     const json = await fetchWithRetry({ query, variables: { requestId, data: report } }, idempotencyKey);
     return json?.data?.createJobReport?.id as string;
   } catch (e: any) {
-    // Log warning locally if needed, but return null to avoid breaking execution
-    if (process.env.DEBUG) console.warn(`[updateJobStatus] Failed to send update: ${e?.message || e}`);
+    console.warn(`[updateJobStatus] Failed to send status update for ${requestId}: ${e?.message || e}`);
     return null;
   }
 }

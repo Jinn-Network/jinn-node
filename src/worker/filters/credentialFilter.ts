@@ -171,8 +171,9 @@ export async function probeCredentialBridge(): Promise<WorkerCredentialInfo> {
       return { providers: new Set(), isTrusted: false };
     }
 
-    const data = await response.json() as { providers: string[] };
-    const providers = new Set(data.providers);
+    const data = await response.json() as { providers: unknown };
+    const providerList = Array.isArray(data.providers) ? data.providers.filter((p): p is string => typeof p === 'string') : [];
+    const providers = new Set(providerList);
     return { providers, isTrusted: providers.size > 0 };
   } catch (err) {
     workerLogger.warn(

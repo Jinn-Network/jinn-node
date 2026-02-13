@@ -18,13 +18,35 @@ import { randomBytes } from 'node:crypto';
 import { getServicePrivateKey, getMechAddress, getMechChainConfig } from '../env/operate-profile.js';
 import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
 
+const READ_BODY_TIMEOUT_MS = 5_000;
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
+    const timer = setTimeout(() => {
+      req.destroy();
+      reject(Object.assign(new Error('Request body read timeout'), { statusCode: 408 }));
+    }, READ_BODY_TIMEOUT_MS);
+
     req.on('data', (chunk: Buffer) => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
-    req.on('error', reject);
+    req.on('end', () => {
+      clearTimeout(timer);
+      resolve(Buffer.concat(chunks).toString('utf-8'));
+    });
+    req.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
   });
+}
+
+async function parseJsonBody(req: IncomingMessage): Promise<any> {
+  const raw = await readBody(req);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw Object.assign(new Error('Invalid JSON in request body'), { statusCode: 400 });
+  }
 }
 
 function json(res: ServerResponse, status: number, data: unknown): void {
@@ -60,7 +82,7 @@ async function handleAddress(_req: IncomingMessage, res: ServerResponse): Promis
 }
 
 async function handleSign(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const body = JSON.parse(await readBody(req));
+  const body = await parseJsonBody(req);
   if (!body.message || typeof body.message !== 'string') {
     json(res, 400, { error: 'Missing or invalid "message" field', code: 'BAD_REQUEST' });
     return;
@@ -77,7 +99,7 @@ async function handleSign(req: IncomingMessage, res: ServerResponse): Promise<vo
 }
 
 async function handleSignRaw(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const body = JSON.parse(await readBody(req));
+  const body = await parseJsonBody(req);
   if (!body.message || typeof body.message !== 'string' || !/^0x[0-9a-fA-F]*$/.test(body.message) || body.message.length % 2 !== 0) {
     json(res, 400, { error: 'Missing or invalid "message" field (expected 0x-prefixed even-length hex)', code: 'BAD_REQUEST' });
     return;
@@ -94,7 +116,7 @@ async function handleSignRaw(req: IncomingMessage, res: ServerResponse): Promise
 }
 
 async function handleSignTypedData(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const body = JSON.parse(await readBody(req));
+  const body = await parseJsonBody(req);
   const { domain, types, primaryType, message } = body;
 
   if (!domain || !types || !primaryType || !message) {
@@ -113,7 +135,7 @@ async function handleSignTypedData(req: IncomingMessage, res: ServerResponse): P
 }
 
 async function handleDispatch(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const body = JSON.parse(await readBody(req));
+  const body = await parseJsonBody(req);
   const { prompts, tools, ipfsJsonContents, postOnly, responseTimeout } = body;
 
   if (!prompts || !ipfsJsonContents) {
@@ -178,9 +200,10 @@ export async function startSigningProxy(): Promise<{
       }
     } catch (err: any) {
       // Never leak the private key in error messages
+      const status = err?.statusCode || 500;
       const message = err?.message || 'Internal server error';
       const safeMessage = message.replace(/0x[a-fA-F0-9]{64}/g, '[REDACTED]');
-      json(res, 500, { error: safeMessage, code: 'INTERNAL_ERROR' });
+      json(res, status, { error: safeMessage, code: status < 500 ? 'BAD_REQUEST' : 'INTERNAL_ERROR' });
     }
   });
 

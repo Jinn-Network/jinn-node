@@ -51,7 +51,7 @@ async function getControlApiSigner(): Promise<Erc8128Signer> {
 }
 
 function buildIdempotencyKey(requestId: string, operationType: string): string {
-  return buildErc8128IdempotencyKey([requestId, operationType, Date.now()]);
+  return buildErc8128IdempotencyKey([requestId, operationType]);
 }
 
 async function postSignedGraphql(

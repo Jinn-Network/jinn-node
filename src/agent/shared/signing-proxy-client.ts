@@ -20,26 +20,52 @@ function getConfig(): { url: string; secret: string } {
   return { url, secret };
 }
 
+const PROXY_TIMEOUT_MS = 10_000;
+const PROXY_RETRIES = 2;
+const PROXY_RETRY_DELAY_MS = 500;
+
 async function proxyRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
   const { url, secret } = getConfig();
   const headers: Record<string, string> = {
     'Authorization': `Bearer ${secret}`,
   };
-  const init: RequestInit = { method, headers };
 
-  if (body !== undefined) {
-    headers['Content-Type'] = 'application/json';
-    init.body = JSON.stringify(body);
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt <= PROXY_RETRIES; attempt++) {
+    try {
+      const init: RequestInit = {
+        method,
+        headers: { ...headers },
+        signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
+      };
+
+      if (body !== undefined) {
+        (init.headers as Record<string, string>)['Content-Type'] = 'application/json';
+        init.body = JSON.stringify(body);
+      }
+
+      const response = await fetch(`${url}${path}`, init);
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Unknown proxy error', code: 'UNKNOWN' }));
+        const err = new Error(`Signing proxy error (${response.status}): ${(error as any).error} [${(error as any).code}]`);
+        // Don't retry client errors (4xx)
+        if (response.status >= 400 && response.status < 500) throw err;
+        lastError = err;
+      } else {
+        return response.json() as Promise<T>;
+      }
+    } catch (err: any) {
+      lastError = err;
+      // Don't retry client errors
+      if (err?.message?.includes('(4')) throw err;
+    }
+
+    if (attempt < PROXY_RETRIES) {
+      await new Promise(resolve => setTimeout(resolve, PROXY_RETRY_DELAY_MS * (attempt + 1)));
+    }
   }
-
-  const response = await fetch(`${url}${path}`, init);
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Unknown proxy error', code: 'UNKNOWN' }));
-    throw new Error(`Signing proxy error (${response.status}): ${(error as any).error} [${(error as any).code}]`);
-  }
-
-  return response.json() as Promise<T>;
+  throw lastError!;
 }
 
 /**

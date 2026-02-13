@@ -53,6 +53,10 @@ async function signedBridgePost(
   headers: Record<string, string> = {},
 ): Promise<Response> {
   const signer = await getBridgeSigner();
+  // Deterministic idempotency key from provider + requestId
+  const provider = url.split('/credentials/').pop() || 'unknown';
+  const idempotencyKey = `cred:${provider}:${body.requestId || 'no-request'}`;
+
   const request = await signRequestWithErc8128({
     signer,
     input: url,
@@ -60,6 +64,7 @@ async function signedBridgePost(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
         ...headers,
       },
       body: JSON.stringify(body),
@@ -190,7 +195,11 @@ export async function getCredential(provider: string): Promise<string> {
 
   const data = await response.json() as CredentialResponse;
 
-  // Cache the token
+  // Cache the token (evict oldest if at capacity)
+  if (tokenCache.size >= 100) {
+    const oldestKey = tokenCache.keys().next().value;
+    if (oldestKey !== undefined) tokenCache.delete(oldestKey);
+  }
   tokenCache.set(provider, {
     token: data.access_token,
     expiresAt: Date.now() + data.expires_in * 1000,
