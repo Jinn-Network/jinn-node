@@ -39,11 +39,11 @@ cd "$CLONE_DIR" && yarn service:add
 The script will:
 1. Detect the existing service and auto-inherit its staking contract
 2. Create a new service config via the middleware API
-3. Show funding requirements for the new service
+3. Show funding requirements and exit
 
-Fund the new service from the monorepo root:
+Fund the required addresses from the monorepo root:
 ```bash
-yarn test:e2e:vnet fund <new-service-safe-address> --eth <amount> --olas <amount>
+yarn test:e2e:vnet fund <address> --eth <amount> --olas <amount>
 ```
 
 Then re-run to continue deployment:

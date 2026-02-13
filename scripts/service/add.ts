@@ -281,37 +281,13 @@ async function main() {
       printStep('done', 'No additional funding required');
     }
 
-    // --- Wait for funding ---
+    // --- Check if funding is needed ---
     const allowStart = requirements.allow_start_agent === true;
     const isRefillRequired = requirements.is_refill_required === true;
 
     if (!allowStart || isRefillRequired) {
-      printStep('active', 'Waiting for funding...');
-      const timeoutMs = 30 * 60 * 1000;
-      const intervalMs = 10_000;
-      const start = Date.now();
-
-      while (Date.now() - start < timeoutMs) {
-        const check = await wrapper.getFundingRequirements(serviceConfigId);
-        if (check.success && check.requirements) {
-          const canStart = check.requirements.allow_start_agent === true;
-          const needsRefill = check.requirements.is_refill_required === true;
-          if (canStart && !needsRefill) {
-            break;
-          }
-        }
-        const elapsed = Math.round((Date.now() - start) / 1000);
-        process.stdout.write(`\r  Waiting for funding... (${elapsed}s elapsed)`);
-        await new Promise(r => setTimeout(r, intervalMs));
-      }
-
-      if (Date.now() - start >= timeoutMs) {
-        printError('Funding not detected within 30 minutes');
-        process.exit(1);
-      }
-
-      process.stdout.write('\r' + ' '.repeat(60) + '\r');
-      printStep('done', 'Funding detected');
+      console.log('\n  Fund the addresses above, then re-run this command to continue deployment.\n');
+      return;
     }
 
     // --- Deploy service ---
