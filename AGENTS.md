@@ -146,6 +146,8 @@ GEMINI_API_KEY=<the human's API key>  # if using Option A
 - `X402_GATEWAY_URL` — Payment gateway
 - `STAKING_CONTRACT` — Jinn staking contract on Base
 - `WORKSTREAM_FILTER` — Growth Agency venture workstream ID
+- `WORKER_MECH_FILTER_MODE=staking` — Multi-operator mode: picks up requests for all staked mechs
+- `WORKER_STAKING_CONTRACT` — Staking contract used to discover peer mechs
 - `CHAIN_ID=8453` — Base chain ID
 
 **Optional values** (ask, but the human can skip):
@@ -255,9 +257,11 @@ yarn worker
 
 The worker will:
 1. Connect to the Ponder indexer
-2. Poll for new job requests matching the workstream filter
+2. Poll for unclaimed requests from any mech staked in the Jinn staking contract
 3. Claim and execute jobs using Gemini
 4. Deliver results on-chain
+
+**Multi-operator note:** The worker uses `staking` filter mode by default, so it sees requests dispatched to ANY mech in the Jinn staking contract — not just its own. Each request has a 61-second priority window for the original mech, after which any staked mech can deliver. In practice, the agent execution takes minutes, so the priority window is always expired by delivery time.
 
 ---
 

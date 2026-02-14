@@ -22,7 +22,7 @@ const dispatchNewJobParamsBase = z.object({
   message: z.string().optional().describe('Optional message to include in the job request'),
   dependencies: z.array(z.string()).optional().describe('Array of job definition UUIDs (not job names) that must have at least one delivered request before this job can execute. Use get_details or search_jobs to find job definition IDs. Example: ["4eac1570-7980-4e2b-afc7-3f5159e99ea5"]'),
   skipBranch: z.boolean().optional().default(false).describe('If true, skip branch creation and code metadata collection. Auto-detected: branches are automatically skipped when CODE_METADATA_REPO_ROOT is not set and no parent branch context exists (artifact-only mode).'),
-  responseTimeout: z.number().optional().default(300).describe('Response timeout in seconds for marketplace request. Defaults to 300 (5 minutes). Maximum allowed by marketplace is 300 seconds.'),
+  responseTimeout: z.number().optional().default(61).describe('Response timeout in seconds for marketplace request. Defaults to 61 (just above the 60s on-chain minimum). This is the priority mech exclusivity window — after it expires, any staked mech can deliver. Range: 60-300.'),
   inputSchema: z.record(z.any()).optional().describe('Input schema for template defaults. Used by x402 gateway to substitute default values for optional fields.'),
 });
 
@@ -106,7 +106,7 @@ PARAMETERS:
 - enabledTools: (optional) Array of tool names to enable
 - message: (optional) Additional message to include in the job request
 - dependencies: (optional) Array of job definition UUIDs (not job names) that must have at least one delivered request before this job executes. Use get_details or search_jobs to find job definition IDs.
-- responseTimeout: (optional) Response timeout in seconds for marketplace request (defaults to 300, max 300)
+- responseTimeout: (optional) Priority mech exclusivity window in seconds (defaults to 61, range 60-300). After this window, any staked mech can deliver.
 
 The blueprint is validated and made directly available to the agent in blueprint context.`,
   inputSchema: dispatchNewJobParamsBase.shape,
