@@ -171,15 +171,23 @@ export async function processOnce(
 
           workerLogger.info({ repoUrl, repoRoot, branch }, 'Bootstrapping workspace from additionalContext.workspaceRepo');
 
-          const cloneResult = await ensureRepoCloned(repoUrl, repoRoot);
-          process.env.CODE_METADATA_REPO_ROOT = repoRoot;
+          try {
+            const cloneResult = await ensureRepoCloned(repoUrl, repoRoot);
+            process.env.CODE_METADATA_REPO_ROOT = repoRoot;
 
-          telemetry.logCheckpoint('initialization', 'workspace_repo_bootstrap', {
-            repoUrl,
-            repoRoot,
-            branch: branch || 'default',
-            wasAlreadyCloned: cloneResult.wasAlreadyCloned,
-          });
+            telemetry.logCheckpoint('initialization', 'workspace_repo_bootstrap', {
+              repoUrl,
+              repoRoot,
+              branch: branch || 'default',
+              wasAlreadyCloned: cloneResult.wasAlreadyCloned,
+            });
+          } catch (cloneError: any) {
+            workerLogger.warn({ repoUrl, repoRoot, error: serializeError(cloneError) },
+              'Failed to clone workspace repo (non-fatal) — agent will run without local repo');
+            telemetry.logCheckpoint('initialization', 'workspace_repo_clone_failed', {
+              repoUrl, repoRoot, error: cloneError.message,
+            });
+          }
         }
       }
 
@@ -214,139 +222,153 @@ export async function processOnce(
           }
 
           if (repoRoot) {
-            const cloneResult = await ensureRepoCloned(remoteUrl, repoRoot);
-            telemetry.logCheckpoint('initialization', 'repo_clone', {
-              remoteUrl,
-              targetPath: repoRoot,
-              wasAlreadyCloned: cloneResult.wasAlreadyCloned,
-              fetchPerformed: cloneResult.fetchPerformed,
-            });
-          }
-        }
-
-        const checkoutResult = await checkoutJobBranch(metadata.codeMetadata);
-        telemetry.logCheckpoint('initialization', 'branch_checkout', {
-          branchName: checkoutResult.branchName,
-          wasNewlyCreated: checkoutResult.wasNewlyCreated,
-          checkoutMethod: checkoutResult.checkoutMethod,
-          baseBranch: metadata.codeMetadata.baseBranch || DEFAULT_BASE_BRANCH,
-          ...(checkoutResult.stashedChanges ? { stashedChanges: checkoutResult.stashedChanges } : {}),
-        });
-
-        // If uncommitted changes were stashed, store them in additionalContext so the agent is informed
-        // This helps the agent understand that some files from a previous failed job were set aside
-        if (checkoutResult.stashedChanges && checkoutResult.stashedChanges.length > 0) {
-          if (!metadata.additionalContext) {
-            metadata.additionalContext = {} as AdditionalContext;
-          }
-          metadata.additionalContext.stashedChanges = checkoutResult.stashedChanges;
-
-          workerLogger.warn({
-            requestId: target.id,
-            stashedFiles: checkoutResult.stashedChanges,
-          }, 'Uncommitted changes from previous job were stashed before checkout');
-        }
-
-        // Now that we're on the job branch, ensure .gitignore and beads are set up
-        // This happens AFTER checkout so .gitignore is committed to the job branch
-        // (not main), preventing divergent commits when child branches don't inherit from main
-        const setupRepoRoot = getRepoRoot(metadata.codeMetadata);
-        if (setupRepoRoot) {
-          ensureGitignore(setupRepoRoot);
-          if (getBlueprintEnableBeads()) {
-            await ensureBeadsInit(setupRepoRoot);
-          }
-          await commitRepoSetup(setupRepoRoot);
-        }
-
-        // Merge dependency branches into this job's branch
-        // This ensures the child job sees work from its dependencies
-        if (target.dependencies && target.dependencies.length > 0) {
-          const repoRoot = getRepoRoot(metadata.codeMetadata);
-          const mergeConflicts: Array<{ branch: string; files: string[] }> = [];
-
-          for (const depJobDefId of target.dependencies) {
-            const branchInfo = await getDependencyBranchInfo(depJobDefId);
-            if (branchInfo?.branchName) {
-              workerLogger.info({
-                requestId: target.id,
-                dependencyJobDefId: depJobDefId,
-                dependencyBranch: branchInfo.branchName,
-              }, 'Syncing with dependency branch');
-
-              const syncResult = await syncWithBranch(repoRoot, branchInfo.branchName);
-
-              telemetry.logCheckpoint('initialization', 'dependency_sync', {
-                dependencyJobDefId: depJobDefId,
-                sourceBranch: syncResult.sourceBranch,
-                synced: syncResult.synced,
-                hasConflicts: syncResult.hasConflicts,
-                conflictingFiles: syncResult.conflictingFiles,
-                ...(syncResult.stashedChanges ? { stashedChanges: syncResult.stashedChanges } : {}),
+            try {
+              const cloneResult = await ensureRepoCloned(remoteUrl, repoRoot);
+              telemetry.logCheckpoint('initialization', 'repo_clone', {
+                remoteUrl,
+                targetPath: repoRoot,
+                wasAlreadyCloned: cloneResult.wasAlreadyCloned,
+                fetchPerformed: cloneResult.fetchPerformed,
               });
-
-              // If uncommitted changes were stashed during merge, inform the agent
-              if (syncResult.stashedChanges && syncResult.stashedChanges.length > 0) {
-                if (!metadata.additionalContext) {
-                  metadata.additionalContext = {} as AdditionalContext;
-                }
-                // Append to existing stashedChanges (may already have entries from checkout stash)
-                const existing = metadata.additionalContext.stashedChanges || [];
-                metadata.additionalContext.stashedChanges = [...existing, ...syncResult.stashedChanges];
-
-                workerLogger.warn({
-                  requestId: target.id,
-                  dependencyBranch: branchInfo.branchName,
-                  stashedFiles: syncResult.stashedChanges,
-                }, 'Uncommitted changes were stashed before dependency merge');
-              }
-
-              if (syncResult.hasConflicts) {
-                mergeConflicts.push({
-                  branch: branchInfo.branchName,
-                  files: syncResult.conflictingFiles,
-                });
-
-                // Commit the conflicted state so we can continue to next dependency
-                // Agent will see conflict markers in committed files and must resolve them
-                try {
-                  execSync('git add .', { cwd: repoRoot, encoding: 'utf8' });
-                  execSync(
-                    `git commit -m "WIP: Merge conflict from ${branchInfo.branchName} - agent must resolve"`,
-                    { cwd: repoRoot, encoding: 'utf8' }
-                  );
-                  workerLogger.info({
-                    requestId: target.id,
-                    dependency: branchInfo.branchName
-                  }, 'Committed conflicted merge state to allow further dependency syncs');
-                } catch (commitError) {
-                  workerLogger.warn({
-                    requestId: target.id,
-                    dependency: branchInfo.branchName,
-                    error: serializeError(commitError)
-                  }, 'Failed to commit conflicted state - subsequent merges may fail');
-                }
-              }
-            } else {
-              workerLogger.debug({
-                requestId: target.id,
-                dependencyJobDefId: depJobDefId,
-              }, 'No branch info for dependency - may be artifact-only job');
+            } catch (cloneError: any) {
+              workerLogger.warn({ remoteUrl, repoRoot, error: serializeError(cloneError) },
+                'Failed to clone code metadata repo (non-fatal) — agent will run without local repo');
+              telemetry.logCheckpoint('initialization', 'repo_clone_failed', {
+                remoteUrl, targetPath: repoRoot, error: cloneError.message,
+              });
+              // Clear repo root so downstream doesn't try to use a non-existent directory
+              delete process.env.CODE_METADATA_REPO_ROOT;
+              repoRoot = undefined;
             }
           }
+        }
 
-          // Store merge conflicts in additionalContext for assertion provider
-          if (mergeConflicts.length > 0) {
+        // Only attempt branch checkout and git operations if repo was successfully cloned
+        if (process.env.CODE_METADATA_REPO_ROOT) {
+          const checkoutResult = await checkoutJobBranch(metadata.codeMetadata);
+          telemetry.logCheckpoint('initialization', 'branch_checkout', {
+            branchName: checkoutResult.branchName,
+            wasNewlyCreated: checkoutResult.wasNewlyCreated,
+            checkoutMethod: checkoutResult.checkoutMethod,
+            baseBranch: metadata.codeMetadata.baseBranch || DEFAULT_BASE_BRANCH,
+            ...(checkoutResult.stashedChanges ? { stashedChanges: checkoutResult.stashedChanges } : {}),
+          });
+
+          // If uncommitted changes were stashed, store them in additionalContext so the agent is informed
+          // This helps the agent understand that some files from a previous failed job were set aside
+          if (checkoutResult.stashedChanges && checkoutResult.stashedChanges.length > 0) {
             if (!metadata.additionalContext) {
               metadata.additionalContext = {} as AdditionalContext;
             }
-            metadata.additionalContext.mergeConflicts = mergeConflicts;
+            metadata.additionalContext.stashedChanges = checkoutResult.stashedChanges;
 
             workerLogger.warn({
               requestId: target.id,
-              conflictCount: mergeConflicts.length,
-              conflicts: mergeConflicts,
-            }, 'Dependency branch merge produced conflicts - agent must resolve');
+              stashedFiles: checkoutResult.stashedChanges,
+            }, 'Uncommitted changes from previous job were stashed before checkout');
+          }
+
+          // Now that we're on the job branch, ensure .gitignore and beads are set up
+          // This happens AFTER checkout so .gitignore is committed to the job branch
+          // (not main), preventing divergent commits when child branches don't inherit from main
+          const setupRepoRoot = getRepoRoot(metadata.codeMetadata);
+          if (setupRepoRoot) {
+            ensureGitignore(setupRepoRoot);
+            if (getBlueprintEnableBeads()) {
+              await ensureBeadsInit(setupRepoRoot);
+            }
+            await commitRepoSetup(setupRepoRoot);
+          }
+
+          // Merge dependency branches into this job's branch
+          // This ensures the child job sees work from its dependencies
+          if (target.dependencies && target.dependencies.length > 0) {
+            const repoRoot = getRepoRoot(metadata.codeMetadata);
+            const mergeConflicts: Array<{ branch: string; files: string[] }> = [];
+
+            for (const depJobDefId of target.dependencies) {
+              const branchInfo = await getDependencyBranchInfo(depJobDefId);
+              if (branchInfo?.branchName) {
+                workerLogger.info({
+                  requestId: target.id,
+                  dependencyJobDefId: depJobDefId,
+                  dependencyBranch: branchInfo.branchName,
+                }, 'Syncing with dependency branch');
+
+                const syncResult = await syncWithBranch(repoRoot, branchInfo.branchName);
+
+                telemetry.logCheckpoint('initialization', 'dependency_sync', {
+                  dependencyJobDefId: depJobDefId,
+                  sourceBranch: syncResult.sourceBranch,
+                  synced: syncResult.synced,
+                  hasConflicts: syncResult.hasConflicts,
+                  conflictingFiles: syncResult.conflictingFiles,
+                  ...(syncResult.stashedChanges ? { stashedChanges: syncResult.stashedChanges } : {}),
+                });
+
+                // If uncommitted changes were stashed during merge, inform the agent
+                if (syncResult.stashedChanges && syncResult.stashedChanges.length > 0) {
+                  if (!metadata.additionalContext) {
+                    metadata.additionalContext = {} as AdditionalContext;
+                  }
+                  // Append to existing stashedChanges (may already have entries from checkout stash)
+                  const existing = metadata.additionalContext.stashedChanges || [];
+                  metadata.additionalContext.stashedChanges = [...existing, ...syncResult.stashedChanges];
+
+                  workerLogger.warn({
+                    requestId: target.id,
+                    dependencyBranch: branchInfo.branchName,
+                    stashedFiles: syncResult.stashedChanges,
+                  }, 'Uncommitted changes were stashed before dependency merge');
+                }
+
+                if (syncResult.hasConflicts) {
+                  mergeConflicts.push({
+                    branch: branchInfo.branchName,
+                    files: syncResult.conflictingFiles,
+                  });
+
+                  // Commit the conflicted state so we can continue to next dependency
+                  // Agent will see conflict markers in committed files and must resolve them
+                  try {
+                    execSync('git add .', { cwd: repoRoot, encoding: 'utf8' });
+                    execSync(
+                      `git commit -m "WIP: Merge conflict from ${branchInfo.branchName} - agent must resolve"`,
+                      { cwd: repoRoot, encoding: 'utf8' }
+                    );
+                    workerLogger.info({
+                      requestId: target.id,
+                      dependency: branchInfo.branchName
+                    }, 'Committed conflicted merge state to allow further dependency syncs');
+                  } catch (commitError) {
+                    workerLogger.warn({
+                      requestId: target.id,
+                      dependency: branchInfo.branchName,
+                      error: serializeError(commitError)
+                    }, 'Failed to commit conflicted state - subsequent merges may fail');
+                  }
+                }
+              } else {
+                workerLogger.debug({
+                  requestId: target.id,
+                  dependencyJobDefId: depJobDefId,
+                }, 'No branch info for dependency - may be artifact-only job');
+              }
+            }
+
+            // Store merge conflicts in additionalContext for assertion provider
+            if (mergeConflicts.length > 0) {
+              if (!metadata.additionalContext) {
+                metadata.additionalContext = {} as AdditionalContext;
+              }
+              metadata.additionalContext.mergeConflicts = mergeConflicts;
+
+              workerLogger.warn({
+                requestId: target.id,
+                conflictCount: mergeConflicts.length,
+                conflicts: mergeConflicts,
+              }, 'Dependency branch merge produced conflicts - agent must resolve');
+            }
           }
         }
       } else {
