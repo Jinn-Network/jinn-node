@@ -347,6 +347,76 @@ All wallet commands require `OPERATE_PASSWORD` and `RPC_URL` in `.env` (unless n
 
 ---
 
+## Staking & Eviction Recovery
+
+### How OLAS Staking Ownership Works
+
+When a service is staked, the staking contract **takes ownership of the service NFT** via `transferFrom`. This means:
+- `ownerOf(serviceId)` returning a staking contract address is **normal** — it means the service is staked
+- To check if actively staked: call `getServiceIds()` on the staking contract and see if the service ID is in the returned array
+- If `ownerOf()` returns the staking contract but the service is NOT in `getServiceIds()`, the service has been **evicted** (removed from active staking due to insufficient activity)
+
+### Checking Staking Status
+
+Use `yarn wallet:info` to see current staking status, or check the explorer at `/nodes/staking/{serviceId}`.
+
+Staking states:
+- **Staked** (green): Service is actively earning rewards
+- **Evicted** (orange): Removed from active staking due to inactivity. NFT still held by staking contract but no longer earning rewards. Must unstake and re-stake to recover.
+- **Unstaked** (gray): NFT owned by the service owner Safe. Can be staked into any contract.
+
+### Restaking After Eviction
+
+If a service has been evicted, use the migration script to unstake and re-stake:
+
+```bash
+# From monorepo root — preview first
+tsx scripts/migrate-staking-contract.ts \
+  --service-id=<ID> \
+  --source=jinn \
+  --target=jinn \
+  --dry-run
+
+# Execute the restake
+tsx scripts/migrate-staking-contract.ts \
+  --service-id=<ID> \
+  --source=jinn \
+  --target=jinn
+```
+
+**Requirements:**
+- `OPERATE_PASSWORD` set in `.env` (decrypts the master wallet for signing)
+- `RPC_URL` set in `.env`
+- The Master EOA must have enough ETH for gas (~0.001 ETH)
+- The staking contract must have available slots (`maxNumServices` not reached)
+
+**What the script does:**
+1. Preflight checks (ownership, staking status, bond sufficiency, slot availability)
+2. Unstakes from the source contract (works for both actively staked and evicted services)
+3. Top-ups bond if the target contract requires a higher minimum
+4. Stakes into the target contract
+5. Verifies the service is actively staked
+
+**Known staking contracts:**
+| Name | Address | Min Stake |
+|------|---------|-----------|
+| Jinn | `0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139` | 5,000 OLAS |
+| AgentsFun1 | `0x2585e63df7BD9De8e058884D496658a030b5c6ce` | 50 OLAS |
+
+### Claiming Rewards
+
+Rewards accumulate while a service is actively staked. To claim:
+
+```bash
+# Checkpoint first (allocates pending rewards — anyone can call)
+tsx scripts/archive/checkpoint-and-claim-165.ts
+
+# Or claim directly via the operate CLI
+cd jinn-node && poetry run operate claim
+```
+
+---
+
 ## Troubleshooting
 
 ### Prerequisites
