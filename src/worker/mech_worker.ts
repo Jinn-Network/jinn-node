@@ -35,6 +35,7 @@ import {
 } from '../config/index.js';
 import { recordIdleCycle, recordExecutionTime } from './healthcheck.js';
 import { getMechAddressesForStakingContract } from './filters/stakingFilter.js';
+import { maybeCallCheckpoint } from './staking/checkpoint.js';
 
 export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
 
@@ -195,6 +196,10 @@ const ENABLE_DEPENDENCY_AUTOFAIL = process.env.WORKER_DEPENDENCY_AUTOFAIL !== '0
 
 const dependencyRedispatchAttempts = new Map<string, number>();
 const dependencyCancelAttempts = new Map<string, number>();
+
+// Staking checkpoint: check every N cycles if epoch is overdue and call checkpoint()
+// At 30s base poll, 60 cycles = ~30 min. checkpoint() is a no-op if epoch hasn't ended.
+const WORKER_CHECKPOINT_CYCLES = parseInt(process.env.WORKER_CHECKPOINT_CYCLES || '60');
 
 // Periodic cleanup of global maps to prevent unbounded growth over weeks of uptime
 const MAP_CLEANUP_INTERVAL_CYCLES = 50;
@@ -1430,6 +1435,7 @@ async function main() {
   // Repost check frequency limiting
   let cyclesSinceLastRepostCheck = 0;
   let cyclesSinceLastCleanup = 0;
+  let cyclesSinceLastCheckpoint = WORKER_CHECKPOINT_CYCLES; // Run on first cycle
 
   for (; ;) {
     const cycleStart = Date.now();
@@ -1451,6 +1457,18 @@ async function main() {
       if (cyclesSinceLastCleanup >= MAP_CLEANUP_INTERVAL_CYCLES) {
         cleanupGlobalMaps();
         cyclesSinceLastCleanup = 0;
+      }
+
+      // Call staking checkpoint if epoch is overdue (permissionless, any EOA can trigger)
+      const stakingContract = getOptionalWorkerStakingContract();
+      cyclesSinceLastCheckpoint++;
+      if (stakingContract && cyclesSinceLastCheckpoint >= WORKER_CHECKPOINT_CYCLES) {
+        cyclesSinceLastCheckpoint = 0;
+        try {
+          await maybeCallCheckpoint(stakingContract);
+        } catch (e: any) {
+          workerLogger.warn({ error: serializeError(e) }, 'Staking checkpoint call failed (non-fatal)');
+        }
       }
 
       const jobProcessed = await processOnce();
