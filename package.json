@@ -64,7 +64,7 @@
     "poetry.lock"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && copyfiles -u 1 'src/**/*.json' 'src/gemini-extension/**/*.md' dist",
+    "build": "echo '=== DEBUG: files exist? ===' && ls -la src/worker/prompt/invariant-validator.ts src/worker/worker_telemetry.ts src/worker/SimplifiedServiceBootstrap.ts 2>&1 && echo '=== DEBUG: NODE_ENV ===' && echo $NODE_ENV && echo '=== DEBUG: tsc version ===' && npx tsc --version && tsc -p tsconfig.build.json && copyfiles -u 1 'src/**/*.json' 'src/gemini-extension/**/*.md' dist",
     "worker": "sh -c 'LOG_PRETTY=1 USE_TSX_MCP=1 tsx src/worker/mech_worker.ts \"$@\"' --",
     "setup": "sh -c 'LOG_PRETTY=1 tsx src/setup/cli.ts \"$@\"' --",
     "typecheck": "tsc --noEmit",
