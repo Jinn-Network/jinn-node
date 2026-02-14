@@ -12,26 +12,11 @@ import { serializeError } from '../logging/errors.js';
 
 function buildGithubHttpsUrl(remoteUrl: string): string | null {
   if (!remoteUrl) return null;
-
-  // Strip embedded credentials from HTTPS URLs (e.g., expired PATs baked into IPFS metadata)
-  // https://x-access-token:ghp_xxx@github.com/org/repo → https://github.com/org/repo
-  let cleanUrl = remoteUrl;
-  try {
-    const parsed = new URL(remoteUrl);
-    if (parsed.hostname === 'github.com' && (parsed.username || parsed.password)) {
-      parsed.username = '';
-      parsed.password = '';
-      cleanUrl = parsed.toString();
-    }
-  } catch {
-    // Not a parseable URL, continue with original
+  if (remoteUrl.startsWith('https://github.com/')) {
+    return remoteUrl;
   }
-
-  if (cleanUrl.startsWith('https://github.com/')) {
-    return cleanUrl;
-  }
-  if (cleanUrl.startsWith('git@github.com:')) {
-    const path = cleanUrl.slice('git@github.com:'.length);
+  if (remoteUrl.startsWith('git@github.com:')) {
+    const path = remoteUrl.slice('git@github.com:'.length);
     return `https://github.com/${path}`;
   }
   return null;

@@ -34,7 +34,7 @@ export async function storeOnchainReport(
         jobInstanceStatusUpdate: result.jobInstanceStatusUpdate // Include extracted status update string
       })
     };
-    await apiCreateJobReport(request.id, payload);
+    await apiCreateJobReport(request.id, payload, workerAddress);
   } catch (reportError: any) {
     workerLogger.warn({
       requestId: request.id,
