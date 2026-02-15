@@ -72,6 +72,7 @@ type JobContext = {
   jobDefinitionId: string | null;
   jobName: string;
   workstreamId?: string;
+  ventureId?: string;
   phase?: string;
   projectRunId: string | null;
   sourceEventId: string | null;
