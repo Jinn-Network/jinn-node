@@ -34,6 +34,9 @@ import {
 } from '../config/index.js';
 import { recordIdleCycle, recordExecutionTime } from './healthcheck.js';
 import { getMechAddressesForStakingContract } from './filters/stakingFilter.js';
+import { maybeCallCheckpoint } from './staking/checkpoint.js';
+import { checkEpochGate } from './staking/epochGate.js';
+import { maybeSubmitHeartbeat } from './staking/heartbeat.js';
 
 export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
 
@@ -174,6 +177,14 @@ const ENABLE_DEPENDENCY_AUTOFAIL = process.env.WORKER_DEPENDENCY_AUTOFAIL !== '0
 
 const dependencyRedispatchAttempts = new Map<string, number>();
 const dependencyCancelAttempts = new Map<string, number>();
+
+// Staking checkpoint: check every N cycles if epoch is overdue and call checkpoint()
+// At 30s base poll, 60 cycles = ~30 min. checkpoint() is a no-op if epoch hasn't ended.
+const WORKER_CHECKPOINT_CYCLES = parseInt(process.env.WORKER_CHECKPOINT_CYCLES || '60');
+
+// Staking heartbeat: submit marketplace requests to meet liveness requirement.
+// At 30s base poll, 16 cycles = ~8 min. Submits 1 request per check if deficit exists.
+const WORKER_HEARTBEAT_CYCLES = parseInt(process.env.WORKER_HEARTBEAT_CYCLES || '16');
 
 // Periodic cleanup of global maps to prevent unbounded growth over weeks of uptime
 const MAP_CLEANUP_INTERVAL_CYCLES = 50;
@@ -1139,6 +1150,24 @@ async function processOnce(): Promise<boolean> {
     return false;
   }
 
+  // Staking target gate: stop claiming if delivery target met for this epoch
+  const stakingContract = getOptionalWorkerStakingContract();
+  if (stakingContract) {
+    const multisig = getServiceSafeAddress();
+    if (multisig) {
+      const gate = await checkEpochGate(stakingContract, multisig);
+      if (gate.targetMet) {
+        const resetIn = Math.max(0, gate.nextCheckpoint - Math.floor(Date.now() / 1000));
+        workerLogger.info({
+          deliveries: gate.deliveryCount,
+          target: gate.target,
+          resetsInSeconds: resetIn,
+        }, `Staking target met (${gate.deliveryCount}/${gate.target}) — skipping job pickup`);
+        return false;
+      }
+    }
+  }
+
   // Optional: target a specific request id if provided (for deterministic tests)
   const targetIdEnv = (getOptionalMechTargetRequestId() || '').trim();
   let candidates: UnclaimedRequest[];
@@ -1225,6 +1254,43 @@ async function processOnce(): Promise<boolean> {
 
   if (!target) return false;
 
+  // Check if this is a heartbeat request — deliver immediately without agent execution
+  if (target.ipfsHash) {
+    try {
+      const meta = await fetchIpfsMetadata(target.ipfsHash);
+      if (meta && (meta as any).heartbeat === true) {
+        workerLogger.info({ requestId: target.id }, 'Heartbeat request — auto-delivering');
+        const mechAddress = getMechAddress();
+        const safeAddress = getServiceSafeAddress();
+        const privateKey = getServicePrivateKey();
+        const rpcHttpUrl = getRequiredRpcUrl();
+        const chainConfig = getMechChainConfig();
+
+        if (mechAddress && safeAddress && privateKey) {
+          try {
+            await (deliverViaSafe as any)({
+              chainConfig,
+              requestId: target.id,
+              resultContent: { heartbeat: true, ts: Date.now() },
+              targetMechAddress: mechAddress,
+              safeAddress,
+              privateKey,
+              rpcHttpUrl,
+              wait: true,
+            });
+            workerLogger.info({ requestId: target.id }, 'Heartbeat delivered');
+          } catch (deliveryErr: any) {
+            workerLogger.warn({ requestId: target.id, error: deliveryErr.message }, 'Heartbeat delivery failed');
+          }
+        }
+        executedJobsThisSession.set(target.id, Date.now());
+        return true;
+      }
+    } catch {
+      // If metadata fetch fails, treat as normal job
+    }
+  }
+
   // Wait for quota only after successful claim (lazy quota check)
   // This eliminates quota API calls during idle periods
   await waitForGeminiQuota({ reason: 'pre_execution' });
@@ -1298,6 +1364,8 @@ async function main() {
   // Repost check frequency limiting
   let cyclesSinceLastRepostCheck = 0;
   let cyclesSinceLastCleanup = 0;
+  let cyclesSinceLastCheckpoint = 0;
+  let cyclesSinceLastHeartbeat = 0;
 
   for (; ;) {
     const cycleStart = Date.now();
@@ -1319,6 +1387,31 @@ async function main() {
       if (cyclesSinceLastCleanup >= MAP_CLEANUP_INTERVAL_CYCLES) {
         cleanupGlobalMaps();
         cyclesSinceLastCleanup = 0;
+      }
+
+      // Call staking checkpoint if epoch is overdue (permissionless, any EOA can trigger)
+      {
+        const stakingContract = getOptionalWorkerStakingContract();
+        cyclesSinceLastCheckpoint++;
+        if (stakingContract && cyclesSinceLastCheckpoint >= WORKER_CHECKPOINT_CYCLES) {
+          cyclesSinceLastCheckpoint = 0;
+          try {
+            await maybeCallCheckpoint(stakingContract);
+          } catch (e: any) {
+            workerLogger.warn({ error: serializeError(e) }, 'Staking checkpoint call failed (non-fatal)');
+          }
+        }
+
+        // Submit heartbeat requests to meet staking liveness requirement
+        cyclesSinceLastHeartbeat++;
+        if (stakingContract && cyclesSinceLastHeartbeat >= WORKER_HEARTBEAT_CYCLES) {
+          cyclesSinceLastHeartbeat = 0;
+          try {
+            await maybeSubmitHeartbeat(stakingContract);
+          } catch (e: any) {
+            workerLogger.warn({ error: serializeError(e) }, 'Staking heartbeat failed (non-fatal)');
+          }
+        }
       }
 
       const jobProcessed = await processOnce();
