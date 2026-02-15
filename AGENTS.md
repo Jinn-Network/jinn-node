@@ -417,6 +417,41 @@ cd jinn-node && poetry run operate claim
 
 ---
 
+## Getting Help — Support Bundle
+
+If you're having issues and need help from the Jinn team, run the support bundle to collect diagnostic information:
+
+```bash
+cd jinn-node
+yarn support:bundle
+```
+
+This outputs a JSON bundle containing:
+- System info (OS, Node/Python versions, git commit)
+- Which environment variables are set (never the actual values of secrets)
+- Wallet addresses and on-chain balances
+- Staking status
+- Connectivity checks (RPC, Ponder indexer, Control API)
+- `.operate` directory state
+
+**No passwords, API keys, or private keys are ever included.** The output is safe to share.
+
+### How to share
+
+1. Run `yarn support:bundle` and copy the JSON output
+2. Share it with the Jinn team (Discord, GitHub issue, or direct message)
+3. If the worker is running on Railway, also include recent logs: `railway logs --tail 50`
+
+### What to include with the bundle
+
+When reporting an issue, also describe:
+- **What you expected** to happen
+- **What actually happened** (error messages, unexpected behavior)
+- **When it started** (after an update? after restaking? randomly?)
+- **Steps to reproduce** if you can
+
+---
+
 ## Troubleshooting
 
 ### Prerequisites
