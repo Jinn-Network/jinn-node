@@ -421,7 +421,7 @@ export async function processOnce(
     try {
       let executionAttempt = 0;
       for (;;) {
-        await waitForGeminiQuota({
+        const credResult = await waitForGeminiQuota({
           reason: executionAttempt === 0 ? 'pre_execution' : 'execution_retry',
           requestId: target.id,
           jobName: metadata?.jobName,
@@ -429,7 +429,7 @@ export async function processOnce(
         });
 
         try {
-          result = await runAgentForRequest(target, metadata);
+          result = await runAgentForRequest(target, metadata, { useApiKey: credResult.useApiKey });
           break;
         } catch (agentError: any) {
           if (isGeminiQuotaError(agentError)) {

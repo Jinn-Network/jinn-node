@@ -49,9 +49,14 @@ function extractCompletedChildRequestIds(additionalContext: AdditionalContext | 
   return Array.from(ids);
 }
 
+export interface AgentExecutionOptions {
+  useApiKey?: boolean;
+}
+
 export async function runAgentForRequest(
   request: UnclaimedRequest,
-  metadata: IpfsMetadata
+  metadata: IpfsMetadata,
+  options?: AgentExecutionOptions
 ): Promise<AgentExecutionResult> {
   // Normalize tools to string array (handles both string and object formats from IPFS metadata)
   const enabledTools = normalizeToolArray(metadata?.enabledTools);
@@ -100,6 +105,7 @@ export async function runAgentForRequest(
     codeWorkspace,
     {
       isCodingJob,
+      useApiKey: options?.useApiKey,
       onStatusUpdate: (status: string) => {
         // Fire-and-forget status update to Control API
         updateJobStatus(request.id, status).catch(() => { });

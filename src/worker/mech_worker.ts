@@ -36,6 +36,7 @@ import {
 import { recordIdleCycle, recordExecutionTime } from './healthcheck.js';
 import { getMechAddressesForStakingContract } from './filters/stakingFilter.js';
 import { maybeCallCheckpoint } from './staking/checkpoint.js';
+import { checkEpochGate } from './staking/epochGate.js';
 
 export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
 
@@ -1254,6 +1255,24 @@ async function processOnce(): Promise<boolean> {
   if (!workerAddress) {
     workerLogger.error('Missing service mech address in .operate config or environment');
     return false;
+  }
+
+  // Staking target gate: stop claiming if delivery target met for this epoch
+  const stakingContract = getOptionalWorkerStakingContract();
+  if (stakingContract) {
+    const multisig = getServiceSafeAddress();
+    if (multisig) {
+      const gate = await checkEpochGate(stakingContract, multisig);
+      if (gate.targetMet) {
+        const resetIn = Math.max(0, gate.nextCheckpoint - Math.floor(Date.now() / 1000));
+        workerLogger.info({
+          deliveries: gate.deliveryCount,
+          target: gate.target,
+          resetsInSeconds: resetIn,
+        }, `Staking target met (${gate.deliveryCount}/${gate.target}) — skipping job pickup`);
+        return false;
+      }
+    }
   }
 
   // Optional: target a specific request id if provided (for deterministic tests)

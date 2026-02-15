@@ -39,6 +39,11 @@ export interface GeminiSettings {
     exclude?: string[];
     [key: string]: unknown;
   };
+  security?: {
+    auth?: {
+      selectedType?: string;
+    };
+  };
 }
 
 interface ToolCall {
@@ -144,6 +149,7 @@ export class Agent {
   private lastStatusUpdate: string | null = null;
   private statusBlockBuffer: string | null = null;
   private inStatusBlock: boolean = false;
+  private useApiKey: boolean;
   private chromeProcess: import('child_process').ChildProcess | null = null;
   private chromeDebugPort: number = 0;
   private chromeUserDataDir: string | null = null;
@@ -164,12 +170,13 @@ export class Agent {
     enabledTools: string[],
     jobContext?: JobContext,
     codeWorkspace?: string | null,
-    options?: { isCodingJob?: boolean; onStatusUpdate?: (status: string) => void }
+    options?: { isCodingJob?: boolean; useApiKey?: boolean; onStatusUpdate?: (status: string) => void }
   ) {
     this.model = model;
     this.enabledTools = enabledTools || [];
     this.jobContext = jobContext;
     this.onStatusUpdate = options?.onStatusUpdate;
+    this.useApiKey = options?.useApiKey ?? false;
 
     // Determine if this is a coding job
     // Primary source: explicit option, fallback to inferring from codeWorkspace
@@ -1194,6 +1201,12 @@ export class Agent {
       // Gemini CLI reads this from settings.tools.core (not top-level coreTools)
       if (!templateSettings.tools) templateSettings.tools = {};
       templateSettings.tools.core = toolPolicy.cliAllowedTools;
+
+      // Override auth type to use API key when OAuth is exhausted
+      if (this.useApiKey) {
+        templateSettings.security = { auth: { selectedType: 'gemini-api-key' } };
+        agentLogger.info({}, 'Overriding auth to gemini-api-key (OAuth quota exhausted)');
+      }
 
       // Ensure directory exists
       const settingsDir = dirname(this.settingsPath);
