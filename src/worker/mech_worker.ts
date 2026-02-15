@@ -25,7 +25,6 @@ import { fetchIpfsMetadata } from './metadata/fetchIpfsMetadata.js';
 import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
 import { shouldStop } from './cycleControl.js';
 import { waitForGeminiQuota } from './llm/geminiQuota.js';
-import { signControlApiHeaders } from '../http/erc8128.js';
 import {
   getOptionalWorkerJobDelayMs,
   getOptionalWorkerMechFilterMode,
@@ -35,8 +34,6 @@ import {
 } from '../config/index.js';
 import { recordIdleCycle, recordExecutionTime } from './healthcheck.js';
 import { getMechAddressesForStakingContract } from './filters/stakingFilter.js';
-import { maybeCallCheckpoint } from './staking/checkpoint.js';
-import { checkEpochGate } from './staking/epochGate.js';
 
 export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
 
@@ -137,26 +134,6 @@ const WORKSTREAM_FILTERS: string[] = (() => {
 // Legacy single-value alias for backward compatibility in logging
 const WORKSTREAM_FILTER = WORKSTREAM_FILTERS.length === 1 ? WORKSTREAM_FILTERS[0] : undefined;
 
-// Template-based job pickup: parse VENTURE_TEMPLATE_IDS for template-dispatched jobs from x402 gateway
-// Format: comma-separated template IDs or JSON array
-const VENTURE_TEMPLATE_IDS: string[] = (() => {
-  const raw = process.env.VENTURE_TEMPLATE_IDS;
-  if (!raw) return [];
-
-  if (raw.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return parsed.map(s => String(s).trim()).filter(Boolean);
-      }
-    } catch {
-      // Not valid JSON, fall through
-    }
-  }
-
-  return raw.split(',').map(s => s.trim()).filter(Boolean);
-})();
-
 // Always set WORKER_STOP_FILE so external stop signals can terminate the worker
 if (!process.env.WORKER_STOP_FILE) {
   const stopFileSuffix = WORKSTREAM_FILTERS.length > 0
@@ -197,10 +174,6 @@ const ENABLE_DEPENDENCY_AUTOFAIL = process.env.WORKER_DEPENDENCY_AUTOFAIL !== '0
 
 const dependencyRedispatchAttempts = new Map<string, number>();
 const dependencyCancelAttempts = new Map<string, number>();
-
-// Staking checkpoint: check every N cycles if epoch is overdue and call checkpoint()
-// At 30s base poll, 60 cycles = ~30 min. checkpoint() is a no-op if epoch hasn't ended.
-const WORKER_CHECKPOINT_CYCLES = parseInt(process.env.WORKER_CHECKPOINT_CYCLES || '60');
 
 // Periodic cleanup of global maps to prevent unbounded growth over weeks of uptime
 const MAP_CLEANUP_INTERVAL_CYCLES = 50;
@@ -570,99 +543,8 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       context: { operation: 'fetchRecentRequests', mechFilterMode: mechFilter.mode }
     });
     const items: any[] = data?.requests?.items || [];
-    workerLogger.info({ totalItems: items.length, items: items.map(r => ({ id: r.id, delivered: r.delivered, dependencies: r.dependencies })) }, 'Ponder GraphQL response (workstream query)');
-
-    // Query 2: Template-based jobs from x402 gateway
-    // Runs when Supabase is configured (dynamic validation) OR VENTURE_TEMPLATE_IDS is set (legacy).
-    // These jobs have jobName containing "(via x402)" and may not match any workstream filter.
-    // Template ownership is validated later in jobRunner via Supabase query.
-    let templateItems: any[] = [];
-    const ENABLE_TEMPLATE_PICKUP = !!(process.env.SUPABASE_URL || VENTURE_TEMPLATE_IDS.length > 0);
-    if (ENABLE_TEMPLATE_PICKUP) {
-      try {
-        const templateWhereConditions: string[] = ['delivered: false', 'jobName_contains: "(via x402)"'];
-        if (mechFilter.mode === 'list' || mechFilter.mode === 'staking') {
-          templateWhereConditions.push('mech_in: $mechs');
-        } else if (mechFilter.mode === 'single') {
-          templateWhereConditions.push('mech: $mech');
-        }
-        const templateWhereClause = `{ ${templateWhereConditions.join(', ')} }`;
-
-        const templateVarDefs: string[] = ['$tLimit: Int!'];
-        if (mechFilter.mode === 'list' || mechFilter.mode === 'staking') {
-          templateVarDefs.push('$mechs: [String!]!');
-        } else if (mechFilter.mode === 'single') {
-          templateVarDefs.push('$mech: String!');
-        }
-
-        const templateQuery = `query TemplateRequests(${templateVarDefs.join(', ')}) {
-  requests(
-    where: ${templateWhereClause}
-    orderBy: "blockTimestamp"
-    orderDirection: "asc"
-    limit: $tLimit
-  ) {
-    items {
-      id
-      mech
-      sender
-      workstreamId
-      ipfsHash
-      blockTimestamp
-      delivered
-      dependencies
-    }
-  }
-}`;
-
-        const templateVars: any = { tLimit: limit };
-        if (mechFilter.mode === 'list' || mechFilter.mode === 'staking') {
-          templateVars.mechs = mechFilter.addresses;
-        } else if (mechFilter.mode === 'single') {
-          templateVars.mech = mechFilter.addresses[0];
-        }
-
-        const templateData = await graphQLRequest<{ requests: { items: any[] } }>({
-          url: PONDER_GRAPHQL_URL,
-          query: templateQuery,
-          variables: templateVars,
-          context: { operation: 'fetchTemplateRequests', mechFilterMode: mechFilter.mode }
-        });
-        templateItems = templateData?.requests?.items || [];
-        if (templateItems.length > 0) {
-          workerLogger.info({ count: templateItems.length }, 'Template-based requests found (via x402)');
-        }
-      } catch (e) {
-        workerLogger.warn({ error: e instanceof Error ? e.message : String(e) }, 'Template request query failed; continuing with workstream results only');
-      }
-    }
-
-    // Merge and deduplicate results from both queries
-    const seenIds = new Set<string>();
-    const allItems: any[] = [];
-
-    for (const r of items) {
-      const id = String(r.id);
-      if (!seenIds.has(id)) {
-        seenIds.add(id);
-        allItems.push(r);
-      }
-    }
-    for (const r of templateItems) {
-      const id = String(r.id);
-      if (!seenIds.has(id)) {
-        seenIds.add(id);
-        allItems.push(r);
-      }
-    }
-
-    workerLogger.info({
-      workstreamResults: items.length,
-      templateResults: templateItems.length,
-      mergedTotal: allItems.length,
-    }, 'Merged request results');
-
-    return allItems.map((r: any) => ({
+    workerLogger.info({ totalItems: items.length, items: items.map(r => ({ id: r.id, delivered: r.delivered, dependencies: r.dependencies })) }, 'Ponder GraphQL response');
+    return items.map((r: any) => ({
       id: String(r.id),
       mech: String(r.mech),
       requester: String(r.sender || ''),
@@ -1257,24 +1139,6 @@ async function processOnce(): Promise<boolean> {
     return false;
   }
 
-  // Staking target gate: stop claiming if delivery target met for this epoch
-  const stakingContract = getOptionalWorkerStakingContract();
-  if (stakingContract) {
-    const multisig = getServiceSafeAddress();
-    if (multisig) {
-      const gate = await checkEpochGate(stakingContract, multisig);
-      if (gate.targetMet) {
-        const resetIn = Math.max(0, gate.nextCheckpoint - Math.floor(Date.now() / 1000));
-        workerLogger.info({
-          deliveries: gate.deliveryCount,
-          target: gate.target,
-          resetsInSeconds: resetIn,
-        }, `Staking target met (${gate.deliveryCount}/${gate.target}) — skipping job pickup`);
-        return false;
-      }
-    }
-  }
-
   // Optional: target a specific request id if provided (for deterministic tests)
   const targetIdEnv = (getOptionalMechTargetRequestId() || '').trim();
   let candidates: UnclaimedRequest[];
@@ -1393,28 +1257,14 @@ async function checkControlApiHealth(): Promise<void> {
   }
 
   try {
-    // Control API requires ERC-8128 signatures for all GraphQL operations.
-    const body = {
-      query: `query { __typename }`,
-      variables: {},
-    };
-    const baseHeaders = {
-      'Content-Type': 'application/json',
-      'Idempotency-Key': `healthcheck:${Date.now()}`,
-    };
-    const headers = await signControlApiHeaders(CONTROL_API_URL, body, baseHeaders);
-
-    const result = await graphQLRequest<{ __typename: string }>({
+    // Simple health check query
+    const query = `query { __typename }`;
+    await graphQLRequest({
       url: CONTROL_API_URL,
-      query: body.query,
-      variables: body.variables,
-      headers,
+      query,
       maxRetries: 0,
       context: { operation: 'healthCheck' }
     });
-    if (!result?.__typename) {
-      throw new Error('Control API health check returned empty payload');
-    }
     workerLogger.info({ controlApiUrl: CONTROL_API_URL }, 'Control API health check passed');
   } catch (e: any) {
     workerLogger.error({
@@ -1429,13 +1279,7 @@ async function checkControlApiHealth(): Promise<void> {
 const WORKER_REPOST_CHECK_CYCLES = parseInt(process.env.WORKER_REPOST_CHECK_CYCLES || '10');
 
 async function main() {
-  const templatePickupEnabled = !!(process.env.SUPABASE_URL || VENTURE_TEMPLATE_IDS.length > 0);
-  workerLogger.info({
-    workstreamFilters: WORKSTREAM_FILTERS.length > 0 ? WORKSTREAM_FILTERS : 'none',
-    ventureTemplateIds: VENTURE_TEMPLATE_IDS.length > 0 ? VENTURE_TEMPLATE_IDS : 'none (dynamic via Supabase)',
-    templatePickupEnabled,
-    templateValidationMode: process.env.SUPABASE_URL ? 'supabase' : (VENTURE_TEMPLATE_IDS.length > 0 ? 'env-allowlist' : 'disabled'),
-  }, 'Mech worker starting');
+  workerLogger.info('Mech worker starting');
 
   // Verify Control API is running before processing any jobs
   await checkControlApiHealth();
@@ -1454,7 +1298,6 @@ async function main() {
   // Repost check frequency limiting
   let cyclesSinceLastRepostCheck = 0;
   let cyclesSinceLastCleanup = 0;
-  let cyclesSinceLastCheckpoint = WORKER_CHECKPOINT_CYCLES; // Run on first cycle
 
   for (; ;) {
     const cycleStart = Date.now();
@@ -1476,18 +1319,6 @@ async function main() {
       if (cyclesSinceLastCleanup >= MAP_CLEANUP_INTERVAL_CYCLES) {
         cleanupGlobalMaps();
         cyclesSinceLastCleanup = 0;
-      }
-
-      // Call staking checkpoint if epoch is overdue (permissionless, any EOA can trigger)
-      const stakingContract = getOptionalWorkerStakingContract();
-      cyclesSinceLastCheckpoint++;
-      if (stakingContract && cyclesSinceLastCheckpoint >= WORKER_CHECKPOINT_CYCLES) {
-        cyclesSinceLastCheckpoint = 0;
-        try {
-          await maybeCallCheckpoint(stakingContract);
-        } catch (e: any) {
-          workerLogger.warn({ error: serializeError(e) }, 'Staking checkpoint call failed (non-fatal)');
-        }
       }
 
       const jobProcessed = await processOnce();

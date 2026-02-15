@@ -181,43 +181,6 @@ export async function dispatchExistingJob(args: unknown) {
   const baseTools: string[] | undefined = Array.isArray(jobDef.enabledTools) ? jobDef.enabledTools : undefined;
   const baseBlueprint: string | undefined = typeof jobDef.blueprint === 'string' ? jobDef.blueprint : undefined;
 
-  // Dedup guard: prevent duplicate dispatch of the same jobDefinitionId from the same parent
-  if (context.requestId) {
-    try {
-      const recentDup = await graphQLRequest<{
-        requests: { items: Array<{ id: string; blockTimestamp: string }> };
-      }>({
-        url: gqlUrl,
-        query: `query CheckRecentDispatch($jobDefId: String!, $sourceId: String!) {
-          requests(
-            where: { jobDefinitionId: $jobDefId, sourceRequestId: $sourceId }
-            limit: 1
-          ) { items { id blockTimestamp } }
-        }`,
-        variables: { jobDefId: jobDefinitionId, sourceId: context.requestId },
-        maxRetries: 1,
-        context: { operation: 'checkRecentDispatch', jobDefinitionId },
-      });
-
-      if (recentDup?.requests?.items?.length) {
-        const existing = recentDup.requests.items[0];
-        return {
-          content: [{
-            type: 'text' as const,
-            text: JSON.stringify({
-              data: { requestId: existing.id, jobDefinitionId, alreadyDispatched: true },
-              meta: { ok: true, code: 'ALREADY_DISPATCHED',
-                message: `Job "${name}" already dispatched from this parent (request ${existing.id}). Use dispatch_existing_job only for re-dispatches from a new parent context.` },
-            }),
-          }],
-        };
-      }
-    } catch (dupCheckError: any) {
-      // Non-fatal: if Ponder is unreachable, allow dispatch to proceed
-      console.warn('[dispatch_existing_job] Dedup check failed, proceeding:', dupCheckError.message);
-    }
-  }
-
   // Normalize tools to string arrays (handles both string and object formats)
   const requiredTools = normalizeToolArray(context.requiredTools);
   const availableTools = normalizeToolArray(context.availableTools);

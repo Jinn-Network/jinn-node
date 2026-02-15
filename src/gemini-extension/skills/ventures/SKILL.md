@@ -109,78 +109,21 @@ Update any combination of venture fields. Only provided fields are modified. Sup
 
 ## Blueprint Format
 
-Blueprints define success criteria (invariants) for a venture. Use `category` and `problem` fields alongside the invariants array:
+Blueprints define success criteria (invariants) for a venture:
 
 ```json
 {
-  "category": "Research",
-  "problem": "The specific problem this venture solves.",
   "invariants": [
     {
-      "id": "GOAL-001",
-      "type": "BOOLEAN",
-      "condition": "You operate exactly one Jinn template",
-      "assessment": "Count registered templates for this venture. Must equal exactly 1."
-    },
-    {
-      "id": "GOAL-002",
-      "type": "FLOOR",
-      "metric": "monthly_revenue_usd",
-      "min": 10000,
-      "assessment": "Sum total revenue from all paid executions in the current calendar month"
+      "id": "inv-availability",
+      "name": "Service Availability",
+      "description": "All production services maintain 99.9% uptime",
+      "type": "availability",
+      "threshold": 0.999
     }
   ]
 }
 ```
-
-### Invariant Types
-
-| Type | Required Fields | Use when |
-|------|----------------|----------|
-| **BOOLEAN** | `condition`, `assessment` | Yes/no check |
-| **FLOOR** | `metric`, `min`, `assessment` | Minimum threshold |
-| **CEILING** | `metric`, `max`, `assessment` | Maximum limit |
-| **RANGE** | `metric`, `min`, `max`, `assessment` | Bounded value |
-
-Full schema reference: [docs/guides/writing-invariants.md](../../docs/guides/writing-invariants.md)
-
-## Writing Good Invariants
-
-Invariants shape WHAT a venture must achieve in the world. The network works out HOW.
-
-### Think like a venture investor, not a developer
-
-**Bad (implementation specs):**
-- "Resolve APY from on-chain data or official protocol APIs"
-- "Cover Aave V3, Compound V3, Morpho, Spark, Fluid"
-- "Rate data staleness under 1 hour"
-
-**Good (product outcomes and business success):**
-- "You operate exactly one Jinn template" (product shape)
-- "$10k+ monthly revenue" (business viability)
-- "Accurate APY snapshot for all wallet positions" (core value proposition)
-- "4.5+ average feedback on 8004 marketplace" (market validation)
-- "Cover top 5 EVM chains by DeFi TVL" (durable scope, not a hardcoded list)
-
-### Key principles
-
-1. **Outcomes over implementation.** Describe what success looks like from the outside. Don't prescribe which protocols, data sources, or methods to use — the network figures that out.
-
-2. **Business reality matters.** Revenue and marketplace feedback are the actual measures of whether a venture matters. A technically perfect product nobody pays for is a failed venture.
-
-3. **Use system-native language.** Reference things that exist in the platform — Jinn templates, the 8004 marketplace, feedback scores. Hook into the system's own measurement infrastructure.
-
-4. **Stay durable.** "Top 5 EVM chains by TVL" beats "Ethereum, Base, Arbitrum" because the top 5 will shift over time. Invariants should stay correct as the world changes.
-
-5. **Encode sensible structural constraints.** Some invariants aren't strictly product outcomes but are practical architectural choices — "exactly 1 template", "template must be published", etc. These shape how the venture operates within the current system and are valid.
-
-6. **Every invariant needs an assessment.** The assessment explains HOW to measure. Use imperative voice: "Count...", "Verify...", "Sum...". Name specific data sources or tools when relevant.
-
-### Minimum requirements
-
-- At least 2 invariants per venture (enforced by frontend before token launch)
-- Every invariant MUST have an `assessment` field
-- Use second person for conditions: "You must...", "You produce..."
 
 ## CLI Scripts
 

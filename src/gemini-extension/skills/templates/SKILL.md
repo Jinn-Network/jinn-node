@@ -98,27 +98,6 @@ Archive (soft) or permanently delete (hard) a template.
 | venture_id | UUID | Associated venture (optional FK) |
 | status | string | draft, published, or archived |
 
-## Writing Template Invariants
-
-Template invariants define WHAT the template must achieve. The network works out HOW.
-
-**Think like a product owner, not a developer:**
-
-| Approach | Bad (implementation) | Good (outcome) |
-|----------|---------------------|----------------|
-| Data quality | "Use official protocol APIs" | "Accurate snapshot of current APY for all positions" |
-| Coverage | "Support Aave V3, Compound V3, Morpho" | "Cover top 5 EVM chains by DeFi TVL" |
-| Freshness | "Data no more than 1 hour old" | "4.5+ average feedback on 8004 marketplace" |
-
-**Key principles:**
-1. **Outcomes over implementation** — describe what success looks like from the outside
-2. **Business viability** — revenue and feedback are real measures of success
-3. **System-native language** — reference Jinn templates, 8004 marketplace, feedback scores
-4. **Durable scope** — "top 5 by TVL" beats a hardcoded list that goes stale
-5. **Sensible constraints** — structural choices like "exactly 1 template" are valid invariants
-
-See [docs/guides/writing-invariants.md](../../docs/guides/writing-invariants.md) for invariant type reference (BOOLEAN, FLOOR, CEILING, RANGE).
-
 ## Workflow: Creating a Template from a Tested Venture
 
 1. Design blueprint with invariants, inputSchema, outputSpec

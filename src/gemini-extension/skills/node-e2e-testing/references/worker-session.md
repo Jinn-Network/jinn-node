@@ -209,16 +209,6 @@ Also check the worker stdout for tool evidence:
 6. **Upload** — Result uploaded to IPFS
 7. **Deliver** — On-chain delivery via Safe transaction
 
-## Debugging Sources
-
-Always report these paths at session end for investigation:
-
-- **Worker output**: stdout captured during `yarn worker --single` execution
-- **Telemetry file**: Path logged by worker early in execution (e.g., `/tmp/telemetry-*.json`)
-- **Ponder logs**: Background stack output (task output file)
-- **Clone directory**: `$CLONE_DIR` — contains `.env`, `.operate/`, service config
-- **VNet config**: `.env.e2e` — VNet RPC URL and session state
-
 ## Acceptable Failures
 
 - **Delivery fails with 403 (quota exhausted)**: OK — the key validation is agent execution with tool use + IPFS upload.

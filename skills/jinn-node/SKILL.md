@@ -86,7 +86,6 @@ For a single-job test run: `yarn worker --single`
 
 - **Setup (advanced)**: [references/setup.md](references/setup.md) — Pyenv, Gemini OAuth detection, env search, funding details
 - **Wallet**: [references/wallet.md](references/wallet.md) — Balances, backup, key export, withdraw, recovery
-- **Launchpad**: [references/launchpad.md](references/launchpad.md) — Browse ventures, suggest ideas, like, comment, propose KPIs. Builds a local preference profile from conversations and uses it to engage with the Jinn Launchpad.
 
 ## Troubleshooting
 

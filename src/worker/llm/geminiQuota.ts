@@ -49,7 +49,6 @@ export interface CredentialSelectionResult {
   selectedCredential: OAuthCredentialSet | null;
   selectedIndex: number;
   allExhausted: boolean;
-  useApiKey?: boolean;
 }
 
 const DEFAULT_MODEL = DEFAULT_WORKER_MODEL;
@@ -481,18 +480,6 @@ export async function waitForGeminiQuota(options: QuotaWaitOptions = {}): Promis
     }
   }
 
-  // All OAuth credentials exhausted — check GEMINI_API_KEY as fallback before entering backoff
-  const apiKey = getOptionalGeminiApiKey() || process.env.GEMINI_API_KEY;
-  if (apiKey) {
-    workerLogger.info({}, 'All OAuth credentials exhausted — checking GEMINI_API_KEY fallback');
-    const apiKeyResult = await checkGeminiQuota({ model });
-    if (apiKeyResult.ok || !apiKeyResult.checked) {
-      workerLogger.info({}, 'Using API key auth (OAuth exhausted, API key quota available)');
-      return { selectedCredential: null, selectedIndex: -1, allExhausted: false, useApiKey: true };
-    }
-    workerLogger.warn({ detail: apiKeyResult.detail }, 'API key quota also exhausted — entering backoff loop');
-  }
-
   // All credentials exhausted - enter backoff loop until one becomes available
   let backoffAttempt = 0;
   while (selection.allExhausted) {
@@ -510,16 +497,7 @@ export async function waitForGeminiQuota(options: QuotaWaitOptions = {}): Promis
     await sleep(waitMs);
     backoffAttempt += 1;
 
-    // Check API key each iteration too (it may have recovered)
-    if (apiKey) {
-      const apiKeyRetry = await checkGeminiQuota({ model });
-      if (apiKeyRetry.ok || !apiKeyRetry.checked) {
-        workerLogger.info({}, 'Using API key auth (recovered during backoff)');
-        return { selectedCredential: null, selectedIndex: -1, allExhausted: false, useApiKey: true };
-      }
-    }
-
-    // Re-check all OAuth credentials
+    // Re-check all credentials
     selection = await selectAvailableCredential({ model });
   }
 

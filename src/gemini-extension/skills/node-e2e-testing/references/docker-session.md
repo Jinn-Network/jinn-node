@@ -4,8 +4,6 @@ Tests: Setup (bare) → Docker build → Docker worker execution with tool use �
 
 **Prerequisite**: Complete the shared steps (Infrastructure + Setup) from SKILL.md first. Setup runs bare — the Docker image doesn't include Python/Poetry.
 
-**Shell variables**: Commands below use `$CLONE_DIR`. Resolve to the absolute path before running — shell state does not persist between separate bash calls.
-
 ## Build the Docker Image
 
 From the monorepo root:
@@ -37,94 +35,97 @@ yarn test:e2e:vnet fund <agent-eoa-address> --eth 0.01
 Wait a few seconds for Ponder to index the marketplace request, then:
 
 ```bash
-yarn test:e2e:docker-run --cwd "$CLONE_DIR" --single
+docker run --rm \
+  --name jinn-e2e-worker \
+  --network host \
+  --env-file "$CLONE_DIR/.env" \
+  -e GEMINI_SANDBOX=false \
+  -e OPERATE_PROFILE_DIR=/home/jinn/.operate \
+  -e JINN_WORKSPACE_DIR=/app/jinn-repos \
+  -e PONDER_GRAPHQL_URL=http://localhost:42069/graphql \
+  -e CONTROL_API_URL=http://localhost:4001/graphql \
+  -v "$CLONE_DIR/.operate:/home/jinn/.operate" \
+  -v "$HOME/.gemini:/home/jinn/.gemini:ro" \
+  --shm-size=2g \
+  jinn-node:e2e \
+  node dist/worker/mech_worker.js --single
 ```
 
-The wrapper script handles:
-- macOS detection (`host.docker.internal` vs `localhost`)
-- Individual auth file mounts (avoids host extension symlinks crashing the CLI)
-- All fixed env vars (`GEMINI_SANDBOX`, `OPERATE_PROFILE_DIR`, etc.)
-- `--shm-size=2g` for Chromium
+Key points:
+- `--network host` — container reaches Ponder (42069) and Control API (4001) on localhost
+- `.operate/` mounted from clone dir (contains keystore + service config from bare setup)
+- `.gemini/` mounted read-only from host (OAuth creds)
+- CMD overridden to `mech_worker.js --single` (not the continuous `worker_launcher.js`)
+- `--shm-size=2g` — Chromium needs more than the default 64MB shared memory
 
-## Verify Healthcheck (required)
+### macOS note
+
+`--network host` doesn't work on Docker Desktop for Mac the same way as Linux. If the container can't reach localhost services, use `host.docker.internal` instead:
 
 ```bash
-yarn test:e2e:docker-run --cwd "$CLONE_DIR" --healthcheck
+docker run --rm \
+  --name jinn-e2e-worker \
+  --env-file "$CLONE_DIR/.env" \
+  -e GEMINI_SANDBOX=false \
+  -e OPERATE_PROFILE_DIR=/home/jinn/.operate \
+  -e JINN_WORKSPACE_DIR=/app/jinn-repos \
+  -e PONDER_GRAPHQL_URL=http://host.docker.internal:42069/graphql \
+  -e CONTROL_API_URL=http://host.docker.internal:4001/graphql \
+  -v "$CLONE_DIR/.operate:/home/jinn/.operate" \
+  -v "$HOME/.gemini:/home/jinn/.gemini:ro" \
+  --shm-size=2g \
+  jinn-node:e2e \
+  node dist/worker/mech_worker.js --single
 ```
 
-Wait ~60s for startup, then validate the endpoint returns all required fields:
-```bash
-curl -s http://localhost:8080/health | jq '{
-  status: .status,
-  nodeId: .nodeId,
-  workerId: .workerId,
-  processedJobs: .processedJobs,
-  heapUsedMB: .memory.heapUsedMB,
-  heapTotalMB: .memory.heapTotalMB,
-  rssMB: .memory.rssMB,
-  idlePercent: .efficiency.idlePercent
-}'
-```
+## Verify Healthcheck (optional)
 
-**Required assertions** (fail the test if any are false):
-- `.status` equals `"ok"`
-- `.memory.heapUsedMB` is a number > 0
-- `.memory.heapTotalMB` is a number > 0 and <= 2200 (heap cap is 2048MB, allow overhead)
-- `.memory.rssMB` is a number > 0
-- `.nodeId` is a non-empty string
+To test the healthcheck with the continuous launcher instead of `--single`:
 
-Clean up:
 ```bash
+docker run -d \
+  --name jinn-e2e-healthcheck \
+  --network host \
+  --env-file "$CLONE_DIR/.env" \
+  -e GEMINI_SANDBOX=false \
+  -e OPERATE_PROFILE_DIR=/home/jinn/.operate \
+  -e JINN_WORKSPACE_DIR=/app/jinn-repos \
+  -v "$CLONE_DIR/.operate:/home/jinn/.operate" \
+  -v "$HOME/.gemini:/home/jinn/.gemini:ro" \
+  --shm-size=2g \
+  -p 8080:8080 \
+  jinn-node:e2e
+
+# Wait ~60s for startup, then:
+curl http://localhost:8080/health
+# Should return JSON with status, nodeId, uptime, processedJobs
+
 docker stop jinn-e2e-healthcheck && docker rm jinn-e2e-healthcheck
 ```
 
 ## Verify Tool Use
 
-**WARNING: Do NOT run Docker again or dispatch a new job for this step.** Telemetry files from the `--single` run above are already on the host at `/tmp/jinn-telemetry/`. Just parse them.
+Same as worker session — check telemetry from the container output. The worker logs the telemetry path early in execution. Since the container runs with `--rm`, capture stdout:
 
-Find the telemetry file and parse it:
 ```bash
-TFILE=$(ls -t /tmp/jinn-telemetry/telemetry-*.json 2>/dev/null | head -1)
-echo "Telemetry file: $TFILE"
-python3 -c "
-import json
-content = open('$TFILE').read()
-events, buf, started, brace_count, in_string, escape_next = [], '', False, 0, False, False
-for ch in content:
-    if not started:
-        if ch == '{':
-            started, brace_count, buf, in_string, escape_next = True, 1, '{', False, False
-        continue
-    buf += ch
-    if escape_next: escape_next = False
-    elif ch == '\\\\' and in_string: escape_next = True
-    elif ch == '\"': in_string = not in_string
-    elif not in_string:
-        if ch == '{': brace_count += 1
-        elif ch == '}': brace_count -= 1
-    if started and brace_count == 0:
-        try: events.append(json.loads(buf))
-        except: pass
-        started, buf, in_string, escape_next = False, '', False, False
-for evt in events:
-    attrs = evt.get('attributes', {})
-    if attrs.get('event.name') == 'gemini_cli.config':
-        print(f\"core_tools_enabled: {attrs.get('core_tools_enabled', '')}\")
-tools = []
-for evt in events:
-    attrs = evt.get('attributes', {})
-    if attrs.get('event.name') in ('gemini_cli.tool_call', 'gemini_cli.function_call'):
-        name = attrs.get('function_name') or attrs.get('tool_name') or 'unknown'
-        tools.append(name)
-        print(f\"Tool call: {name} (success={attrs.get('success','?')}, {attrs.get('duration_ms','?')}ms)\")
-if not tools:
-    print('ERROR: No tool calls found in telemetry')
-else:
-    print(f'Total tool calls: {len(tools)}')
-    for req in ['google_web_search', 'create_artifact']:
-        print(f\"  [{'PASS' if req in tools else 'FAIL'}] {req}\")
-"
+docker run --rm \
+  --name jinn-e2e-worker \
+  --network host \
+  --env-file "$CLONE_DIR/.env" \
+  -e GEMINI_SANDBOX=false \
+  -e OPERATE_PROFILE_DIR=/home/jinn/.operate \
+  -e JINN_WORKSPACE_DIR=/app/jinn-repos \
+  -v "$CLONE_DIR/.operate:/home/jinn/.operate" \
+  -v "$HOME/.gemini:/home/jinn/.gemini:ro" \
+  -v /tmp/jinn-telemetry:/tmp \
+  --shm-size=2g \
+  jinn-node:e2e \
+  node dist/worker/mech_worker.js --single 2>&1 | tee /tmp/docker-worker-output.log
 ```
+
+The `-v /tmp/jinn-telemetry:/tmp` mount ensures telemetry files are accessible on the host after the container exits.
+
+Then parse telemetry using the streaming parser from [worker-session.md](worker-session.md#step-1-parse-telemetry-and-check-tool-configuration).
 
 ## Expected Flow
 
@@ -136,20 +137,10 @@ else:
 6. **Upload** — Result uploaded to IPFS
 7. **Deliver** — On-chain delivery via Safe transaction
 
-## Debugging Sources
-
-Always report these paths at session end for investigation:
-
-- **Docker worker output**: stdout from `yarn test:e2e:docker-run`
-- **Telemetry file**: `/tmp/jinn-telemetry/telemetry-*.json` (always available)
-- **Docker logs**: `docker logs jinn-e2e-worker` (if container still running)
-- **Ponder logs**: Background stack output (task output file)
-- **Clone directory**: `$CLONE_DIR` — contains `.env`, `.operate/`, service config
-- **VNet config**: `.env.e2e` — VNet RPC URL and session state
-
 ## Acceptable Failures
 
 - **Delivery fails with 403 (quota exhausted)**: OK — the key validation is Docker execution with tool use + IPFS upload.
+- **`--network host` doesn't work on macOS**: Use `host.docker.internal` variant above.
 - **Chromium sandbox warning**: Expected — `GEMINI_SANDBOX=false` disables macOS sandbox (unavailable in Linux containers).
 
 ## Success Criteria
@@ -161,5 +152,4 @@ Always report these paths at session end for investigation:
 - [ ] Agent called `create_artifact` at least once
 - [ ] Result was uploaded to IPFS
 - [ ] On-chain delivery attempted (success or quota error)
-- [ ] Healthcheck returns `status: "ok"` with valid memory metrics
-- [ ] Heap total is within cap (`heapTotalMB <= 2200`)
+- [ ] Healthcheck returns valid JSON (if tested)

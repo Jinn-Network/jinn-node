@@ -88,23 +88,23 @@ echo "CLONE_DIR=$CLONE_DIR" >> .env.e2e
 echo "OPERATE_PASSWORD=e2e-test-password-2024" >> .env.e2e
 ```
 
-The `.env.example` already has correct defaults for `CHAIN_ID`, `STAKING_CONTRACT`, `WORKSTREAM_FILTER`, and `X402_GATEWAY_URL`. Only update the four values that differ for E2E testing:
-```bash
-# In $CLONE_DIR/.env, update these four lines (leave everything else as-is):
+Edit `$CLONE_DIR/.env` — read RPC_URL from `.env.e2e`:
+```
 RPC_URL=<from .env.e2e>
 OPERATE_PASSWORD=e2e-test-password-2024
 PONDER_GRAPHQL_URL=http://localhost:42069/graphql
 CONTROL_API_URL=http://localhost:4001/graphql
+STAKING_CONTRACT=0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139
+WORKSTREAM_FILTER=0x9470f6f2bec6940c93fedebc0ea74bccaf270916f4693e96e8ccc586f26a89ac
+X402_GATEWAY_URL=https://x402-gateway-production-1b84.up.railway.app
 ```
 
 **Setup is iterative** — it pauses when funding is needed, prints exact addresses and amounts. Fund those exact amounts and re-run until it completes:
 ```bash
-# Use --no-staking for worker and docker sessions (middleware can't read
-# staking params from Tenderly VNets). Only wallet sessions need staking.
-cd "$CLONE_DIR" && yarn setup --no-staking
+cd "$CLONE_DIR" && yarn setup
 # Read funding requirements from output, then from monorepo root:
 yarn test:e2e:vnet fund <address> --eth <amount> --olas <amount>
-cd "$CLONE_DIR" && yarn setup --no-staking
+cd "$CLONE_DIR" && yarn setup
 # Repeat until complete.
 ```
 

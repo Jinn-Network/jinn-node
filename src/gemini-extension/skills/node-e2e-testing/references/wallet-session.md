@@ -66,16 +66,6 @@ After recovery:
 - Master Safe should have reduced OLAS/ETH balances
 - The destination address should have received the funds
 
-## Debugging Sources
-
-Always report these paths at session end for investigation:
-
-- **Script output**: stdout from wallet commands
-- **Middleware logs**: `$CLONE_DIR/.operate/` — middleware daemon output
-- **Ponder logs**: Background stack output (task output file)
-- **Clone directory**: `$CLONE_DIR` — contains `.env`, `.operate/`, service config
-- **VNet config**: `.env.e2e` — VNet RPC URL, session state, time-warp status
-
 ## Acceptable Failures
 
 - **Recovery fails with 403 (quota exhausted)**: The unstake + withdraw flow requires multiple on-chain transactions. If quota runs out mid-recovery, the partial state is expected on Tenderly.

@@ -54,12 +54,6 @@ function matchesDeprecatedPattern(model: string): boolean {
   return false;
 }
 
-function isExperimentalModel(model: string): boolean {
-  // These models are commonly suggested by upstream LLMs but often 404 in Gemini CLI/API.
-  // Treat them as disallowed unless explicitly allowlisted by policy.
-  return model.includes('-exp');
-}
-
 export type ModelValidationResult = {
   ok: boolean;
   reason?: string;
@@ -90,26 +84,6 @@ export type GeminiModelNormalization = {
   normalized: string;
   changed: boolean;
   reason?: string;
-};
-
-export type GeminiModelPolicy = {
-  /**
-   * If non-empty, the requested model must be in this allowlist (after normalization).
-   * If empty/undefined, any non-deprecated model is allowed.
-   */
-  allowedModels?: string[] | null;
-  /**
-   * Fallback/default model when requested model is empty or disallowed.
-   */
-  defaultModel?: string | null;
-};
-
-export type GeminiModelSelection = {
-  requested: string;
-  normalizedRequested: string;
-  selected: string;
-  changed: boolean;
-  reason: 'empty_fallback' | 'normalized' | 'policy_fallback' | 'deprecated_fallback';
 };
 
 function stripModelsPrefix(model: string): string {
@@ -156,106 +130,5 @@ export function normalizeGeminiModel(
     requested,
     normalized: stripped,
     changed: false,
-  };
-}
-
-function normalizeAllowlist(allowedModels: string[], defaultModel: string): string[] {
-  // Preserve order but normalize names so comparisons are stable (preview aliases, strip "models/", etc).
-  const seen = new Set<string>();
-  const normalized: string[] = [];
-  for (const m of allowedModels) {
-    if (typeof m !== 'string') continue;
-    const n = normalizeGeminiModel(m, defaultModel).normalized;
-    if (!validateModelAllowed(n).ok) continue;
-    if (!seen.has(n)) {
-      seen.add(n);
-      normalized.push(n);
-    }
-  }
-  return normalized;
-}
-
-/**
- * Select the effective Gemini model to run under a model policy.
- *
- * Behavior:
- * - Empty requested model uses policy default (or worker default).
- * - Deprecated/experimental models fall back to policy default.
- * - If allowlist is present, models outside it fall back to policy default.
- */
-export function selectGeminiModelWithPolicy(
-  requestedModel: string | null | undefined,
-  policy: GeminiModelPolicy | null | undefined,
-  workerDefaultModel: string = DEFAULT_WORKER_MODEL,
-): GeminiModelSelection {
-  const policyDefaultRaw = (policy?.defaultModel ?? '').trim();
-  let policyDefault = normalizeGeminiModel(
-    policyDefaultRaw.length > 0 ? policyDefaultRaw : workerDefaultModel,
-    workerDefaultModel,
-  ).normalized;
-  if (!validateModelAllowed(policyDefault).ok || isExperimentalModel(policyDefault)) {
-    policyDefault = normalizeGeminiModel(workerDefaultModel, workerDefaultModel).normalized;
-  }
-
-  const requestedRaw = (requestedModel ?? '').trim();
-  if (requestedRaw.length === 0) {
-    return {
-      requested: policyDefault,
-      normalizedRequested: policyDefault,
-      selected: policyDefault,
-      changed: true,
-      reason: 'empty_fallback',
-    };
-  }
-
-  const normalizedRequested = normalizeGeminiModel(requestedRaw, policyDefault).normalized;
-
-  const allowedModels = Array.isArray(policy?.allowedModels) ? policy!.allowedModels!.filter((m) => typeof m === 'string') : [];
-  const normalizedAllowed = allowedModels.length > 0 ? normalizeAllowlist(allowedModels, policyDefault) : [];
-  const allowedSet = new Set(normalizedAllowed);
-
-  // Block experimental models unless explicitly allowlisted.
-  if (isExperimentalModel(normalizedRequested) && !allowedSet.has(normalizedRequested)) {
-    const fallback = allowedSet.has(policyDefault) ? policyDefault : (normalizedAllowed[0] ?? policyDefault);
-    return {
-      requested: requestedRaw,
-      normalizedRequested,
-      selected: fallback,
-      changed: true,
-      reason: 'policy_fallback',
-    };
-  }
-
-  const validation = validateModelAllowed(normalizedRequested);
-  if (!validation.ok) {
-    return {
-      requested: requestedRaw,
-      normalizedRequested,
-      selected: policyDefault,
-      changed: true,
-      reason: 'deprecated_fallback',
-    };
-  }
-
-  if (normalizedAllowed.length > 0) {
-    if (!allowedSet.has(normalizedRequested)) {
-      // Ensure we always pick something from the allowlist if possible.
-      const fallback = allowedSet.has(policyDefault) ? policyDefault : (normalizedAllowed[0] ?? policyDefault);
-      return {
-        requested: requestedRaw,
-        normalizedRequested,
-        selected: fallback,
-        changed: true,
-        reason: 'policy_fallback',
-      };
-    }
-  }
-
-  return {
-    requested: requestedRaw,
-    normalizedRequested,
-    selected: normalizedRequested,
-    changed: normalizedRequested !== requestedRaw,
-    reason: 'normalized',
   };
 }

@@ -73,12 +73,10 @@
     "wallet:export-keys": "tsx scripts/wallet/export-keys.ts",
     "wallet:withdraw": "sh -c 'tsx scripts/wallet/withdraw.ts \"$@\"' --",
     "wallet:unstake": "sh -c 'tsx scripts/wallet/unstake.ts \"$@\"' --",
-    "wallet:recover": "sh -c 'tsx scripts/wallet/recover.ts \"$@\"' --",
-    "support:bundle": "FORCE_STDERR=true tsx scripts/support-bundle.ts"
+    "wallet:recover": "sh -c 'tsx scripts/wallet/recover.ts \"$@\"' --"
   },
   "dependencies": {
     "@jinn-network/mech-client-ts": "^0.0.6",
-    "@slicekit/erc8128": "^0.1.0",
     "@modelcontextprotocol/sdk": "^1.11.0",
     "@octokit/rest": "^22.0.1",
     "@safe-global/protocol-kit": "^6.1.0",
