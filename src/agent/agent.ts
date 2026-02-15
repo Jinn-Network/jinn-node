@@ -36,6 +36,13 @@ export interface GeminiSettings {
   };
   coreTools?: string[];
   excludeTools?: string[];
+  security?: {
+    auth?: {
+      selectedType?: string;
+      enforcedType?: string;
+    };
+  };
+  [key: string]: unknown;
 }
 
 interface ToolCall {
@@ -1045,6 +1052,14 @@ export class Agent {
       }
 
       const templateSettings: GeminiSettings = JSON.parse(readFileSync(templatePath, 'utf8'));
+
+      // If GEMINI_API_KEY is set, override auth to use API key instead of OAuth
+      // This prevents the interactive OAuth dialog from blocking non-interactive workers
+      if (process.env.GEMINI_API_KEY && !process.env.GEMINI_OAUTH_CREDENTIALS) {
+        if (!templateSettings.security) templateSettings.security = {};
+        if (!templateSettings.security.auth) templateSettings.security.auth = {};
+        templateSettings.security.auth.selectedType = 'gemini-api-key';
+      }
 
       if (!templateSettings.mcpServers) {
         throw new Error('No MCP servers configured in settings.template.json');
