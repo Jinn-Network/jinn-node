@@ -1323,15 +1323,17 @@ async function checkControlApiHealth(): Promise<void> {
   }
 
   try {
-    // Simple health check query
-    const query = `query { __typename }`;
-    await graphQLRequest({
-      url: CONTROL_API_URL,
-      query,
-      maxRetries: 0,
-      context: { operation: 'healthCheck' }
-    });
-    workerLogger.info({ controlApiUrl: CONTROL_API_URL }, 'Control API health check passed');
+    // Use the REST /health endpoint which bypasses ERC-8128 auth
+    const healthUrl = CONTROL_API_URL!.replace(/\/graphql\/?$/, '/health');
+    const res = await fetch(healthUrl, { method: 'GET', signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    const body = await res.json() as any;
+    if (body?.status !== 'ok') {
+      throw new Error(`Unhealthy response: ${JSON.stringify(body)}`);
+    }
+    workerLogger.info({ controlApiUrl: CONTROL_API_URL, nodeId: body.nodeId }, 'Control API health check passed');
   } catch (e: any) {
     workerLogger.error({
       error: serializeError(e),
