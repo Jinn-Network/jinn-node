@@ -1248,7 +1248,7 @@ async function processOnce(): Promise<boolean> {
     return false;
   }
 
-  // Staking target gate: stop claiming if delivery target met for this epoch
+  // Staking target gate: stop claiming if request target met for this epoch
   const stakingContract = getOptionalWorkerStakingContract();
   if (stakingContract) {
     const multisig = getServiceSafeAddress();
@@ -1257,10 +1257,10 @@ async function processOnce(): Promise<boolean> {
       if (gate.targetMet) {
         const resetIn = Math.max(0, gate.nextCheckpoint - Math.floor(Date.now() / 1000));
         workerLogger.info({
-          deliveries: gate.deliveryCount,
+          requests: gate.requestCount,
           target: gate.target,
           resetsInSeconds: resetIn,
-        }, `Staking target met (${gate.deliveryCount}/${gate.target}) — skipping job pickup`);
+        }, `Staking target met (${gate.requestCount}/${gate.target}) — skipping job pickup`);
         return false;
       }
     }
