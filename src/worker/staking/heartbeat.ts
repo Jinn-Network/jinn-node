@@ -130,12 +130,22 @@ async function submitHeartbeat(multisig: string, mechAddress: string): Promise<b
   return result.success;
 }
 
+// How many requests to submit per heartbeat call.
+// With slow worker cycles (Control API retries, backoff), a single request per
+// call is not enough to hit 65/epoch. Submit a small batch each time.
+const HEARTBEAT_BATCH_SIZE = parseInt(process.env.HEARTBEAT_BATCH_SIZE || '5');
+
+// Minimum seconds between heartbeat submissions to avoid gas waste
+const HEARTBEAT_MIN_INTERVAL_SEC = parseInt(process.env.HEARTBEAT_MIN_INTERVAL_SEC || '60');
+
+let lastHeartbeatTimestamp = 0;
+
 /**
  * Maybe submit heartbeat requests to meet the staking liveness requirement.
  * Called periodically from the worker loop.
  *
  * Only submits if there's a deficit of requests for the current epoch.
- * Submits at most 1 request per call to spread gas cost over time.
+ * Submits a batch of requests per call to compensate for slow worker cycles.
  */
 export async function maybeSubmitHeartbeat(stakingContract: string): Promise<void> {
   const multisig = getServiceSafeAddress();
@@ -143,6 +153,12 @@ export async function maybeSubmitHeartbeat(stakingContract: string): Promise<voi
 
   if (!multisig || !mechAddress) {
     log.debug('No multisig or mech address — skipping heartbeat');
+    return;
+  }
+
+  // Throttle: don't submit more often than HEARTBEAT_MIN_INTERVAL_SEC
+  const now = Math.floor(Date.now() / 1000);
+  if (now - lastHeartbeatTimestamp < HEARTBEAT_MIN_INTERVAL_SEC) {
     return;
   }
 
@@ -160,14 +176,29 @@ export async function maybeSubmitHeartbeat(stakingContract: string): Promise<voi
       return;
     }
 
+    const batchSize = Math.min(deficit, HEARTBEAT_BATCH_SIZE);
+
     log.info({
       deficit,
+      batchSize,
       currentRequestCount: current,
       target: TARGET_WITH_MARGIN,
       epochSecondsRemaining,
-    }, `Request deficit: ${deficit} — submitting heartbeat`);
+    }, `Request deficit: ${deficit} — submitting ${batchSize} heartbeat(s)`);
 
-    await submitHeartbeat(multisig, mechAddress);
+    let submitted = 0;
+    for (let i = 0; i < batchSize; i++) {
+      const ok = await submitHeartbeat(multisig, mechAddress);
+      if (ok) {
+        submitted++;
+      } else {
+        log.warn({ submitted, batchSize }, 'Heartbeat batch interrupted by failure');
+        break;
+      }
+    }
+
+    lastHeartbeatTimestamp = Math.floor(Date.now() / 1000);
+    log.info({ submitted, batchSize, deficit }, `Heartbeat batch complete`);
   } catch (error: any) {
     log.warn({ error: error.message }, 'Heartbeat check failed (non-fatal)');
   }
