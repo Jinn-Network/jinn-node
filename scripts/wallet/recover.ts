@@ -3,11 +3,12 @@
  * Recover - Full emergency recovery: unstake + withdraw all funds
  *
  * Usage:
- *   yarn wallet:recover --to <address>             # Full recovery
- *   yarn wallet:recover --to <address> --dry-run  # Preview without executing
+ *   yarn wallet:recover --to <address>                    # Recover all services
+ *   yarn wallet:recover --to <address> --service <id>     # Recover specific service
+ *   yarn wallet:recover --to <address> --dry-run          # Preview without executing
  *
  * This performs a complete fund recovery:
- * 1. Terminate service (if staked) - triggers unstaking
+ * 1. Terminate all services (or specific --service) from staking
  * 2. Withdraw all funds from Master Safe (ETH + OLAS)
  * 3. Withdraw all funds from Service Safe (ETH)
  * 4. Sweep remaining ETH from EOAs (optional)
@@ -40,6 +41,7 @@ async function main() {
   const { values } = parseArgs({
     options: {
       to: { type: 'string', short: 't' },
+      service: { type: 'string', short: 's' },
       'dry-run': { type: 'boolean', default: false },
       'skip-terminate': { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h' }
@@ -52,17 +54,19 @@ async function main() {
 Full emergency fund recovery - terminates service and withdraws all funds.
 
 Usage:
-  yarn wallet:recover --to <address>             # Full recovery
+  yarn wallet:recover --to <address>             # Full recovery (all services)
+  yarn wallet:recover --to <address> --service <id>  # Recover specific service
   yarn wallet:recover --to <address> --dry-run  # Preview without executing
 
 Options:
   --to, -t            Destination address for all funds (required)
+  --service, -s       Recover a specific service by config ID (default: all)
   --dry-run           Preview recovery without executing
   --skip-terminate    Skip service termination (if already unstaked)
   --help, -h          Show this help message
 
 Recovery steps:
-  1. Terminate service (unstakes from staking contract)
+  1. Terminate all services (or specific --service) from staking
   2. Withdraw OLAS + ETH from Master Safe
   3. Withdraw ETH from Service Safe
   4. (Optional) Sweep EOAs
@@ -99,6 +103,7 @@ Recovery steps:
   const dryRun = values['dry-run'];
   const skipTerminate = values['skip-terminate'];
   const destination = values.to;
+  const targetService = values.service;
 
   console.log('');
   console.log('═══════════════════════════════════════════════════════════════');
@@ -139,15 +144,29 @@ Recovery steps:
     // Step 2: Get service info (v2 API)
     console.log('\nStep 2: Fetching service information...');
     const servicesResult = await wrapper.getServices();
-    let serviceSafe: string | undefined;
-    let serviceConfigId: string | undefined;
+    let services: Array<{ service_config_id: string; multisig?: string }> = [];
 
     if (servicesResult.success && servicesResult.services?.length) {
-      const service = servicesResult.services[0];
-      serviceConfigId = service.service_config_id;
-      serviceSafe = service.chain_configs?.base?.chain_data?.multisig;
-      console.log(`  Service Config ID: ${serviceConfigId}`);
-      console.log(`  Service Safe: ${serviceSafe || 'Not found'}`);
+      for (const svc of servicesResult.services) {
+        const svcId = svc.service_config_id;
+        const svcSafe = svc.chain_configs?.base?.chain_data?.multisig;
+        services.push({ service_config_id: svcId, multisig: svcSafe });
+        console.log(`  Service ${svcId} — Safe: ${svcSafe || 'Not found'}`);
+      }
+
+      // Filter to target service if specified
+      if (targetService) {
+        const matched = services.filter(s => s.service_config_id === targetService);
+        if (matched.length === 0) {
+          console.error(`\nError: Service "${targetService}" not found.`);
+          console.error(`Available: ${services.map(s => s.service_config_id).join(', ')}`);
+          process.exit(1);
+        }
+        services = matched;
+        console.log(`\n  Targeting service: ${targetService}`);
+      } else {
+        console.log(`\n  Recovering all ${services.length} service(s)`);
+      }
     } else {
       console.log('  No active services found');
     }
@@ -166,12 +185,17 @@ Recovery steps:
       totalOlas += masterBalances.olas;
     }
 
-    if (serviceSafe && serviceSafe !== masterSafe) {
-      const serviceBalances = await getBalances(provider, serviceSafe);
-      console.log(`  Service Safe ETH:  ${ethers.formatEther(serviceBalances.eth)}`);
-      console.log(`  Service Safe OLAS: ${ethers.formatEther(serviceBalances.olas)}`);
-      totalEth += serviceBalances.eth;
-      totalOlas += serviceBalances.olas;
+    const seenSafes = new Set<string>();
+    if (masterSafe) seenSafes.add(masterSafe.toLowerCase());
+    for (const svc of services) {
+      if (svc.multisig && !seenSafes.has(svc.multisig.toLowerCase())) {
+        seenSafes.add(svc.multisig.toLowerCase());
+        const serviceBalances = await getBalances(provider, svc.multisig);
+        console.log(`  Service Safe ${svc.service_config_id} ETH:  ${ethers.formatEther(serviceBalances.eth)}`);
+        console.log(`  Service Safe ${svc.service_config_id} OLAS: ${ethers.formatEther(serviceBalances.olas)}`);
+        totalEth += serviceBalances.eth;
+        totalOlas += serviceBalances.olas;
+      }
     }
 
     const eoaBalances = await getBalances(provider, masterEOA);
@@ -187,14 +211,13 @@ Recovery steps:
       console.log('DRY RUN COMPLETE - No transactions executed');
       console.log('');
       console.log('Recovery would:');
-      if (!skipTerminate && serviceConfigId) {
-        console.log(`  1. Terminate service ${serviceConfigId}`);
+      if (!skipTerminate && services.length > 0) {
+        for (let i = 0; i < services.length; i++) {
+          console.log(`  ${i + 1}. Terminate service ${services[i].service_config_id}`);
+        }
       }
       if (masterSafe) {
-        console.log(`  2. Withdraw from Master Safe to ${destination}`);
-      }
-      if (serviceSafe && serviceSafe !== masterSafe) {
-        console.log(`  3. Withdraw from Service Safe to ${destination}`);
+        console.log(`  ${services.length + 1}. Withdraw from Master Safe to ${destination}`);
       }
       console.log('');
       console.log('Remove --dry-run to execute recovery');
@@ -202,16 +225,19 @@ Recovery steps:
       process.exit(0);
     }
 
-    // Step 4: Terminate service (if not skipped)
-    if (!skipTerminate && serviceConfigId) {
-      console.log('\nStep 4: Terminating service...');
-      const terminateResult = await wrapper.terminateAndWithdraw(serviceConfigId, destination);
+    // Step 4: Terminate services (if not skipped)
+    if (!skipTerminate && services.length > 0) {
+      console.log(`\nStep 4: Terminating ${services.length} service(s)...`);
+      for (const svc of services) {
+        console.log(`\n  Terminating ${svc.service_config_id}...`);
+        const terminateResult = await wrapper.terminateAndWithdraw(svc.service_config_id, destination);
 
-      if (terminateResult.success) {
-        console.log('  ✓ Service terminated');
-      } else {
-        console.log(`  ⚠️ Terminate may have failed: ${terminateResult.error}`);
-        console.log('  Continuing with withdrawal...');
+        if (terminateResult.success) {
+          console.log(`  Service ${svc.service_config_id} terminated`);
+        } else {
+          console.log(`  Terminate ${svc.service_config_id} may have failed: ${terminateResult.error}`);
+          console.log('  Continuing with remaining services...');
+        }
       }
     }
 

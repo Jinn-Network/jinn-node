@@ -148,6 +148,16 @@ export function startHealthcheckServer(): void {
             ? Math.round((totalIdleMs / uptimeMs) * 100)
             : 0,
         },
+        // V8 memory usage for right-sizing VPS/container limits
+        memory: (() => {
+          const m = process.memoryUsage();
+          return {
+            heapUsedMB: Math.round(m.heapUsed / 1024 / 1024),
+            heapTotalMB: Math.round(m.heapTotal / 1024 / 1024),
+            rssMB: Math.round(m.rss / 1024 / 1024),
+            externalMB: Math.round(m.external / 1024 / 1024),
+          };
+        })(),
       };
 
       res.writeHead(200, { 'Content-Type': 'application/json' });

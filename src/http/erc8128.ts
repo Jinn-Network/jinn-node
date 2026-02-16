@@ -1,218 +1,160 @@
+/**
+ * ERC-8128 HTTP Message Signatures for Control API authentication.
+ *
+ * Workers sign every Control API request with their on-chain private key.
+ * The Control API verifies signatures and extracts the worker address
+ * from the cryptographic keyid — replacing the bare X-Worker-Address header.
+ *
+ * Uses @slicekit/erc8128 (RFC 9421 + Ethereum signatures).
+ */
+
 import {
-  createSignerClient,
-  createVerifierClient,
-  formatKeyId,
-  parseKeyId,
-  type Address,
-  type ClientOptions,
+  signRequest,
+  verifyRequest as erc8128VerifyRequest,
   type EthHttpSigner,
-  type Hex,
   type NonceStore,
-  type SignOptions,
-  type VerifyPolicy,
+  type VerifyMessageFn,
   type VerifyResult,
+  type VerifyPolicy,
+  type SetHeadersFn,
 } from '@slicekit/erc8128';
-import { verifyMessage, type Account } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { verifyMessage } from 'viem';
+import { getRequiredWorkerPrivateKey } from '../config/index.js';
 
-export type Erc8128NonceStore = NonceStore;
+// ============================================================================
+// Client-side: Signer construction + request signing
+// ============================================================================
 
-export type Erc8128Signer = EthHttpSigner;
+let _signer: EthHttpSigner | null = null;
 
-export const DEFAULT_ERC8128_SIGN_OPTIONS: SignOptions = {
-  label: 'eth',
-  binding: 'request-bound',
-  replay: 'non-replayable',
-  ttlSeconds: 60,
-};
+/**
+ * Lazy singleton signer from the worker's private key.
+ * The address and chainId are embedded in the ERC-8128 keyid.
+ */
+export function getControlApiSigner(): EthHttpSigner {
+  if (_signer) return _signer;
 
-export const DEFAULT_ERC8128_VERIFY_POLICY: VerifyPolicy = {
-  label: 'eth',
-  strictLabel: false,
-  replayable: false,
-  clockSkewSec: 5,
-  maxValiditySec: 300,
-  maxNonceWindowSec: 300,
-};
+  const key = getRequiredWorkerPrivateKey() as `0x${string}`;
+  const account = privateKeyToAccount(key);
 
-const CHAIN_CONFIG_TO_CHAIN_ID: Record<string, number> = {
-  base: 8453,
-  'base-mainnet': 8453,
-  base_mainnet: 8453,
-  'base-sepolia': 84532,
-  base_sepolia: 84532,
-  gnosis: 100,
-  ethereum: 1,
-  mainnet: 1,
-  sepolia: 11155111,
-  optimism: 10,
-  mode: 34443,
-};
-
-function toHex(bytes: Uint8Array): Hex {
-  return (`0x${Buffer.from(bytes).toString('hex')}`) as Hex;
-}
-
-export function normalizeAddress(value: string): Address {
-  return value.toLowerCase() as Address;
-}
-
-export function resolveChainId(chainConfig?: string | null, fallback = 8453): number {
-  if (!chainConfig) return fallback;
-  const normalized = chainConfig.toLowerCase().trim();
-  if (/^\d+$/.test(normalized)) {
-    return Number.parseInt(normalized, 10);
-  }
-  return CHAIN_CONFIG_TO_CHAIN_ID[normalized] ?? fallback;
-}
-
-export function createAccountHttpSigner(account: Account, chainId: number): EthHttpSigner {
-  const accountWithSigner = account as Account & {
-    signMessage?: (args: { message: { raw: Hex } }) => Promise<Hex>;
+  _signer = {
+    address: account.address,
+    chainId: 8453, // Base
+    signMessage: (msg: Uint8Array) =>
+      account.signMessage({ message: { raw: msg } }),
   };
-  if (typeof accountWithSigner.signMessage !== 'function') {
-    throw new Error('Account does not support signMessage');
+
+  return _signer;
+}
+
+/**
+ * Sign a Control API request and return headers with ERC-8128 signature fields.
+ *
+ * Builds a Web API Request, signs it, then extracts the signature headers
+ * so they can be merged into the existing postJson header flow.
+ *
+ * @param url - The Control API URL
+ * @param body - The request body (will be JSON.stringified)
+ * @param headers - Existing headers to preserve
+ * @returns Headers with signature-input, signature, and content-digest added
+ */
+export async function signControlApiHeaders(
+  url: string,
+  body: any,
+  headers: Record<string, string>,
+): Promise<Record<string, string>> {
+  const signer = getControlApiSigner();
+  const jsonBody = JSON.stringify(body);
+
+  const req = new Request(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...headers },
+    body: jsonBody,
+  });
+
+  const signed = await signRequest(req, signer, {
+    binding: 'request-bound',
+    replay: 'non-replayable',
+    ttlSeconds: 60,
+  });
+
+  // Extract signature headers from the signed request
+  const result: Record<string, string> = { ...headers };
+  for (const key of ['signature-input', 'signature', 'content-digest']) {
+    const val = signed.headers.get(key);
+    if (val) result[key] = val;
   }
 
-  return {
-    address: normalizeAddress(account.address),
-    chainId,
-    signMessage: async (message: Uint8Array) =>
-      accountWithSigner.signMessage!({ message: { raw: toHex(message) } }),
-  };
+  return result;
 }
 
-export function createPrivateKeyHttpSigner(privateKey: Hex, chainId: number): EthHttpSigner {
-  const account = privateKeyToAccount(privateKey);
-  return createAccountHttpSigner(account, chainId);
-}
+// ============================================================================
+// Server-side: Nonce store + verification helpers
+// ============================================================================
 
-export function createSignedFetchClient(
-  signer: EthHttpSigner,
-  defaults: Partial<ClientOptions> = {},
-) {
-  return createSignerClient(signer, {
-    ...DEFAULT_ERC8128_SIGN_OPTIONS,
-    ...defaults,
-  });
-}
-
-export async function signRequestWithErc8128(args: {
-  signer: EthHttpSigner;
-  input: RequestInfo;
-  init?: RequestInit;
-  signOptions?: SignOptions;
-}): Promise<Request> {
-  const client = createSignedFetchClient(args.signer, args.signOptions);
-  return client.signRequest(args.input, args.init, args.signOptions);
-}
-
-export async function signedFetchWithErc8128(args: {
-  signer: EthHttpSigner;
-  input: RequestInfo;
-  init?: RequestInit;
-  signOptions?: SignOptions;
-  fetch?: typeof fetch;
-}): Promise<Response> {
-  const client = createSignedFetchClient(args.signer, {
-    fetch: args.fetch,
-    ...(args.signOptions ?? {}),
-  });
-  return client.fetch(args.input, args.init, args.signOptions);
-}
-
-export function createErc8128Verifier(
-  nonceStore: NonceStore,
-  policy: Partial<VerifyPolicy> = {},
-) {
-  return createVerifierClient(
-    async ({ address, message, signature }) =>
-      verifyMessage({
-        address,
-        message: { raw: message.raw },
-        signature,
-      }),
-    nonceStore,
-    {
-      ...DEFAULT_ERC8128_VERIFY_POLICY,
-      ...policy,
-    },
-  );
-}
-
-export async function verifyRequestWithErc8128(args: {
-  request: Request;
-  nonceStore: NonceStore;
-  policy?: Partial<VerifyPolicy>;
-}): Promise<VerifyResult> {
-  const verifier = createErc8128Verifier(args.nonceStore, args.policy);
-  return verifier.verifyRequest(args.request, args.policy);
-}
-
-export function buildErc8128IdempotencyKey(parts: Array<string | number | undefined | null>): string {
-  return parts
-    .filter((part): part is string | number => part !== undefined && part !== null && `${part}`.length > 0)
-    .map((part) => String(part))
-    .join(':');
-}
-
-export function formatErc8128KeyId(chainId: number, address: Address): string {
-  return formatKeyId(chainId, address);
-}
-
-export function parseErc8128KeyId(keyId: string): { chainId: number; address: Address } | null {
-  return parseKeyId(keyId);
-}
-
+/**
+ * In-memory nonce store with TTL-based expiration.
+ * Tracks seen nonces and garbage-collects expired entries on access.
+ */
 export class InMemoryNonceStore implements NonceStore {
-  private readonly entries = new Map<string, number>();
+  private seen = new Map<string, number>();
 
   async consume(key: string, ttlSeconds: number): Promise<boolean> {
-    const now = Date.now();
-    const expiresAt = now + Math.max(ttlSeconds, 1) * 1000;
-    const existing = this.entries.get(key);
-
-    if (existing && existing > now) {
-      return false;
-    }
-
-    this.entries.set(key, expiresAt);
-    this.prune(now);
+    this.gc();
+    if (this.seen.has(key)) return false;
+    this.seen.set(key, Date.now() + ttlSeconds * 1000);
     return true;
   }
 
-  private prune(now: number): void {
-    for (const [key, expiresAt] of this.entries.entries()) {
+  private gc(): void {
+    const now = Date.now();
+    for (const [key, expiresAt] of this.seen) {
       if (expiresAt <= now) {
-        this.entries.delete(key);
+        this.seen.delete(key);
       }
     }
   }
 }
 
 /**
- * Redis-backed NonceStore for ERC-8128 replay protection.
- * Uses atomic SET NX EX for race-safe nonce consumption.
- * Fails closed (returns false) on Redis errors.
+ * Verify an ERC-191 personal_sign message using viem.
+ * Matches the VerifyMessageFn shape expected by @slicekit/erc8128.
  */
-export class RedisNonceStore implements NonceStore {
-  private readonly redis: { set(key: string, value: string, expiryMode: string, ttl: number, flag: string): Promise<string | null> };
-  private readonly keyPrefix: string;
-
-  constructor(redis: { set(key: string, value: string, expiryMode: string, ttl: number, flag: string): Promise<string | null> }, keyPrefix = 'erc8128:nonce:') {
-    this.redis = redis;
-    this.keyPrefix = keyPrefix;
+export const ethVerifyMessage: VerifyMessageFn = async (args) => {
+  try {
+    const valid = await verifyMessage({
+      address: args.address as `0x${string}`,
+      message: { raw: args.message.raw as `0x${string}` },
+      signature: args.signature as `0x${string}`,
+    });
+    return valid;
+  } catch {
+    return false;
   }
+};
 
-  async consume(key: string, ttlSeconds: number): Promise<boolean> {
-    try {
-      const redisKey = `${this.keyPrefix}${key}`;
-      const ttl = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? Math.ceil(ttlSeconds) : 300;
-      const result = await this.redis.set(redisKey, '1', 'EX', ttl, 'NX');
-      return result === 'OK';
-    } catch (err) {
-      console.error('[RedisNonceStore] consume failed:', err);
-      return false; // fail-closed
-    }
-  }
+/**
+ * Verify an incoming HTTP request's ERC-8128 signature.
+ * Thin wrapper that bundles our verifyMessage and nonceStore.
+ */
+export async function verifyControlApiRequest(
+  request: Request,
+  nonceStore: NonceStore,
+  policy?: VerifyPolicy,
+  setHeaders?: SetHeadersFn,
+): Promise<VerifyResult> {
+  return erc8128VerifyRequest(request, ethVerifyMessage, nonceStore, {
+    maxValiditySec: 120,
+    clockSkewSec: 10,
+    ...policy,
+  }, setHeaders);
 }
+
+export type {
+  EthHttpSigner,
+  NonceStore,
+  VerifyMessageFn,
+  VerifyResult,
+  VerifyPolicy,
+};

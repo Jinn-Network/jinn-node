@@ -39,6 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
     fonts-liberation \
     git \
+    openssh-client \
     dumb-init \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
@@ -58,6 +59,9 @@ COPY --from=builder /app/node_modules/ ./node_modules/
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/dist/ ./dist/
 
+# Copy init script (used by Railway startCommand and standalone docker run)
+COPY scripts/init.sh ./scripts/
+
 # Create directories the worker writes to at runtime
 RUN mkdir -p /home/jinn/.operate /home/jinn/.gemini /app/jinn-repos /tmp/.gemini-worker \
     && chown -R jinn:jinn /app /tmp/.gemini-worker /home/jinn
@@ -65,11 +69,17 @@ RUN mkdir -p /home/jinn/.operate /home/jinn/.gemini /app/jinn-repos /tmp/.gemini
 # Persistent volume: home dir contains .operate/ (keystore) and .gemini/ (auth + extensions)
 VOLUME ["/home/jinn"]
 
+# Cap V8 heap to force earlier GC — without this, Node uses up to ~50% of container
+# memory (4GB in 8GB container), inflating baseline RAM. Override at runtime via
+# NODE_OPTIONS env var or docker-compose environment section.
+ARG NODE_MAX_OLD_SPACE_SIZE=2048
+
 # Environment defaults for containerized operation
 ENV NODE_ENV=production \
     GEMINI_SANDBOX=false \
     OPERATE_PROFILE_DIR=/home/jinn/.operate \
-    JINN_WORKSPACE_DIR=/app/jinn-repos
+    JINN_WORKSPACE_DIR=/app/jinn-repos \
+    NODE_OPTIONS="--max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE}"
 
 # Healthcheck endpoint (healthcheck defined in docker-compose.yml)
 EXPOSE 8080

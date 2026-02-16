@@ -35,9 +35,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 8G
+          memory: 4G
         reservations:
-          memory: 2G
+          memory: 1G
 
     logging:
       driver: json-file

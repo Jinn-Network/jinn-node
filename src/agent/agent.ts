@@ -1,5 +1,5 @@
 import { spawn, execSync } from 'child_process';
-import { writeFileSync, readFileSync, unlinkSync, mkdirSync, existsSync, statSync, symlinkSync, lstatSync } from 'fs';
+import { writeFileSync, readFileSync, unlinkSync, mkdirSync, existsSync, statSync, symlinkSync, lstatSync, rmSync } from 'fs';
 import { join, dirname, resolve, isAbsolute, delimiter } from 'path';
 import { tmpdir, homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -231,6 +231,7 @@ export class Agent {
   private inStatusBlock: boolean = false;
   private chromeProcess: import('child_process').ChildProcess | null = null;
   private chromeDebugPort: number = 0;
+  private chromeUserDataDir: string | null = null;
 
   // Stdout protection limits (configurable via environment variables)
   private readonly MAX_STDOUT_SIZE = parseInt(process.env.AGENT_MAX_STDOUT_SIZE || '5242880'); // 5MB default
@@ -539,6 +540,7 @@ export class Agent {
     const port = 9222 + Math.floor(Math.random() * 1000);
     const userDataDir = join(tmpdir(), `chrome-worker-${process.pid}-${Date.now()}`);
     mkdirSync(userDataDir, { recursive: true });
+    this.chromeUserDataDir = userDataDir;
 
     const candidates = [
       '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -597,6 +599,15 @@ export class Agent {
       this.chromeProcess.kill('SIGTERM');
       this.chromeProcess = null;
       agentLogger.info('Killed pre-launched Chrome process');
+    }
+    if (this.chromeUserDataDir) {
+      try {
+        rmSync(this.chromeUserDataDir, { recursive: true, force: true });
+        agentLogger.debug({ dir: this.chromeUserDataDir }, 'Cleaned up Chrome temp directory');
+      } catch {
+        // Best-effort cleanup — don't fail the job if this errors
+      }
+      this.chromeUserDataDir = null;
     }
   }
 

@@ -30,6 +30,7 @@ import { TransactionRequest } from './types/transaction.js';
 import { ExecutionResult } from './types.js';
 import { validateTransaction } from './validation.js';
 import { updateTransactionStatus } from './control_api_client.js';
+import { serializeError } from './logging/errors.js';
 import {
   getRequiredChainId,
   getWorkerTxConfirmations,
@@ -187,7 +188,7 @@ export class EoaExecutor implements ITransactionExecutor {
       eoaLogger.error({ requestId: request.id, error }, 'Error processing EOA transaction');
       await onStatusUpdate(request.id, 'FAILED', {
         error_code: 'UNEXPECTED_ERROR',
-        error_message: error instanceof Error ? error.message : String(error),
+        error_message: serializeError(error),
         completed_at: new Date().toISOString()
       });
     }
