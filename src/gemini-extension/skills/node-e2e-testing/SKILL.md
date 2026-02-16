@@ -4,7 +4,7 @@ description: End-to-end test the jinn-node operator experience using Tenderly VN
 allowed-tools: Bash Read Edit Write Glob Grep
 user-invocable: true
 disable-model-invocation: true
-argument-hint: "[worker|wallet|docker|all]"
+argument-hint: "[worker|wallet|docker|operator|all]"
 ---
 
 # jinn-node E2E Testing
@@ -19,15 +19,17 @@ Tenderly free tier allows ~5-10 write transactions per VNet. Full coverage requi
 
 | Argument | Sessions | What it tests |
 |----------|----------|---------------|
-| `worker` | 1 VNet | Setup → Dispatch → Worker execution (bare) |
+| `worker` | 1 VNet | Setup → Operator scripts → Dispatch → Worker execution with rotation (bare) |
 | `wallet` | 1 VNet | Setup → Wallet info → Recovery (unstake + withdraw) |
 | `docker` | 1 VNet | Setup (bare) → Docker build → Docker worker execution |
-| `all` | 3 VNets | `worker` first, then `wallet`, then `docker` |
+| `operator` | 1 VNet | Setup → Operator scripts → Add 2nd service → Multi-service validation |
+| `all` | 4 VNets | `worker` first, then `wallet`, then `docker`, then `operator` |
 
 **Based on the argument, read the corresponding session file:**
 - `worker` or `all` → read [references/worker-session.md](references/worker-session.md)
 - `wallet` or `all` → read [references/wallet-session.md](references/wallet-session.md)
 - `docker` or `all` → read [references/docker-session.md](references/docker-session.md)
+- `operator` or `all` → read [references/operator-session.md](references/operator-session.md)
 
 For `all`: complete each session (including cleanup) before starting the next.
 

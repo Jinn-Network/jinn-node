@@ -10,6 +10,7 @@
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { logger } from '../logging/index.js';
+import { decryptKeystoreV3 } from '../env/keystore-decrypt.js';
 
 const configLogger = logger.child({ component: 'SERVICE-CONFIG-READER' });
 
@@ -121,13 +122,36 @@ export async function readServiceConfig(
       }
     }
     
-    // Read agent private key from deployment/agent_keys/agent_0/ethereum_private_key.txt
+    // Read agent private key — try keys.json first (middleware daemon format),
+    // fall back to deployment/agent_keys path (Docker/AEA format)
     let agentPrivateKey: string | undefined;
     try {
-      const privateKeyPath = join(servicesDir, targetServiceId, 'deployment', 'agent_keys', 'agent_0', 'ethereum_private_key.txt');
-      agentPrivateKey = (await fs.readFile(privateKeyPath, 'utf-8')).trim();
-    } catch (error) {
-      configLogger.debug({ error: error instanceof Error ? error.message : String(error) }, 'Could not read agent private key');
+      const keysJsonPath = join(servicesDir, targetServiceId, 'keys.json');
+      const keysJson = JSON.parse(await fs.readFile(keysJsonPath, 'utf-8'));
+      if (Array.isArray(keysJson) && keysJson.length > 0 && keysJson[0].private_key) {
+        const rawKey = keysJson[0].private_key;
+        if (typeof rawKey === 'string' && rawKey.startsWith('{')) {
+          // Encrypted keystore — decrypt with OPERATE_PASSWORD
+          const password = process.env.OPERATE_PASSWORD;
+          if (password) {
+            agentPrivateKey = decryptKeystoreV3(rawKey, password);
+          } else {
+            configLogger.warn('Encrypted keystore in keys.json but OPERATE_PASSWORD not set');
+          }
+        } else if (typeof rawKey === 'string' && rawKey.startsWith('0x')) {
+          agentPrivateKey = rawKey;
+        }
+      }
+    } catch {
+      // keys.json not found or invalid — try legacy path
+    }
+    if (!agentPrivateKey) {
+      try {
+        const privateKeyPath = join(servicesDir, targetServiceId, 'deployment', 'agent_keys', 'agent_0', 'ethereum_private_key.txt');
+        agentPrivateKey = (await fs.readFile(privateKeyPath, 'utf-8')).trim();
+      } catch (error) {
+        configLogger.debug({ error: error instanceof Error ? error.message : String(error) }, 'Could not read agent private key');
+      }
     }
     
     const serviceInfo: ServiceInfo = {
@@ -152,8 +176,69 @@ export async function readServiceConfig(
 }
 
 /**
+ * Remove service directories that were created but never deployed on-chain.
+ * A config is "undeployed" if chain_data.token and chain_data.multisig are both absent.
+ * Also removes directories with missing or malformed config.json.
+ */
+export async function cleanupUndeployedConfigs(
+  middlewarePath: string
+): Promise<{ removed: string[]; errors: string[] }> {
+  const removed: string[] = [];
+  const errors: string[] = [];
+  const servicesDir = join(middlewarePath, '.operate', 'services');
+
+  let entries;
+  try {
+    entries = await fs.readdir(servicesDir, { withFileTypes: true });
+  } catch {
+    return { removed, errors };
+  }
+
+  const serviceDirs = entries.filter(e => e.isDirectory() && e.name.startsWith('sc-'));
+
+  for (const dir of serviceDirs) {
+    const servicePath = join(servicesDir, dir.name);
+    const configPath = join(servicePath, 'config.json');
+
+    try {
+      const raw = await fs.readFile(configPath, 'utf-8');
+      const config = JSON.parse(raw);
+      const homeChain = config.home_chain || 'base';
+      const chainData = config.chain_configs?.[homeChain]?.chain_data;
+      const token = chainData?.token;
+      const multisig = chainData?.multisig;
+
+      // If token and multisig are both absent → never deployed on-chain
+      // Note: middleware uses token=-1 as "unminted" placeholder, which is truthy in JS
+      if ((!token || token === -1) && !multisig) {
+        configLogger.info({ service: dir.name }, 'Removing undeployed service config');
+        await fs.rm(servicePath, { recursive: true, force: true });
+        removed.push(dir.name);
+      }
+    } catch (err: any) {
+      if (err.code === 'ENOENT' || err instanceof SyntaxError) {
+        // Missing or malformed config.json → remove
+        configLogger.info({ service: dir.name }, 'Removing service config with missing/malformed config.json');
+        try {
+          await fs.rm(servicePath, { recursive: true, force: true });
+          removed.push(dir.name);
+        } catch (rmErr) {
+          errors.push(`${dir.name}: ${rmErr}`);
+        }
+      }
+    }
+  }
+
+  if (removed.length > 0) {
+    configLogger.info({ count: removed.length, services: removed }, 'Cleaned up undeployed service configs');
+  }
+
+  return { removed, errors };
+}
+
+/**
  * List all service configurations in middleware .operate directory
- * 
+ *
  * @param middlewarePath Path to olas-operate-middleware directory
  * @returns Array of ServiceInfo objects
  */

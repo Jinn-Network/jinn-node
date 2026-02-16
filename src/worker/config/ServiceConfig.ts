@@ -29,7 +29,7 @@ export const SERVICE_CONSTANTS = {
   DEFAULT_SERVICE_BOND_WEI: "50000000000000000000", // 50 ETH in wei (Pearl template)
   
   // Fund requirements (wei as integers for middleware)
-  DEFAULT_AGENT_FUNDING_WEI: 325700000000000, // 0.0003257 ETH for gas
+  DEFAULT_AGENT_FUNDING_WEI: 5000000000000000, // 0.005 ETH for gas
   DEFAULT_SAFE_FUNDING_WEI: 1628500000000000, // 0.0016285 ETH for gas
   
   // OLAS token requirements (Base mainnet: 0x54330d28ca3357F294334BDC454a032e7f353416)

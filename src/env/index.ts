@@ -8,7 +8,7 @@ if (process.env.__ENV_LOADED !== '1') {
   try {
     // Resolve repo root based on this file's location
     const here = path.dirname(fileURLToPath(import.meta.url));
-    const repoRoot = path.resolve(here, '..');
+    const repoRoot = path.resolve(here, '../..');
 
     // Detect test environment (Vitest sets VITEST='true')
     const isTestEnv = process.env.VITEST === 'true';

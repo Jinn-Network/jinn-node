@@ -15,7 +15,7 @@ import marketplaceAbi from '@jinn-network/mech-client-ts/dist/abis/MechMarketpla
 import { workerLogger } from '../logging/index.js';
 import { claimRequest as apiClaimRequest } from './control_api_client.js';
 import { deliverViaSafe } from '@jinn-network/mech-client-ts/dist/post_deliver.js';
-import { getMechAddress, getServicePrivateKey, getMechChainConfig, getServiceSafeAddress } from '../env/operate-profile.js';
+import { getMechAddress, getServicePrivateKey, getMechChainConfig, getServiceSafeAddress, getMiddlewarePath } from '../env/operate-profile.js';
 import { dispatchExistingJob } from '../agent/mcp/tools/dispatch_existing_job.js';
 import { getInheritedEnv } from './status/autoDispatch.js';
 import { serializeError } from './logging/errors.js';
@@ -30,10 +30,16 @@ import {
   getOptionalWorkerMechFilterMode,
   getOptionalWorkerStakingContract,
   getOptionalWorkerMechFilterList,
+  getWorkerMultiServiceEnabled,
+  getWorkerActivityPollMs,
+  getWorkerActivityCacheTtlMs,
+  getRequiredRpcUrl as getConfigRpcUrl,
   type WorkerMechFilterMode,
 } from '../config/index.js';
 import { recordIdleCycle, recordExecutionTime } from './healthcheck.js';
 import { getMechAddressesForStakingContract } from './filters/stakingFilter.js';
+import { ServiceRotator } from './rotation/ServiceRotator.js';
+import { setActiveService } from './rotation/ActiveServiceContext.js';
 import { maybeCallCheckpoint } from './staking/checkpoint.js';
 import { checkEpochGate } from './staking/epochGate.js';
 import { maybeSubmitHeartbeat } from './staking/heartbeat.js';
@@ -71,6 +77,10 @@ const executedJobsThisSession = new Map<string, number>();
 let consecutiveStuckCycles = 0;
 let lastStuckRequestIds: string[] = [];
 
+// Earning window job tracking
+let earningWindowJobCount = 0;
+let earningWindowId: string | null = null;
+
 // Parse --runs=<N> flag for controlled execution cycles
 const MAX_RUNS = (() => {
   if (SINGLE_SHOT) return 1; // --single is equivalent to --runs=1
@@ -107,6 +117,20 @@ const MAX_STUCK_CYCLES = (() => {
 const WORKER_POLL_BASE_MS = parseInt(process.env.WORKER_POLL_BASE_MS || '30000');
 const WORKER_POLL_MAX_MS = parseInt(process.env.WORKER_POLL_MAX_MS || '300000');
 const WORKER_POLL_BACKOFF_FACTOR = parseFloat(process.env.WORKER_POLL_BACKOFF_FACTOR || '1.5');
+
+// Earning schedule: "HH:MM-HH:MM" in local timezone (e.g., "22:00-08:00")
+// When set, worker only claims jobs during this window.
+// Supports overnight windows (start > end wraps past midnight).
+// Unset = always earning (current behavior).
+const EARNING_SCHEDULE = process.env.EARNING_SCHEDULE?.trim() || null;
+
+// Max jobs per earning window. Unset = unlimited (current behavior).
+const EARNING_MAX_JOBS = (() => {
+  const raw = process.env.EARNING_MAX_JOBS;
+  if (!raw) return undefined;
+  const value = parseInt(raw, 10);
+  return isNaN(value) || value < 1 ? undefined : value;
+})();
 
 // Workstream filtering: parse --workstream=<id> flag or WORKSTREAM_FILTER env var
 // Supports multiple workstreams via:
@@ -171,6 +195,63 @@ const MIN_TIME_BETWEEN_REPOSTS = 5 * 60 * 1000; // 5 minutes
 
 // Track recent reposts to prevent loops
 const recentReposts = new Map<string, number>();
+
+/**
+ * Parse "HH:MM-HH:MM" schedule and check if current time is inside the window.
+ * Handles overnight windows (e.g., "22:00-08:00").
+ */
+function checkEarningWindow(schedule: string): { inWindow: boolean; msUntilWindow: number } {
+  const match = schedule.match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    workerLogger.warn({ schedule }, 'Invalid EARNING_SCHEDULE format, expected HH:MM-HH:MM');
+    return { inWindow: true, msUntilWindow: 0 }; // fail open
+  }
+
+  const [, sh, sm, eh, em] = match;
+  const startMinutes = parseInt(sh) * 60 + parseInt(sm);
+  const endMinutes = parseInt(eh) * 60 + parseInt(em);
+
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+  let inWindow: boolean;
+  if (startMinutes <= endMinutes) {
+    // Same-day window (e.g., "09:00-17:00")
+    inWindow = nowMinutes >= startMinutes && nowMinutes < endMinutes;
+  } else {
+    // Overnight window (e.g., "22:00-08:00")
+    inWindow = nowMinutes >= startMinutes || nowMinutes < endMinutes;
+  }
+
+  if (inWindow) return { inWindow: true, msUntilWindow: 0 };
+
+  // Calculate ms until window opens
+  let minutesUntil = startMinutes - nowMinutes;
+  if (minutesUntil <= 0) minutesUntil += 24 * 60;
+
+  return { inWindow: false, msUntilWindow: minutesUntil * 60 * 1000 };
+}
+
+/**
+ * Get a stable ID for the current earning window (for resetting the job counter).
+ * Format: "YYYY-MM-DD-HH:MM" using the window's start time.
+ */
+function getCurrentWindowId(schedule: string): string {
+  const match = schedule.match(/^(\d{1,2}):(\d{2})-/);
+  if (!match) return 'unknown';
+  const startHour = parseInt(match[1]);
+  const startMin = parseInt(match[2]);
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const startMinutes = startHour * 60 + startMin;
+
+  // If we're well before the start time (>12h away), the window started yesterday
+  const windowDate = new Date(now);
+  if (startMinutes > nowMinutes + 12 * 60) {
+    windowDate.setDate(windowDate.getDate() - 1);
+  }
+  return `${windowDate.toISOString().slice(0, 10)}-${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}`;
+}
 
 const DEFAULT_BASE_BRANCH = process.env.CODE_METADATA_DEFAULT_BASE_BRANCH || 'main';
 
@@ -1450,6 +1531,39 @@ async function main() {
   // Verify Control API is running before processing any jobs
   await checkControlApiHealth();
 
+  // Initialize multi-service rotation if enabled
+  let rotator: ServiceRotator | null = null;
+  if (getWorkerMultiServiceEnabled()) {
+    const middlewarePath = getMiddlewarePath();
+    if (middlewarePath) {
+      try {
+        rotator = new ServiceRotator({
+          rpcUrl: getConfigRpcUrl(),
+          middlewarePath,
+          activityPollMs: getWorkerActivityPollMs(),
+          activityCacheTtlMs: getWorkerActivityCacheTtlMs(),
+        });
+        const initial = await rotator.initialize();
+        setActiveService(rotator.buildIdentity(initial.service));
+        workerLogger.info({
+          activeService: initial.service.serviceConfigId,
+          serviceId: initial.service.serviceId,
+          reason: initial.reason,
+        }, 'Multi-service rotation active');
+      } catch (err: any) {
+        workerLogger.error({ error: err?.message || String(err) }, 'Failed to initialize multi-service rotation, falling back to single-service');
+        rotator = null;
+      }
+    } else {
+      workerLogger.warn('WORKER_MULTI_SERVICE enabled but no middleware path found');
+    }
+  }
+
+  // Log earning schedule at startup
+  if (EARNING_SCHEDULE) {
+    workerLogger.info({ schedule: EARNING_SCHEDULE, maxJobs: EARNING_MAX_JOBS ?? 'unlimited' }, 'Earning schedule configured');
+  }
+
   if (SINGLE_SHOT) {
     await processOnce();
     return;
@@ -1473,6 +1587,32 @@ async function main() {
       if (shouldStop()) {
         workerLogger.info('Stop signal detected before poll - exiting worker loop');
         return;
+      }
+
+      // Earning schedule gate: skip polling if outside earning window
+      if (EARNING_SCHEDULE) {
+        const { inWindow, msUntilWindow } = checkEarningWindow(EARNING_SCHEDULE);
+        if (!inWindow) {
+          workerLogger.info({ schedule: EARNING_SCHEDULE, sleepMs: msUntilWindow }, 'Outside earning window - sleeping until window opens');
+          // Sleep until window opens (capped at 1 hour to recheck for stop signals)
+          await new Promise(r => setTimeout(r, Math.min(msUntilWindow, 60 * 60 * 1000)));
+          continue;
+        }
+
+        // Reset job counter if this is a new window
+        const windowId = getCurrentWindowId(EARNING_SCHEDULE);
+        if (windowId !== earningWindowId) {
+          earningWindowJobCount = 0;
+          earningWindowId = windowId;
+          workerLogger.info({ windowId, maxJobs: EARNING_MAX_JOBS ?? 'unlimited' }, 'New earning window started');
+        }
+      }
+
+      // Earning job cap: skip polling if cap reached for this window
+      if (EARNING_MAX_JOBS !== undefined && earningWindowJobCount >= EARNING_MAX_JOBS) {
+        workerLogger.info({ jobCount: earningWindowJobCount, maxJobs: EARNING_MAX_JOBS }, 'Earning job cap reached for this window - sleeping');
+        await new Promise(r => setTimeout(r, 5 * 60 * 1000));
+        continue;
       }
 
       // Check for completed chains only every Nth cycle (reduces DB queries when idle)
@@ -1523,6 +1663,7 @@ async function main() {
         recordExecutionTime(cycleDurationMs);
         consecutiveIdleCycles = 0;
         currentPollIntervalMs = WORKER_POLL_BASE_MS;
+        earningWindowJobCount++;
       } else {
         recordIdleCycle(cycleDurationMs);
         consecutiveIdleCycles++;
@@ -1536,6 +1677,24 @@ async function main() {
       if (shouldStop()) {
         workerLogger.info('Stop signal detected after job processing - exiting worker loop');
         return;
+      }
+
+      // Multi-service rotation check (no-op when rotator is null)
+      if (rotator) {
+        try {
+          const decision = await rotator.reevaluate();
+          if (decision.switched) {
+            setActiveService(rotator.buildIdentity(decision.service));
+            workerLogger.info({
+              activeService: decision.service.serviceConfigId,
+              serviceId: decision.service.serviceId,
+              reason: decision.reason,
+              rotationState: rotator.getState(),
+            }, 'Rotated to new service');
+          }
+        } catch (rotErr: any) {
+          workerLogger.warn({ error: rotErr?.message || String(rotErr) }, 'Service rotation check failed');
+        }
       }
 
       // Check if we've reached the max runs limit
