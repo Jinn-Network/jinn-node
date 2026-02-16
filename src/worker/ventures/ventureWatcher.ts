@@ -57,13 +57,22 @@ export async function checkAndDispatchScheduledVentures(): Promise<void> {
   try {
     evictStaleEntries();
     const ventures = await listVentures({ status: 'active' });
-    const withSchedule = ventures.filter(
-      v => Array.isArray(v.dispatch_schedule) && v.dispatch_schedule.length > 0
-    );
+
+    // Respect VENTURE_FILTER env var — only dispatch for filtered ventures
+    const ventureFilter = process.env.VENTURE_FILTER;
+    const allowedIds = ventureFilter
+      ? new Set(ventureFilter.split(',').map(s => s.trim()).filter(Boolean))
+      : null;
+
+    const withSchedule = ventures.filter(v => {
+      if (!Array.isArray(v.dispatch_schedule) || v.dispatch_schedule.length === 0) return false;
+      if (allowedIds && !allowedIds.has(v.id)) return false;
+      return true;
+    });
 
     if (withSchedule.length === 0) return;
 
-    workerLogger.debug({ ventureCount: withSchedule.length }, 'Venture watcher: checking schedules');
+    workerLogger.debug({ ventureCount: withSchedule.length, ventureFilter: ventureFilter || 'none' }, 'Venture watcher: checking schedules');
 
     for (const venture of withSchedule) {
       for (const entry of venture.dispatch_schedule) {
