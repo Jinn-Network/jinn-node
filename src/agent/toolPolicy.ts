@@ -238,6 +238,30 @@ export function getEnabledExtensions(enabledTools: string[]): ExtensionMetaTool[
 }
 
 /**
+ * Moltbook agent social network tools (custom MCP tools)
+ * Requires MOLTBOOK_API_KEY env var
+ */
+export const MOLTBOOK_TOOLS = [
+  'moltbook_search',
+  'moltbook_get_feed',
+  'moltbook_get_submolt',
+  'moltbook_list_submolts',
+  'moltbook_subscribe',
+  'moltbook_create_post',
+  'moltbook_get_post',
+  'moltbook_create_comment',
+  'moltbook_upvote',
+  'moltbook_get_profile',
+] as const;
+
+/**
+ * Check if moltbook is enabled in the tools list
+ */
+export function hasMoltbook(enabledTools: string[]): boolean {
+  return enabledTools.includes('moltbook');
+}
+
+/**
  * Telegram messaging tools (custom MCP tools)
  * Reads chat_id from TELEGRAM_CHAT_ID env var
  */
@@ -402,6 +426,14 @@ export function computeToolPolicy(
         ...(config as { tools: string[] }).tools
       ];
     }
+  }
+
+  // Expand moltbook meta-tool to Moltbook MCP tools
+  if (expandedTools.includes('moltbook')) {
+    expandedTools = [
+      ...expandedTools.filter(t => t !== 'moltbook'),
+      ...MOLTBOOK_TOOLS
+    ];
   }
 
   // Expand telegram_messaging meta-tool to custom MCP tools

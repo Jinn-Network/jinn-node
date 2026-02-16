@@ -1,5 +1,6 @@
 import {
   EXTENSION_META_TOOLS,
+  MOLTBOOK_TOOLS,
   TELEGRAM_TOOLS,
   FIREFLIES_TOOLS,
   RAILWAY_TOOLS,
@@ -100,6 +101,9 @@ function expandMetaTools(tools: string[]): string[] {
     }
 
     // Expand other meta-tools that aren't in EXTENSION_META_TOOLS
+    if (tool === 'moltbook') {
+      expanded.push(...MOLTBOOK_TOOLS);
+    }
     if (tool === 'telegram_messaging') {
       expanded.push(...TELEGRAM_TOOLS);
     }
