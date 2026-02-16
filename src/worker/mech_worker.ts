@@ -137,6 +137,13 @@ const WORKSTREAM_FILTERS: string[] = (() => {
 // Legacy single-value alias for backward compatibility in logging
 const WORKSTREAM_FILTER = WORKSTREAM_FILTERS.length === 1 ? WORKSTREAM_FILTERS[0] : undefined;
 
+// Template IDs for x402 gateway job pickup (legacy; dynamic validation uses Supabase)
+const VENTURE_TEMPLATE_IDS: string[] = (() => {
+  const raw = process.env.VENTURE_TEMPLATE_IDS;
+  if (!raw) return [];
+  return raw.split(',').map(s => s.trim()).filter(Boolean);
+})();
+
 // Always set WORKER_STOP_FILE so external stop signals can terminate the worker
 if (!process.env.WORKER_STOP_FILE) {
   const stopFileSuffix = WORKSTREAM_FILTERS.length > 0
@@ -345,7 +352,7 @@ async function getJobDefinitionStatus(jobDefinitionId: string): Promise<JobDefin
   } catch (e: any) {
     workerLogger.warn({
       jobDefinitionId,
-      error: e instanceof Error ? e.message : String(e),
+      error: serializeError(e),
     }, 'Failed to fetch job definition status');
     return { exists: false };
   }
@@ -396,7 +403,7 @@ async function maybeRedispatchDependency(params: {
     workerLogger.warn({
       requestId: params.request.id,
       dependencyId: params.dependencyId,
-      error: e?.message || String(e),
+      error: serializeError(e),
     }, 'Failed to re-dispatch stale dependency');
   }
 }
@@ -458,7 +465,7 @@ async function maybeCancelMissingDependency(params: {
     workerLogger.warn({
       requestId: params.request.id,
       dependencyId: params.dependencyId,
-      error: e?.message || String(e),
+      error: serializeError(e),
     }, 'Failed to auto-cancel request for missing dependency');
   }
 }
@@ -554,8 +561,99 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       context: { operation: 'fetchRecentRequests', mechFilterMode: mechFilter.mode }
     });
     const items: any[] = data?.requests?.items || [];
-    workerLogger.info({ totalItems: items.length, items: items.map(r => ({ id: r.id, delivered: r.delivered, dependencies: r.dependencies })) }, 'Ponder GraphQL response');
-    return items.map((r: any) => ({
+    workerLogger.info({ totalItems: items.length, items: items.map(r => ({ id: r.id, delivered: r.delivered, dependencies: r.dependencies })) }, 'Ponder GraphQL response (workstream query)');
+
+    // Query 2: Template-based jobs from x402 gateway
+    // Runs when Supabase is configured (dynamic validation) OR VENTURE_TEMPLATE_IDS is set (legacy).
+    // These jobs have jobName containing "(via x402)" and may not match any workstream filter.
+    // Template ownership is validated later in jobRunner via Supabase query.
+    let templateItems: any[] = [];
+    const ENABLE_TEMPLATE_PICKUP = !!(process.env.SUPABASE_URL || VENTURE_TEMPLATE_IDS.length > 0);
+    if (ENABLE_TEMPLATE_PICKUP) {
+      try {
+        const templateWhereConditions: string[] = ['delivered: false', 'jobName_contains: "(via x402)"'];
+        if (mechFilter.mode === 'list' || mechFilter.mode === 'staking') {
+          templateWhereConditions.push('mech_in: $mechs');
+        } else if (mechFilter.mode === 'single') {
+          templateWhereConditions.push('mech: $mech');
+        }
+        const templateWhereClause = `{ ${templateWhereConditions.join(', ')} }`;
+
+        const templateVarDefs: string[] = ['$tLimit: Int!'];
+        if (mechFilter.mode === 'list' || mechFilter.mode === 'staking') {
+          templateVarDefs.push('$mechs: [String!]!');
+        } else if (mechFilter.mode === 'single') {
+          templateVarDefs.push('$mech: String!');
+        }
+
+        const templateQuery = `query TemplateRequests(${templateVarDefs.join(', ')}) {
+  requests(
+    where: ${templateWhereClause}
+    orderBy: "blockTimestamp"
+    orderDirection: "asc"
+    limit: $tLimit
+  ) {
+    items {
+      id
+      mech
+      sender
+      workstreamId
+      ipfsHash
+      blockTimestamp
+      delivered
+      dependencies
+    }
+  }
+}`;
+
+        const templateVars: any = { tLimit: limit };
+        if (mechFilter.mode === 'list' || mechFilter.mode === 'staking') {
+          templateVars.mechs = mechFilter.addresses;
+        } else if (mechFilter.mode === 'single') {
+          templateVars.mech = mechFilter.addresses[0];
+        }
+
+        const templateData = await graphQLRequest<{ requests: { items: any[] } }>({
+          url: PONDER_GRAPHQL_URL,
+          query: templateQuery,
+          variables: templateVars,
+          context: { operation: 'fetchTemplateRequests', mechFilterMode: mechFilter.mode }
+        });
+        templateItems = templateData?.requests?.items || [];
+        if (templateItems.length > 0) {
+          workerLogger.info({ count: templateItems.length }, 'Template-based requests found (via x402)');
+        }
+      } catch (e) {
+        workerLogger.warn({ error: serializeError(e) }, 'Template request query failed; continuing with workstream results only');
+      }
+    }
+
+    // Merge and deduplicate results from both queries
+    const seenIds = new Set<string>();
+    const allItems: any[] = [];
+
+    for (const r of items) {
+      const id = String(r.id);
+      if (!seenIds.has(id)) {
+        seenIds.add(id);
+        allItems.push(r);
+      }
+    }
+    for (const r of templateItems) {
+      const id = String(r.id);
+      if (!seenIds.has(id)) {
+        seenIds.add(id);
+        allItems.push(r);
+      }
+    }
+
+    workerLogger.info({
+      workstreamResults: items.length,
+      templateResults: templateItems.length,
+      mergedTotal: allItems.length,
+    }, 'Merged request results');
+
+    return allItems.map((r: any) => ({
       id: String(r.id),
       mech: String(r.mech),
       requester: String(r.sender || ''),
@@ -566,7 +664,7 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       dependencies: Array.isArray(r?.dependencies) ? r.dependencies.map((dep: any) => String(dep)) : undefined
     })) as UnclaimedRequest[];
   } catch (e) {
-    workerLogger.warn({ error: e instanceof Error ? e.message : String(e) }, 'Ponder GraphQL not reachable; returning empty set');
+    workerLogger.warn({ error: serializeError(e) }, 'Ponder GraphQL not reachable; returning empty set');
     return [];
   }
 }
@@ -624,14 +722,14 @@ async function filterUnclaimed(requests: UnclaimedRequest[]): Promise<UnclaimedR
           }, 'Request already delivered in marketplace by another mech - filtering out');
         }
       } catch (err) {
-        workerLogger.warn({ requestId, error: err instanceof Error ? err.message : String(err) }, 'Failed to check marketplace status for request; keeping request');
+        workerLogger.warn({ requestId, error: serializeError(err) }, 'Failed to check marketplace status for request; keeping request');
         filtered.push(request);
       }
     }
 
     return filtered;
   } catch (e) {
-    workerLogger.warn({ error: e instanceof Error ? e.message : String(e) }, 'Error checking marketplace status, falling back to Ponder status');
+    workerLogger.warn({ error: serializeError(e) }, 'Error checking marketplace status, falling back to Ponder status');
     return notDelivered;
   }
 }
@@ -702,7 +800,7 @@ async function resolveJobDefinitionId(
     workerLogger.warn({
       identifier,
       workstreamId,
-      error: e instanceof Error ? e.message : String(e)
+      error: serializeError(e)
     }, 'Failed to resolve dependency identifier');
     return identifier;
   }
@@ -738,7 +836,7 @@ export async function isJobDefinitionComplete(jobDefinitionId: string): Promise<
   } catch (e: any) {
     workerLogger.warn({
       jobDefinitionId,
-      error: e instanceof Error ? e.message : String(e)
+      error: serializeError(e)
     }, 'Failed to check job definition completion - assuming not complete');
     return false;
   }
@@ -804,7 +902,7 @@ async function checkDependenciesMet(request: UnclaimedRequest): Promise<boolean>
   } catch (e: any) {
     workerLogger.warn({
       requestId: request.id,
-      error: e instanceof Error ? e.message : String(e)
+      error: serializeError(e)
     }, 'Failed to check dependencies - assuming not met');
     return false;
   }
@@ -867,7 +965,7 @@ async function tryClaim(request: UnclaimedRequest, workerAddress: string): Promi
     } catch (e: any) {
       workerLogger.info({
         requestId: request.id,
-        reason: e?.message || String(e),
+        reason: serializeError(e),
         workstreamId: resolvedWorkstreamId
       }, 'Control API claim failed');
       return false;
@@ -949,7 +1047,7 @@ export async function getDependencyBranchInfo(jobDefinitionId: string): Promise<
   } catch (e: any) {
     workerLogger.warn({
       jobDefinitionId,
-      error: e instanceof Error ? e.message : String(e)
+      error: serializeError(e)
     }, 'Failed to get dependency branch info');
     return null;
   }
@@ -1339,7 +1437,7 @@ async function checkControlApiHealth(): Promise<void> {
       error: serializeError(e),
       controlApiUrl: CONTROL_API_URL
     }, 'Control API is not running - worker cannot start');
-    throw new Error('Control API health check failed: ' + (e?.message || String(e)) + '\n\nPlease start Control API with: yarn control:dev');
+    throw new Error('Control API health check failed: ' + serializeError(e) + '\n\nPlease start Control API with: yarn control:dev');
   }
 }
 

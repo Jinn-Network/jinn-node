@@ -62,7 +62,7 @@ export async function inferJobStatus(params: {
 
   // 1. FAILED: Execution error
   if (error) {
-    const errorMessage = error?.message || error?.error?.message || (typeof error === 'object' ? JSON.stringify(error) : String(error));
+    const errorMessage = serializeError(error);
     return {
       status: 'FAILED',
       message: `Job failed: ${errorMessage}`
