@@ -89,7 +89,6 @@ export async function dispatchFromTemplate(
     skipBranch: true,
     additionalContextOverrides: {
       env: mergedInput.env || undefined,
-      model: (ventureTemplate as any)?.model || undefined,
     },
     transformPayload: (payload) => {
       // Inject ventureContext into additionalContext
@@ -97,6 +96,12 @@ export async function dispatchFromTemplate(
         payload.additionalContext.ventureContext = ventureContext;
       } else {
         payload.additionalContext = { ventureContext };
+      }
+
+      // Inject model preference from venture template
+      if (ventureTemplate?.model) {
+        payload.additionalContext = payload.additionalContext || {};
+        payload.additionalContext.model = ventureTemplate.model;
       }
 
       // Include outputSpec from shared templates if available
