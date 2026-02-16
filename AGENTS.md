@@ -323,6 +323,46 @@ railway logs -f # Watch logs
 
 ---
 
+## Staking Reward Claims
+
+OLAS staking rewards require two separate claim steps. Both require `OPERATE_PASSWORD` in `.env`.
+
+### 1. Claim L1 Dispenser Incentives (every ~14 days)
+
+Bridges OLAS from the Ethereum mainnet Dispenser to the Jinn staking contract on Base. This must be done after each tokenomics epoch ends (~14 days). Permissionless — any EOA with mainnet ETH can call it.
+
+```bash
+cd jinn-node
+yarn staking:claim-incentives              # Claim all pending epochs
+yarn staking:claim-incentives --dry-run    # Preview without sending txs
+```
+
+**Requirements:** Master EOA needs ~0.005 ETH on Ethereum mainnet for gas. The Dispenser enforces `maxNumClaimingEpochs=1`, so the script automatically loops to claim one epoch at a time. After claiming, OLAS arrives on Base via the Optimism bridge (~20 min delay).
+
+### 2. Claim Service Rewards (after each L2 checkpoint)
+
+Claims rewards allocated to a specific service by the staking contract on Base. The L2 `checkpoint()` (called automatically by the worker every ~24h) allocates rewards to eligible services. This script then claims those rewards via the Master Safe.
+
+```bash
+cd jinn-node
+yarn staking:claim-rewards              # Claim pending rewards for service 165
+yarn staking:claim-rewards --dry-run    # Preview without sending tx
+```
+
+**Requirements:** Master EOA needs Base ETH for gas. Safe threshold must be 1. Rewards are sent to the service multisig.
+
+### Reward Flow Summary
+
+```
+L1 Tokenomics Epoch ends (~14 days)
+  → yarn staking:claim-incentives     (L1 tx, bridges OLAS to Base)
+  → ~20 min bridge delay
+  → Worker calls checkpoint()         (automatic, allocates to services)
+  → yarn staking:claim-rewards        (L2 Safe tx, sends OLAS to multisig)
+```
+
+---
+
 ## Wallet Management
 
 All wallet commands require `OPERATE_PASSWORD` and `RPC_URL` in `.env` (unless noted).

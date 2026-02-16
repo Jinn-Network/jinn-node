@@ -74,6 +74,8 @@
     "wallet:withdraw": "sh -c 'tsx scripts/wallet/withdraw.ts \"$@\"' --",
     "wallet:unstake": "sh -c 'tsx scripts/wallet/unstake.ts \"$@\"' --",
     "wallet:recover": "sh -c 'tsx scripts/wallet/recover.ts \"$@\"' --",
+    "staking:claim-incentives": "sh -c 'tsx scripts/staking/claim-incentives.ts \"$@\"' --",
+    "staking:claim-rewards": "sh -c 'tsx scripts/staking/claim-service-rewards.ts \"$@\"' --",
     "support:bundle": "FORCE_STDERR=true tsx scripts/support-bundle.ts"
   },
   "dependencies": {
