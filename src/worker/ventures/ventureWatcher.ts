@@ -23,10 +23,39 @@ import type { ScheduleEntry } from '../../data/types/scheduleEntry.js';
 const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
 
 /**
+ * In-memory dispatch tracking to prevent double-dispatches
+ * caused by Ponder indexing lag (10-30s).
+ * Key: `${ventureId}:${templateId}`, Value: timestamp of last dispatch.
+ */
+const recentDispatches = new Map<string, Date>();
+
+/** Record a successful dispatch in the in-memory tracker. */
+export function recordDispatch(ventureId: string, templateId: string): void {
+  recentDispatches.set(`${ventureId}:${templateId}`, new Date());
+}
+
+/** Check if a dispatch was recorded in-memory since the given timestamp. */
+function hasInMemoryDispatch(ventureId: string, templateId: string, since: Date): boolean {
+  const key = `${ventureId}:${templateId}`;
+  const lastDispatch = recentDispatches.get(key);
+  if (!lastDispatch) return false;
+  return lastDispatch.getTime() >= since.getTime();
+}
+
+/** Evict entries older than 24 hours to prevent unbounded growth. */
+function evictStaleEntries(): void {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const [key, date] of recentDispatches) {
+    if (date.getTime() < cutoff) recentDispatches.delete(key);
+  }
+}
+
+/**
  * Check all active ventures and dispatch any due schedule entries.
  */
 export async function checkAndDispatchScheduledVentures(): Promise<void> {
   try {
+    evictStaleEntries();
     const ventures = await listVentures({ status: 'active' });
     const withSchedule = ventures.filter(
       v => Array.isArray(v.dispatch_schedule) && v.dispatch_schedule.length > 0
@@ -62,6 +91,16 @@ async function processScheduleEntry(venture: Venture, entry: ScheduleEntry): Pro
   const { due, lastTick } = isDue(entry.cron, new Date());
   if (!due) return;
 
+  // Fast path: check in-memory tracker first (avoids Ponder lag issue)
+  if (hasInMemoryDispatch(venture.id, entry.templateId, lastTick)) {
+    workerLogger.debug(
+      { ventureId: venture.id, entryId: entry.id, templateId: entry.templateId },
+      'Venture watcher: skipping (in-memory dispatch record exists)'
+    );
+    return;
+  }
+
+  // Slow path: check Ponder for dispatches from other workers
   const alreadyDispatched = await hasRecentDispatch(
     venture.id,
     entry.templateId,
@@ -69,6 +108,8 @@ async function processScheduleEntry(venture: Venture, entry: ScheduleEntry): Pro
   );
 
   if (alreadyDispatched) {
+    // Record in memory so we don't query Ponder again this tick
+    recordDispatch(venture.id, entry.templateId);
     workerLogger.debug(
       { ventureId: venture.id, entryId: entry.id, templateId: entry.templateId },
       'Venture watcher: skipping (already dispatched since last tick)'

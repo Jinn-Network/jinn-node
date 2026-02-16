@@ -1,18 +1,20 @@
 /**
- * Venture Dispatch — dispatch finite workstreams from templates.
+ * Venture Dispatch — dispatch jobs from venture templates.
  *
  * Called by the venture watcher when a schedule entry is due.
- * Loads the template from Supabase, merges input, builds the IPFS payload,
- * and posts to the marketplace via the shared dispatch core.
+ * Loads the venture template from the `venture_templates` table,
+ * builds the IPFS payload, and posts to the marketplace.
  */
 
 import { randomUUID } from 'node:crypto';
 import { workerLogger } from '../../logging/index.js';
+import { getVentureTemplate } from '../../data/ventureTemplates.js';
 import { getTemplate } from '../../scripts/templates/crud.js';
 import { dispatchToMarketplace } from '../../agent/shared/dispatch-core.js';
 import { extractToolPolicyFromBlueprint } from '../../shared/template-tools.js';
 import type { Venture } from '../../data/ventures.js';
 import type { ScheduleEntry } from '../../data/types/scheduleEntry.js';
+import { recordDispatch } from './ventureWatcher.js';
 
 /**
  * Dispatch a finite workstream from a template + venture schedule entry.
@@ -21,17 +23,18 @@ export async function dispatchFromTemplate(
   venture: Venture,
   entry: ScheduleEntry,
 ): Promise<{ requestIds: string[] }> {
-  // 1. Load template from Supabase
-  const template = await getTemplate(entry.templateId);
+  // 1. Load template — try venture_templates first, fall back to shared templates
+  const ventureTemplate = await getVentureTemplate(entry.templateId);
+  const sharedTemplate = ventureTemplate ? null : await getTemplate(entry.templateId);
+  const template = ventureTemplate ?? sharedTemplate;
   if (!template) {
-    throw new Error(`Template not found: ${entry.templateId}`);
+    throw new Error(`Template not found in venture_templates or templates: ${entry.templateId}`);
   }
 
-  // 2. Merge input: entry.input overrides template input_schema defaults
-  const mergedInput = mergeInput(
-    template.input_schema as Record<string, any> || {},
-    entry.input || {}
-  );
+  // 2. Merge input: entry.input provides runtime overrides (+ input_schema defaults for shared templates)
+  const mergedInput = sharedTemplate?.input_schema
+    ? { ...extractDefaults(sharedTemplate.input_schema as Record<string, any>), ...entry.input }
+    : (entry.input || {});
 
   // 3. Build blueprint with substitution
   const blueprintObj = typeof template.blueprint === 'string'
@@ -61,7 +64,7 @@ export async function dispatchFromTemplate(
   const toolPolicy = extractToolPolicyFromBlueprint(substitutedBlueprint);
   const enabledTools = toolPolicy.availableTools.length > 0
     ? toolPolicy.availableTools
-    : (template.enabled_tools || []);
+    : (Array.isArray(template.enabled_tools) ? template.enabled_tools : []);
 
   // 7. Generate a unique job definition ID
   const jobDefinitionId = randomUUID();
@@ -86,6 +89,7 @@ export async function dispatchFromTemplate(
     skipBranch: true,
     additionalContextOverrides: {
       env: mergedInput.env || undefined,
+      model: (ventureTemplate as any)?.model || undefined,
     },
     transformPayload: (payload) => {
       // Inject ventureContext into additionalContext
@@ -95,14 +99,17 @@ export async function dispatchFromTemplate(
         payload.additionalContext = { ventureContext };
       }
 
-      // Include outputSpec from template if available
-      if (template.output_spec && typeof template.output_spec === 'object') {
-        payload.outputSpec = template.output_spec;
+      // Include outputSpec from shared templates if available
+      if (sharedTemplate?.output_spec && typeof sharedTemplate.output_spec === 'object') {
+        payload.outputSpec = sharedTemplate.output_spec;
       }
 
       return payload;
     },
   });
+
+  // Record dispatch in memory to prevent double-dispatch during Ponder indexing lag
+  recordDispatch(venture.id, template.id);
 
   workerLogger.info(
     { ventureId: venture.id, templateId: template.id, requestIds: result.requestIds },
@@ -113,25 +120,16 @@ export async function dispatchFromTemplate(
 }
 
 /**
- * Merge template input_schema defaults with schedule entry input overrides.
+ * Extract default values from a JSON Schema input_schema.
  */
-function mergeInput(
-  inputSchema: Record<string, any>,
-  entryInput: Record<string, any>
-): Record<string, any> {
+function extractDefaults(inputSchema: Record<string, any>): Record<string, any> {
   const result: Record<string, any> = {};
-
-  // Extract defaults from input_schema properties
   if (inputSchema.properties) {
     for (const [key, spec] of Object.entries(inputSchema.properties as Record<string, any>)) {
-      if (spec.default !== undefined) {
-        result[key] = spec.default;
-      }
+      if (spec.default !== undefined) result[key] = spec.default;
     }
   }
-
-  // Override with entry input
-  return { ...result, ...entryInput };
+  return result;
 }
 
 /**
