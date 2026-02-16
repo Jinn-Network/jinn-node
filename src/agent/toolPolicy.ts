@@ -245,6 +245,7 @@ export const TELEGRAM_TOOLS = [
   'telegram_send_message',
   'telegram_send_photo',
   'telegram_send_document',
+  'telegram_get_updates',
 ] as const;
 
 /**

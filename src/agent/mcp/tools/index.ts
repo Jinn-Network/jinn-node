@@ -51,6 +51,7 @@ export {
   telegramSendMessage, telegramSendMessageParams, telegramSendMessageSchema,
   telegramSendPhoto, telegramSendPhotoParams, telegramSendPhotoSchema,
   telegramSendDocument, telegramSendDocumentParams, telegramSendDocumentSchema,
+  telegramGetUpdates, telegramGetUpdatesParams, telegramGetUpdatesSchema,
 } from './telegram-messaging.js';
 
 // Export database functions

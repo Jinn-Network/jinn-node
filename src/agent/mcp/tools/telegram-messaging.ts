@@ -1,13 +1,14 @@
 /**
  * Telegram Messaging MCP Tools
  *
- * Provides tools for AI agents to send messages and photos to Telegram.
- * Chat ID and Topic ID are configured via environment variables, not passed by agent.
+ * Provides tools for AI agents to send and read messages on Telegram.
+ * Chat ID and default Topic ID are configured via environment variables.
+ * Per-message topic_id can override the default for forum thread targeting.
  *
  * Environment variables:
  * - TELEGRAM_BOT_TOKEN: Bot API token from @BotFather
  * - TELEGRAM_CHAT_ID: Target chat ID (group, channel, or user)
- * - TELEGRAM_TOPIC_ID: (Optional) Forum topic/thread ID for supergroups
+ * - TELEGRAM_TOPIC_ID: (Optional) Default forum topic/thread ID for supergroups
  */
 
 import { z } from 'zod';
@@ -22,6 +23,8 @@ export const telegramSendMessageParams = z.object({
         .describe('Text formatting mode (optional)'),
     disable_notification: z.boolean().optional()
         .describe('Send silently without notification (optional)'),
+    topic_id: z.number().optional()
+        .describe('Forum topic/thread ID. Overrides the default TELEGRAM_TOPIC_ID when targeting a specific thread.'),
 });
 
 export const telegramSendMessageSchema = {
@@ -45,6 +48,8 @@ export const telegramSendPhotoParams = z.object({
     caption: z.string().max(1024).optional().describe('Photo caption (max 1024 chars)'),
     parse_mode: z.enum(['HTML', 'Markdown', 'MarkdownV2']).optional()
         .describe('Caption formatting mode (optional)'),
+    topic_id: z.number().optional()
+        .describe('Forum topic/thread ID. Overrides the default TELEGRAM_TOPIC_ID when targeting a specific thread.'),
 });
 
 export const telegramSendPhotoSchema = {
@@ -64,6 +69,8 @@ export const telegramSendDocumentParams = z.object({
     caption: z.string().max(1024).optional().describe('Document caption (max 1024 chars)'),
     parse_mode: z.enum(['HTML', 'Markdown', 'MarkdownV2']).optional()
         .describe('Caption formatting mode (optional)'),
+    topic_id: z.number().optional()
+        .describe('Forum topic/thread ID. Overrides the default TELEGRAM_TOPIC_ID when targeting a specific thread.'),
 });
 
 export const telegramSendDocumentSchema = {
@@ -150,12 +157,13 @@ export async function telegramSendMessage(args: unknown) {
         }
 
         const config = getTelegramConfig();
-        const { text, parse_mode, disable_notification } = parsed.data;
+        const { text, parse_mode, disable_notification, topic_id } = parsed.data;
+        const effectiveTopicId = topic_id ?? config.topicId;
 
         const result = await telegramApiCall<TelegramMessage>('sendMessage', config.botToken, {
             chat_id: config.chatId,
             text,
-            ...(config.topicId && { message_thread_id: config.topicId }),
+            ...(effectiveTopicId && { message_thread_id: effectiveTopicId }),
             ...(parse_mode && { parse_mode }),
             ...(disable_notification && { disable_notification }),
         });
@@ -203,12 +211,13 @@ export async function telegramSendPhoto(args: unknown) {
         }
 
         const config = getTelegramConfig();
-        const { photo, caption, parse_mode } = parsed.data;
+        const { photo, caption, parse_mode, topic_id } = parsed.data;
+        const effectiveTopicId = topic_id ?? config.topicId;
 
         const result = await telegramApiCall<TelegramMessage>('sendPhoto', config.botToken, {
             chat_id: config.chatId,
             photo,
-            ...(config.topicId && { message_thread_id: config.topicId }),
+            ...(effectiveTopicId && { message_thread_id: effectiveTopicId }),
             ...(caption && { caption }),
             ...(parse_mode && { parse_mode }),
         });
@@ -256,12 +265,13 @@ export async function telegramSendDocument(args: unknown) {
         }
 
         const config = getTelegramConfig();
-        const { document, caption, parse_mode } = parsed.data;
+        const { document, caption, parse_mode, topic_id } = parsed.data;
+        const effectiveTopicId = topic_id ?? config.topicId;
 
         const result = await telegramApiCall<TelegramMessage>('sendDocument', config.botToken, {
             chat_id: config.chatId,
             document,
-            ...(config.topicId && { message_thread_id: config.topicId }),
+            ...(effectiveTopicId && { message_thread_id: effectiveTopicId }),
             ...(caption && { caption }),
             ...(parse_mode && { parse_mode }),
         });
@@ -275,6 +285,133 @@ export async function telegramSendDocument(args: unknown) {
                         chat_id: result.chat.id,
                         date: new Date(result.date * 1000).toISOString(),
                     },
+                    meta: { ok: true },
+                }),
+            }],
+        };
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+            content: [{
+                type: 'text' as const,
+                text: JSON.stringify({
+                    data: null,
+                    meta: { ok: false, code: 'EXECUTION_ERROR', message },
+                }),
+            }],
+        };
+    }
+}
+
+// ============================================
+// Read Tools
+// ============================================
+
+export const telegramGetUpdatesParams = z.object({
+    limit: z.number().min(1).max(100).optional()
+        .describe('Max updates to retrieve (1–100, default: 20)'),
+    offset: z.number().optional()
+        .describe('Update ID offset — pass last update_id + 1 to acknowledge previous updates and avoid receiving them again'),
+    allowed_updates: z.array(z.string()).optional()
+        .describe('Update types to receive, e.g. ["message", "edited_message"]. Default: ["message"]'),
+});
+
+export const telegramGetUpdatesSchema = {
+    description: `Read recent messages from the configured Telegram chat via long polling.
+
+Use offset to paginate: pass the highest update_id + 1 from the previous call to only receive new updates.
+Without offset, returns the earliest unconfirmed updates.
+
+Returns an array of updates, each containing a message with sender info, text, thread ID, and reply context.
+
+Note: The bot only sees messages sent after it was added to the group, and only in threads where it has access.`,
+    inputSchema: telegramGetUpdatesParams.shape,
+};
+
+interface TelegramUpdate {
+    update_id: number;
+    message?: {
+        message_id: number;
+        from?: { id: number; first_name: string; username?: string; is_bot?: boolean };
+        chat: { id: number; title?: string; type: string };
+        date: number;
+        text?: string;
+        message_thread_id?: number;
+        reply_to_message?: {
+            message_id: number;
+            text?: string;
+            from?: { id: number; first_name: string; username?: string; is_bot?: boolean };
+        };
+    };
+}
+
+export async function telegramGetUpdates(args: unknown) {
+    try {
+        const parsed = telegramGetUpdatesParams.safeParse(args);
+        if (!parsed.success) {
+            return {
+                content: [{
+                    type: 'text' as const,
+                    text: JSON.stringify({
+                        data: null,
+                        meta: { ok: false, code: 'VALIDATION_ERROR', message: parsed.error.message },
+                    }),
+                }],
+            };
+        }
+
+        const config = getTelegramConfig();
+        const { limit, offset, allowed_updates } = parsed.data;
+
+        const result = await telegramApiCall<TelegramUpdate[]>('getUpdates', config.botToken, {
+            ...(limit !== undefined ? { limit } : { limit: 20 }),
+            ...(offset !== undefined && { offset }),
+            allowed_updates: allowed_updates ?? ['message'],
+            timeout: 0, // Short polling — agent controls the cycle
+        });
+
+        // Transform updates to a cleaner shape for the agent
+        const updates = result.map(update => ({
+            update_id: update.update_id,
+            ...(update.message && {
+                message: {
+                    message_id: update.message.message_id,
+                    from: update.message.from ? {
+                        id: update.message.from.id,
+                        first_name: update.message.from.first_name,
+                        ...(update.message.from.username && { username: update.message.from.username }),
+                        ...(update.message.from.is_bot && { is_bot: update.message.from.is_bot }),
+                    } : undefined,
+                    chat: {
+                        id: update.message.chat.id,
+                        ...(update.message.chat.title && { title: update.message.chat.title }),
+                        type: update.message.chat.type,
+                    },
+                    date: new Date(update.message.date * 1000).toISOString(),
+                    ...(update.message.text && { text: update.message.text }),
+                    ...(update.message.message_thread_id && { message_thread_id: update.message.message_thread_id }),
+                    ...(update.message.reply_to_message && {
+                        reply_to_message: {
+                            message_id: update.message.reply_to_message.message_id,
+                            ...(update.message.reply_to_message.text && { text: update.message.reply_to_message.text }),
+                            ...(update.message.reply_to_message.from && {
+                                from: {
+                                    id: update.message.reply_to_message.from.id,
+                                    first_name: update.message.reply_to_message.from.first_name,
+                                    ...(update.message.reply_to_message.from.username && { username: update.message.reply_to_message.from.username }),
+                                },
+                            }),
+                        },
+                    }),
+                },
+            }),
+        }));
+
+        return {
+            content: [{
+                type: 'text' as const,
+                text: JSON.stringify({
+                    data: { updates },
                     meta: { ok: true },
                 }),
             }],
