@@ -62,7 +62,9 @@ COPY --from=builder /app/dist/ ./dist/
 # Copy init script (used by Railway startCommand and standalone docker run)
 COPY scripts/init.sh ./scripts/
 
-# Create directories the worker writes to at runtime
+# Create directories the worker writes to at runtime.
+# IMPORTANT: /tmp/.gemini-worker is used as GEMINI_CLI_HOME (extensions + runtime config).
+# Do NOT mount volumes over /tmp — use subdirectory mounts (e.g., /tmp/jinn-telemetry).
 RUN mkdir -p /home/jinn/.operate /home/jinn/.gemini /app/jinn-repos /tmp/.gemini-worker \
     && chown -R jinn:jinn /app /tmp/.gemini-worker /home/jinn
 
