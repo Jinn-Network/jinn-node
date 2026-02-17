@@ -46,7 +46,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf /usr/bin/chromium /usr/bin/chromium-browser
 
 # Pre-install Gemini CLI globally (avoids ~30s npx download per job)
-ARG GEMINI_CLI_VERSION=0.25.0
+ARG GEMINI_CLI_VERSION=0.28.2
 RUN npm install -g @google/gemini-cli@${GEMINI_CLI_VERSION}
 
 # Create non-root user
