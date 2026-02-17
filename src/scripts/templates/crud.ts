@@ -17,7 +17,6 @@ export interface Template {
   default_cyclic: boolean;
   venture_id: string | null;
   status: string;
-  type: 'venture' | 'agent';
   created_at: string;
   updated_at: string;
 }
@@ -38,7 +37,6 @@ export interface CreateTemplateArgs {
   defaultCyclic?: boolean;
   ventureId?: string;
   status?: 'draft' | 'published' | 'archived';
-  type?: 'venture' | 'agent';
 }
 
 export interface UpdateTemplateArgs {
@@ -58,7 +56,6 @@ export interface UpdateTemplateArgs {
   defaultCyclic?: boolean;
   ventureId?: string | null;
   status?: 'draft' | 'published' | 'archived';
-  type?: 'venture' | 'agent';
 }
 
 function generateSlug(name: string): string {
@@ -96,7 +93,6 @@ export async function createTemplate(args: CreateTemplateArgs): Promise<Template
     default_cyclic: args.defaultCyclic || false,
     venture_id: args.ventureId || null,
     status: args.status || 'draft',
-    type: args.type || 'agent',
   };
 
   const { data, error } = await supabase.from('templates').insert(record).select().single();
@@ -164,7 +160,6 @@ export async function updateTemplate(args: UpdateTemplateArgs): Promise<Template
   if (updates.defaultCyclic !== undefined) record.default_cyclic = updates.defaultCyclic;
   if (updates.ventureId !== undefined) record.venture_id = updates.ventureId;
   if (updates.status !== undefined) record.status = updates.status;
-  if (updates.type !== undefined) record.type = updates.type;
   if (updates.blueprint !== undefined) record.blueprint = parseBlueprint(updates.blueprint);
 
   if (Object.keys(record).length === 0) throw new Error('No fields to update');
