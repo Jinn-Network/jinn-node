@@ -783,6 +783,17 @@ export class Agent {
 
         // OAuth credentials (oauth_creds.json, google_accounts.json, settings.json) are now
         // written to ~/.gemini/ by geminiQuota.ts during credential selection before job runs
+
+        // If GEMINI_API_KEY is set but no OAuth credentials exist, write a .gemini/.env file
+        // so the CLI discovers the API key through its .env loading path (searches up from cwd,
+        // then ~/.gemini/.env). This prevents the interactive OAuth prompt in containers.
+        if (envWithJob.GEMINI_API_KEY && !existsSync(join(userGeminiDir, 'oauth_creds.json'))) {
+          writeFileSync(
+            join(userGeminiDir, '.env'),
+            `GEMINI_API_KEY=${envWithJob.GEMINI_API_KEY}\n`
+          );
+          agentLogger.info('Wrote GEMINI_API_KEY to ~/.gemini/.env for CLI discovery');
+        }
       } catch (err: any) {
         agentLogger.debug({ error: err.message }, 'Failed to create gemini directories');
       }
