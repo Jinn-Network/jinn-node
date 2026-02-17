@@ -71,7 +71,7 @@ async function main() {
 
   const privateKey = getMasterPrivateKey() || getServicePrivateKey();
   if (!privateKey) {
-    console.error('No private key available. Set OPERATE_PASSWORD or JINN_SERVICE_PRIVATE_KEY.');
+    console.error('No private key available. Set OPERATE_PASSWORD to decrypt .operate keystore.');
     process.exit(1);
   }
 

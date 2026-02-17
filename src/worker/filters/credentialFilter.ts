@@ -5,7 +5,7 @@
  * which providers the worker's address has ACL grants for. The bridge ACL is the
  * source of truth — no self-declared env vars needed.
  *
- * If CREDENTIAL_BRIDGE_URL is unset or the probe fails, the worker behaves as a
+ * If X402_GATEWAY_URL is unset or the probe fails, the worker behaves as a
  * public operator (no filtering, no priority).
  *
  * IMPORTANT: When adding a new MCP tool that calls getCredential(),
@@ -26,10 +26,8 @@ import {
  * calls and static-providers.ts entries.
  */
 export const TOOL_CREDENTIAL_MAP: Record<string, string[]> = {
-  // GitHub tools → 'github' (github_tools.ts)
-  'get_file_contents': ['github'],
-  'search_code': ['github'],
-  'list_commits': ['github'],
+  // GitHub tools are operator-level (GITHUB_TOKEN in .env), not bridge-scoped.
+  // See github_tools.ts — reads from process.env.GITHUB_TOKEN directly.
 
   // Telegram tools → 'telegram' (telegram-messaging.ts)
   'telegram_send_message': ['telegram'],
@@ -121,7 +119,7 @@ export interface WorkerCredentialInfo {
  * Returns empty providers on any failure (bridge down, no URL, no key).
  */
 export async function probeCredentialBridge(requestId?: string): Promise<WorkerCredentialInfo> {
-  const bridgeUrl = process.env.CREDENTIAL_BRIDGE_URL;
+  const bridgeUrl = process.env.X402_GATEWAY_URL;
   if (!bridgeUrl) {
     return { providers: new Set(), isTrusted: false };
   }

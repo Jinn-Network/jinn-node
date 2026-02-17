@@ -19,9 +19,10 @@ dotenv.config({ path: join(process.cwd(), '.env') });
  *
  * Categories:
  * 1. Operator secrets (PRIVATE_KEY, OPERATE_*) — NEVER passed
- * 2. Venture credentials (GITHUB_TOKEN, TELEGRAM_BOT_TOKEN, etc.) — via credential bridge
- * 3. Platform infra (SUPABASE_SERVICE_ROLE_KEY, etc.) — via credential bridge
- * 4. Agent-safe config (below) — passed through
+ * 2. Operator credentials (GITHUB_TOKEN) — passed directly via allowlist
+ * 3. Venture credentials (TELEGRAM_BOT_TOKEN, OPENAI_API_KEY, etc.) — via credential bridge
+ * 4. Platform infra (SUPABASE_SERVICE_ROLE_KEY, etc.) — via credential bridge
+ * 5. Agent-safe config (below) — passed through
  */
 const AGENT_ENV_ALLOWLIST: Array<string | RegExp> = [
   // System
@@ -33,8 +34,8 @@ const AGENT_ENV_ALLOWLIST: Array<string | RegExp> = [
   // Job context (all JINN_* except private key and signing proxy — proxy injected separately)
   /^JINN_(?!SERVICE_PRIVATE_KEY)/,
 
-  // Credential bridge + payment config
-  'CREDENTIAL_BRIDGE_URL', 'X402_NETWORK', 'GATEWAY_PAYMENT_ADDRESS',
+  // x402 gateway (credential bridge + payment)
+  'X402_GATEWAY_URL', 'X402_NETWORK', 'GATEWAY_PAYMENT_ADDRESS',
 
   // Service endpoints (non-secret URLs/ports)
   'RPC_URL', 'MECHX_CHAIN_RPC', 'MECH_RPC_HTTP_URL', 'BASE_RPC_URL',
@@ -50,6 +51,9 @@ const AGENT_ENV_ALLOWLIST: Array<string | RegExp> = [
   // Git identity and code metadata (non-secret)
   /^GIT_AUTHOR_/, /^GIT_COMMITTER_/, /^CODE_METADATA_/,
   'GITHUB_API_URL', 'GITHUB_REPOSITORY',
+
+  // Operator-level credentials (not venture/bridge-scoped)
+  'GITHUB_TOKEN',
 
   // Tool config (non-secret values — IDs and hosts, not tokens)
   'TELEGRAM_CHAT_ID', 'TELEGRAM_TOPIC_ID',

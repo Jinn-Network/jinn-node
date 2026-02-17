@@ -5,7 +5,7 @@
  * the signing proxy running in the worker process.
  *
  * Environment variables:
- * - CREDENTIAL_BRIDGE_URL: URL of the x402-gateway (e.g., https://gateway.example.com)
+ * - X402_GATEWAY_URL: URL of the x402-gateway (e.g., https://gateway.example.com)
  * - JINN_SIGNING_PROXY_URL: Signing proxy base URL
  * - JINN_SIGNING_PROXY_SECRET: Signing proxy bearer token
  */
@@ -161,9 +161,9 @@ export async function getCredential(provider: string): Promise<string> {
     return cached.token;
   }
 
-  const bridgeUrl = process.env.CREDENTIAL_BRIDGE_URL;
+  const bridgeUrl = process.env.X402_GATEWAY_URL;
   if (!bridgeUrl) {
-    throw new Error('CREDENTIAL_BRIDGE_URL environment variable is required');
+    throw new Error('X402_GATEWAY_URL environment variable is required');
   }
 
   // Include requestId for job-bound credentials when available

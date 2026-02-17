@@ -6,7 +6,7 @@
  * the agent only needs its crypto private key, not Twitter API credentials.
  *
  * Environment variables:
- * - CREDENTIAL_BRIDGE_URL: URL of the x402-gateway credential bridge
+ * - X402_GATEWAY_URL: URL of the x402-gateway credential bridge
  * - WORKER_PRIVATE_KEY: Agent's private key (for signing credential requests)
  */
 

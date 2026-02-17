@@ -382,8 +382,7 @@ export const VALID_JOB_TOOLS: ReadonlySet<string> = new Set([
   'inspect_workstream',
   'inspect_job_run',
   'inspect_job',
-  // Credential-requiring tools (need credential bridge at runtime)
-  // GitHub (github_tools.ts → getCredential('github'))
+  // GitHub (operator-level: reads GITHUB_TOKEN from env)
   'get_file_contents',
   'search_code',
   'list_commits',

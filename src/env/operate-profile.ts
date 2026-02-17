@@ -39,13 +39,11 @@ let _cachedKeystoreSourceHash: string | null = null;
 function hasAllServiceEnvVars(): boolean {
   const mechAddr = process.env.JINN_SERVICE_MECH_ADDRESS;
   const safeAddr = process.env.JINN_SERVICE_SAFE_ADDRESS;
-  const privateKey = process.env.JINN_SERVICE_PRIVATE_KEY;
 
-  // All three must be valid for us to skip .operate
+  // Both must be valid for us to skip .operate
   return Boolean(
     mechAddr && /^0x[a-fA-F0-9]{40}$/i.test(mechAddr) &&
-    safeAddr && /^0x[a-fA-F0-9]{40}$/i.test(safeAddr) &&
-    privateKey && /^0x[a-fA-F0-9]{64}$/i.test(privateKey)
+    safeAddr && /^0x[a-fA-F0-9]{40}$/i.test(safeAddr)
   );
 }
 
@@ -370,7 +368,7 @@ export function getServiceSafeAddress(): string | null {
  * Get the service's agent EOA private key
  *
  * Priority:
- * 1. JINN_SERVICE_PRIVATE_KEY environment variable (for Railway deployment)
+ * 1. ActiveServiceContext (multi-service rotation)
  * 2. Read from .operate/keys/[agent_address]:
  *    - If private_key is 0x-prefixed hex: return directly (old format)
  *    - If private_key is JSON object: decrypt using OPERATE_PASSWORD (new format)
@@ -380,13 +378,6 @@ export function getServiceSafeAddress(): string | null {
  * @throws Error if decryption fails (wrong password)
  */
 export function getServicePrivateKey(): string | null {
-  // Check environment variable first (for Railway deployment)
-  const envKey = process.env.JINN_SERVICE_PRIVATE_KEY;
-  if (envKey && /^0x[a-fA-F0-9]{64}$/i.test(envKey)) {
-    configLogger.info(' Using private key from JINN_SERVICE_PRIVATE_KEY');
-    return envKey;
-  }
-
   // Check ActiveServiceContext (multi-service rotation)
   const activeKey = getActivePrivateKey();
   if (activeKey) {
