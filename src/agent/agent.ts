@@ -1,5 +1,5 @@
 import { spawn, execSync } from 'child_process';
-import { writeFileSync, readFileSync, unlinkSync, mkdirSync, existsSync, statSync, symlinkSync, lstatSync, rmSync } from 'fs';
+import { writeFileSync, readFileSync, unlinkSync, mkdirSync, existsSync, statSync, symlinkSync, lstatSync, rmSync, copyFileSync } from 'fs';
 import { join, dirname, resolve, isAbsolute, delimiter } from 'path';
 import { tmpdir, homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -874,20 +874,28 @@ export class Agent {
         }, 'Prompt too large for argv; piping via stdin and disabling sandbox');
       }
 
-      // GEMINI_CLI_HOME controls where Gemini CLI looks for extensions and config
-      // (CLI respects GEMINI_CLI_HOME, not GEMINI_HOME — see gemini-cli-core/utils/paths.js)
+      // GEMINI_CLI_HOME controls where Gemini CLI looks for extensions, config, AND auth.
+      // CLI 0.28+ reads ALL config from GEMINI_CLI_HOME/.gemini/ (not ~/.gemini/).
       const geminiHome = join('/tmp', '.gemini-worker');
-      // OAuth credentials must be in ~/.gemini/ — CLI ignores GEMINI_CLI_HOME for auth
       const userGeminiDir = join(homedir(), '.gemini');
+      const cliGeminiDir = join(geminiHome, '.gemini');
       try {
         mkdirSync(geminiHome, { recursive: true });
         mkdirSync(userGeminiDir, { recursive: true });
+        mkdirSync(cliGeminiDir, { recursive: true });
         envWithJob.GEMINI_CLI_HOME = geminiHome;
 
-        // OAuth credentials (oauth_creds.json, google_accounts.json, settings.json) are now
-        // written to ~/.gemini/ by geminiQuota.ts during credential selection before job runs
+        // Copy OAuth credentials from ~/.gemini/ → GEMINI_CLI_HOME/.gemini/
+        // Source files are either volume-mounted (Docker E2E) or written by geminiQuota.ts (production).
+        for (const file of ['oauth_creds.json', 'google_accounts.json', 'settings.json']) {
+          const src = join(userGeminiDir, file);
+          const dst = join(cliGeminiDir, file);
+          if (existsSync(src)) {
+            copyFileSync(src, dst);
+          }
+        }
       } catch (err: any) {
-        agentLogger.debug({ error: err.message }, 'Failed to create gemini directories');
+        agentLogger.debug({ error: err.message }, 'Failed to set up gemini directories');
       }
 
       const sandboxMode = useStdinPrompt ? 'false' : getSandboxMode();
