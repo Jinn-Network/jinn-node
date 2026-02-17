@@ -7,13 +7,18 @@
  * 1. Shadow heartbeats — one heartbeat per real delivery (doubles real work)
  * 2. Deadline burst — within N hours of checkpoint, heartbeats every 5 min
  *
+ * IMPORTANT: The staking multisig (from getServiceInfo on the staking contract)
+ * may differ from the worker's configured Safe. Heartbeats MUST be submitted
+ * from the staking multisig to count toward activity. The agent EOA private key
+ * must be an owner of that multisig.
+ *
  * All state is read from on-chain contracts (cached 5 min). This module never
  * crashes the worker — every public function swallows errors.
  */
 
 import { ethers } from 'ethers';
 import { logger } from '../../logging/index.js';
-import { getServiceSafeAddress, getServicePrivateKey, getMechAddress } from '../../env/operate-profile.js';
+import { getServicePrivateKey, getMechAddress } from '../../env/operate-profile.js';
 import { submitMarketplaceRequest } from '../MechMarketplaceRequester.js';
 
 const hbLogger = logger.child({ component: 'HEARTBEAT' });
@@ -28,7 +33,6 @@ const BURST_INTERVAL_MS = parseInt(process.env.HEARTBEAT_BURST_INTERVAL_MS || '3
 
 // Contract addresses (defaults for Jinn on Base)
 const STAKING_CONTRACT = process.env.WORKER_STAKING_CONTRACT || '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139';
-const ACTIVITY_CHECKER = process.env.WORKER_ACTIVITY_CHECKER || '0x1dF0be586a7273a24C7b991e37FE4C0b1C622A9B';
 const MECH_MARKETPLACE = process.env.MECH_MARKETPLACE_ADDRESS_BASE || '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020';
 const SERVICE_ID = parseInt(process.env.WORKER_SERVICE_ID || '165', 10);
 
@@ -44,10 +48,6 @@ const STAKING_ABI = [
   'function getServiceInfo(uint256 serviceId) view returns (tuple(address multisig, address owner, uint256[] nonces, uint256 tsStart, uint256 reward, uint256 inactivity))',
 ];
 
-const ACTIVITY_CHECKER_ABI = [
-  'function getMultisigNonces(address multisig) view returns (uint256[] memory)',
-];
-
 const MARKETPLACE_ABI = [
   'function mapRequestCounts(address requester) view returns (uint256)',
 ];
@@ -57,10 +57,11 @@ const MARKETPLACE_ABI = [
 // ---------------------------------------------------------------------------
 
 interface EpochState {
+  stakingMultisig: string;        // on-chain source of truth
   tsCheckpoint: number;
   livenessPeriod: number;
-  baselineRequestCount: number; // nonces[1] at staking time
-  currentRequestCount: number;  // mapRequestCounts(safe)
+  baselineRequestCount: number;   // nonces[1] at staking time
+  currentRequestCount: number;    // mapRequestCounts(stakingMultisig)
   fetchedAt: number;
 }
 
@@ -70,27 +71,30 @@ let cachedEpochState: EpochState | null = null;
 let lastKnownCheckpointTs = 0;
 let lastBurstHeartbeatAt = 0;
 
-async function fetchEpochState(safe: string): Promise<EpochState> {
+async function fetchEpochState(): Promise<EpochState> {
   // Return cached if fresh
   if (cachedEpochState && Date.now() - cachedEpochState.fetchedAt < CACHE_TTL_MS) {
     return cachedEpochState;
   }
 
   const provider = new ethers.JsonRpcProvider(RPC_URL);
-
   const staking = new ethers.Contract(STAKING_CONTRACT, STAKING_ABI, provider);
-  const activityChecker = new ethers.Contract(ACTIVITY_CHECKER, ACTIVITY_CHECKER_ABI, provider);
   const marketplace = new ethers.Contract(MECH_MARKETPLACE, MARKETPLACE_ABI, provider);
 
-  // Parallel reads
-  const [tsCheckpoint, livenessPeriod, serviceInfo, requestCount] = await Promise.all([
+  // First get service info to learn the staking multisig
+  const [tsCheckpoint, livenessPeriod, serviceInfo] = await Promise.all([
     staking.tsCheckpoint() as Promise<bigint>,
     staking.livenessPeriod() as Promise<bigint>,
     staking.getServiceInfo(SERVICE_ID),
-    marketplace.mapRequestCounts(safe) as Promise<bigint>,
   ]);
 
+  const stakingMultisig: string = serviceInfo.multisig;
+
+  // Now query request count for the correct multisig
+  const requestCount = await marketplace.mapRequestCounts(stakingMultisig) as bigint;
+
   const state: EpochState = {
+    stakingMultisig,
     tsCheckpoint: Number(tsCheckpoint),
     livenessPeriod: Number(livenessPeriod),
     baselineRequestCount: Number(serviceInfo.nonces[1]),
@@ -108,6 +112,13 @@ async function fetchEpochState(safe: string): Promise<EpochState> {
   }
   lastKnownCheckpointTs = state.tsCheckpoint;
 
+  hbLogger.debug({
+    stakingMultisig,
+    baseline: state.baselineRequestCount,
+    current: state.currentRequestCount,
+    epochRequests: state.currentRequestCount - state.baselineRequestCount,
+  }, 'Epoch state fetched');
+
   cachedEpochState = state;
   return state;
 }
@@ -122,29 +133,32 @@ function remaining(state: EpochState): number {
 // ---------------------------------------------------------------------------
 
 async function submitHeartbeat(): Promise<void> {
-  const safe = getServiceSafeAddress();
   const privateKey = getServicePrivateKey();
   const mechAddress = getMechAddress();
 
-  if (!safe || !privateKey || !mechAddress) {
-    hbLogger.warn('Missing service profile — skipping heartbeat');
+  if (!privateKey || !mechAddress) {
+    hbLogger.warn('Missing service profile (private key or mech address) — skipping heartbeat');
     return;
   }
 
   // Re-check on-chain count right before submitting (invalidate cache)
   cachedEpochState = null;
-  const freshState = await fetchEpochState(safe);
+  const freshState = await fetchEpochState();
   const rem = remaining(freshState);
 
   if (rem <= 0) {
-    hbLogger.debug({ target: TARGET, current: freshState.currentRequestCount - freshState.baselineRequestCount }, 'Target already met — skipping heartbeat');
+    hbLogger.debug({ target: TARGET, epochRequests: freshState.currentRequestCount - freshState.baselineRequestCount }, 'Target already met — skipping heartbeat');
     return;
   }
 
-  hbLogger.info({ remaining: rem, target: TARGET }, 'Submitting heartbeat');
+  hbLogger.info({
+    remaining: rem,
+    target: TARGET,
+    stakingMultisig: freshState.stakingMultisig,
+  }, 'Submitting heartbeat');
 
   const result = await submitMarketplaceRequest({
-    serviceSafeAddress: safe,
+    serviceSafeAddress: freshState.stakingMultisig,
     agentEoaPrivateKey: privateKey,
     mechContractAddress: mechAddress,
     mechMarketplaceAddress: MECH_MARKETPLACE,
@@ -170,10 +184,7 @@ async function submitHeartbeat(): Promise<void> {
  * Submits one heartbeat if we haven't hit the target yet.
  */
 export async function onJobDelivered(): Promise<void> {
-  const safe = getServiceSafeAddress();
-  if (!safe) return;
-
-  const state = await fetchEpochState(safe);
+  const state = await fetchEpochState();
   const rem = remaining(state);
 
   hbLogger.debug({ remaining: rem, target: TARGET }, 'Shadow heartbeat check');
@@ -189,10 +200,7 @@ export async function onJobDelivered(): Promise<void> {
  * BURST_INTERVAL_MS until the target is met.
  */
 export async function checkHeartbeatSchedule(): Promise<void> {
-  const safe = getServiceSafeAddress();
-  if (!safe) return;
-
-  const state = await fetchEpochState(safe);
+  const state = await fetchEpochState();
   const rem = remaining(state);
 
   if (rem <= 0) return;
