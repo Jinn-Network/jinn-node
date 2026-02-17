@@ -108,6 +108,21 @@ export async function claimParentDispatch(
   return json.data.claimParentDispatch;
 }
 
+export async function claimVentureDispatch(
+  ventureId: string,
+  templateId: string,
+  scheduleTick: string
+): Promise<{ allowed: boolean; claimed_by?: string }> {
+  const headers = buildHeaders(`${ventureId}:${templateId}`, 'claim-venture');
+  const query = `mutation ClaimVenture($v: String!, $t: String!, $s: String!) { 
+    claimVentureDispatch(ventureId: $v, templateId: $t, scheduleTick: $s) { 
+      allowed claimed_by 
+    } 
+  }`;
+  const json = await fetchWithRetry({ query, variables: { v: ventureId, t: templateId, s: scheduleTick } }, headers);
+  return json.data.claimVentureDispatch;
+}
+
 export async function createJobReport(requestId: string, report: JobReportInput, workerAddress?: string): Promise<string> {
   const headers = buildHeaders(requestId, 'report', workerAddress);
   const query = `mutation Report($requestId: String!, $data: JobReportInput!) { createJobReport(requestId: $requestId, reportData: $data) { id } }`;

@@ -46,11 +46,26 @@ export {
   blogGetPerformanceSummary, blogGetPerformanceSummaryParams, blogGetPerformanceSummarySchema,
 } from './blog-analytics.js';
 
+// Moltbook tools
+export {
+  moltbookSearch, moltbookSearchParams, moltbookSearchSchema,
+  moltbookGetFeed, moltbookGetFeedParams, moltbookGetFeedSchema,
+  moltbookGetSubmolt, moltbookGetSubmoltParams, moltbookGetSubmoltSchema,
+  moltbookListSubmolts, moltbookListSubmoltsParams, moltbookListSubmoltsSchema,
+  moltbookSubscribe, moltbookSubscribeParams, moltbookSubscribeSchema,
+  moltbookCreatePost, moltbookCreatePostParams, moltbookCreatePostSchema,
+  moltbookGetPost, moltbookGetPostParams, moltbookGetPostSchema,
+  moltbookCreateComment, moltbookCreateCommentParams, moltbookCreateCommentSchema,
+  moltbookUpvote, moltbookUpvoteParams, moltbookUpvoteSchema,
+  moltbookGetProfile, moltbookGetProfileParams, moltbookGetProfileSchema,
+} from './moltbook.js';
+
 // Telegram tools
 export {
   telegramSendMessage, telegramSendMessageParams, telegramSendMessageSchema,
   telegramSendPhoto, telegramSendPhotoParams, telegramSendPhotoSchema,
   telegramSendDocument, telegramSendDocumentParams, telegramSendDocumentSchema,
+  telegramGetUpdates, telegramGetUpdatesParams, telegramGetUpdatesSchema,
 } from './telegram-messaging.js';
 
 // Export database functions

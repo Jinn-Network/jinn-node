@@ -398,6 +398,7 @@ async function dispatchForVerification(
         mechAddress,
         branchName: lineageInfo?.dispatcherBranchName || metadata?.codeMetadata?.branch?.name || undefined,
         workstreamId,
+        ventureId: metadata?.ventureId || undefined,
       },
       async () =>
         dispatchExistingJob({
@@ -514,6 +515,7 @@ async function dispatchForContinuation(
         mechAddress,
         branchName: lineageInfo?.dispatcherBranchName || metadata?.codeMetadata?.branch?.name || undefined,
         workstreamId,
+        ventureId: metadata?.ventureId || undefined,
       },
       async () =>
         dispatchExistingJob({
@@ -652,6 +654,7 @@ export async function dispatchForCycle(
         mechAddress,
         branchName: lineageInfo?.dispatcherBranchName || metadata?.codeMetadata?.branch?.name || undefined,
         workstreamId,
+        ventureId: metadata?.ventureId || undefined,
       },
       async () =>
         dispatchExistingJob({
@@ -794,6 +797,7 @@ export async function dispatchForLoopRecovery(
         mechAddress,
         branchName: lineageInfo?.dispatcherBranchName || metadata?.codeMetadata?.branch?.name || undefined,
         workstreamId,
+        ventureId: metadata?.ventureId || undefined,
       },
       async () =>
         dispatchExistingJob({
@@ -939,6 +943,7 @@ export async function dispatchForTimeoutRecovery(
         mechAddress,
         branchName: lineageInfo?.dispatcherBranchName || metadata?.codeMetadata?.branch?.name || undefined,
         workstreamId,
+        ventureId: metadata?.ventureId || undefined,
       },
       async () =>
         dispatchExistingJob({
@@ -1458,6 +1463,7 @@ export async function dispatchParentIfNeeded(
             baseBranch,
             mechAddress,
             branchName: lineageInfo.dispatcherBranchName || undefined,
+            ventureId: metadata?.ventureId || undefined,
           },
           async () =>
             dispatchExistingJob({

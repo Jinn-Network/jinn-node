@@ -18,6 +18,7 @@ import type {
   BlueprintContext,
   BlueprintBuilderConfig,
   MeasurementInfo,
+  VentureInvariant,
 } from '../../types.js';
 
 export const VentureContextProvider: ContextProvider = {
@@ -59,8 +60,17 @@ export const VentureContextProvider: ContextProvider = {
       }
     }
 
-    return {
-      measurements: measurements.length > 0 ? measurements : undefined,
-    };
+    const result: Partial<BlueprintContext> = {};
+
+    // Only include measurements if we actually have them — avoids overwriting
+    // MeasurementContextProvider output with undefined via Object.assign
+    if (measurements.length > 0) {
+      result.measurements = measurements;
+    }
+
+    // Inject venture invariants so agents see the venture's homeostatic goals
+    result.ventureInvariants = ventureInvariants as VentureInvariant[];
+
+    return result;
   },
 };

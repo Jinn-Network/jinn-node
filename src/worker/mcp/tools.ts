@@ -16,11 +16,12 @@ export async function withJobContext<T>(
     parentRequestId?: string;
     branchName?: string;
     workstreamId?: string;
+    ventureId?: string;
   },
   fn: () => Promise<T>
 ): Promise<T> {
   const prevContext = snapshotJobContext();
-  
+
   try {
     setJobContext(context);
     return await fn();

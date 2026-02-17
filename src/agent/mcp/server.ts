@@ -27,7 +27,6 @@ export const REGISTERED_MCP_TOOLS = [
   'template_update',
   'template_delete',
   'list_tools', // Special tool registered separately
-  'verify_trade_ideas',
   // Blog management tools
   'blog_create_post',
   'blog_list_posts',
@@ -39,10 +38,22 @@ export const REGISTERED_MCP_TOOLS = [
   'blog_get_metrics',
   'blog_get_pageviews',
   'blog_get_performance_summary',
+  // Moltbook tools
+  'moltbook_search',
+  'moltbook_get_feed',
+  'moltbook_get_submolt',
+  'moltbook_list_submolts',
+  'moltbook_subscribe',
+  'moltbook_create_post',
+  'moltbook_get_post',
+  'moltbook_create_comment',
+  'moltbook_upvote',
+  'moltbook_get_profile',
   // Telegram messaging tools
   'telegram_send_message',
   'telegram_send_photo',
   'telegram_send_document',
+  'telegram_get_updates',
   // Inspection tools (workstream/job analysis)
   'inspect_job_run',
   'inspect_job',
@@ -131,10 +142,22 @@ async function main() {
       { name: 'blog_get_metrics', schema: tools.blogGetMetricsSchema, handler: tools.blogGetMetrics },
       { name: 'blog_get_pageviews', schema: tools.blogGetPageviewsSchema, handler: tools.blogGetPageviews },
       { name: 'blog_get_performance_summary', schema: tools.blogGetPerformanceSummarySchema, handler: tools.blogGetPerformanceSummary },
+      // Moltbook tools
+      { name: 'moltbook_search', schema: tools.moltbookSearchSchema, handler: tools.moltbookSearch },
+      { name: 'moltbook_get_feed', schema: tools.moltbookGetFeedSchema, handler: tools.moltbookGetFeed },
+      { name: 'moltbook_get_submolt', schema: tools.moltbookGetSubmoltSchema, handler: tools.moltbookGetSubmolt },
+      { name: 'moltbook_list_submolts', schema: tools.moltbookListSubmoltsSchema, handler: tools.moltbookListSubmolts },
+      { name: 'moltbook_subscribe', schema: tools.moltbookSubscribeSchema, handler: tools.moltbookSubscribe },
+      { name: 'moltbook_create_post', schema: tools.moltbookCreatePostSchema, handler: tools.moltbookCreatePost },
+      { name: 'moltbook_get_post', schema: tools.moltbookGetPostSchema, handler: tools.moltbookGetPost },
+      { name: 'moltbook_create_comment', schema: tools.moltbookCreateCommentSchema, handler: tools.moltbookCreateComment },
+      { name: 'moltbook_upvote', schema: tools.moltbookUpvoteSchema, handler: tools.moltbookUpvote },
+      { name: 'moltbook_get_profile', schema: tools.moltbookGetProfileSchema, handler: tools.moltbookGetProfile },
       // Telegram messaging tools
       { name: 'telegram_send_message', schema: tools.telegramSendMessageSchema, handler: tools.telegramSendMessage },
       { name: 'telegram_send_photo', schema: tools.telegramSendPhotoSchema, handler: tools.telegramSendPhoto },
       { name: 'telegram_send_document', schema: tools.telegramSendDocumentSchema, handler: tools.telegramSendDocument },
+      { name: 'telegram_get_updates', schema: tools.telegramGetUpdatesSchema, handler: tools.telegramGetUpdates },
       // Inspection tools (workstream/job analysis)
       { name: 'inspect_job_run', schema: tools.inspectJobRunSchema, handler: tools.inspectJobRun },
       { name: 'inspect_job', schema: tools.inspectJobSchema, handler: tools.inspectJob },

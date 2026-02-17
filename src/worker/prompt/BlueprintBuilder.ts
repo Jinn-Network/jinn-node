@@ -113,7 +113,13 @@ export class BlueprintBuilder {
       try {
         const providerContext = await provider.provide(buildContext);
         if (providerContext && Object.keys(providerContext).length > 0) {
-          Object.assign(context, providerContext);
+          // Filter out undefined values to prevent overwriting prior context
+          const filtered = Object.fromEntries(
+            Object.entries(providerContext).filter(([, v]) => v !== undefined)
+          );
+          if (Object.keys(filtered).length > 0) {
+            Object.assign(context, filtered);
+          }
           providers.push(provider.name);
 
           if (this.config.logProviders) {

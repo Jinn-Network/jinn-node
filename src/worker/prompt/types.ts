@@ -247,6 +247,9 @@ export interface BlueprintContext {
 
   /** Latest measurements for invariants (used for prose rendering) */
   measurements?: MeasurementInfo[];
+
+  /** Venture-level invariants (homeostatic goals from parent venture) */
+  ventureInvariants?: VentureInvariant[];
 }
 
 // =============================================================================

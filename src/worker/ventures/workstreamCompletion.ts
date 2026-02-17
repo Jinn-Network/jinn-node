@@ -19,7 +19,7 @@ export async function checkWorkstreamCompletion(
   requestId: string,
 ): Promise<boolean> {
   try {
-    // Query root request delivery status + count of undelivered children
+    // Query root request delivery status + count of undelivered descendants
     const data = await graphQLRequest<{
       request: { id: string; delivered: boolean } | null;
       requests: { items: Array<{ id: string }> };
@@ -32,7 +32,7 @@ export async function checkWorkstreamCompletion(
         }
         requests(
           where: {
-            sourceRequestId: { equals: $requestId }
+            workstreamId: { equals: $requestId }
             delivered: { equals: false }
           }
           limit: 1
