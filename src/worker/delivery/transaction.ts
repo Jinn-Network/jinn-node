@@ -9,7 +9,7 @@ import { join, dirname } from 'path';
 import { createRequire } from 'module';
 import { workerLogger } from '../../logging/index.js';
 import { getOptionalMechChainConfig, getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
-import { getServiceSafeAddress, getServicePrivateKey } from '../../env/operate-profile.js';
+import { getServiceSafeAddress, getServicePrivateKey, getMechAddress } from '../../env/operate-profile.js';
 import type { UnclaimedRequest, AgentExecutionResult, FinalStatus, IpfsMetadata, RecognitionPhaseResult, ReflectionResult } from '../types.js';
 import { buildDeliveryPayload } from './payload.js';
 import { checkDeliveryStatusViaPonder } from './ponderVerification.js';
@@ -485,6 +485,19 @@ export async function deliverViaSafeTransaction(
   if (!safeAddress || !privateKey) {
     workerLogger.warn({ safeAddress: !!safeAddress, privateKey: !!privateKey }, 'Missing Safe delivery configuration; skipping on-chain delivery');
     throw new Error('Missing Safe delivery configuration');
+  }
+
+  // Guard: ensure request's mech matches our own mech address.
+  // In staking filter mode, the worker may fetch requests from other operators' mechs.
+  // Delivering to a mech we don't control will always revert (onlyOperator check).
+  const ownMechAddress = getMechAddress();
+  if (ownMechAddress && targetMechAddress.toLowerCase() !== ownMechAddress.toLowerCase()) {
+    workerLogger.error({
+      requestId: context.requestId,
+      targetMech: targetMechAddress,
+      ownMech: ownMechAddress,
+    }, 'Mech address mismatch: request belongs to a different mech than this worker controls. Skipping delivery.');
+    throw new Error(`Mech mismatch: request mech ${targetMechAddress} != worker mech ${ownMechAddress}`);
   }
 
   // Check Safe deployment
