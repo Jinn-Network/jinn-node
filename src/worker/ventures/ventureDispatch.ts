@@ -1,14 +1,13 @@
 /**
- * Venture Dispatch — dispatch jobs from venture templates.
+ * Venture Dispatch — dispatch jobs from workstream templates.
  *
  * Called by the venture watcher when a schedule entry is due.
- * Loads the venture template from the `venture_templates` table,
+ * Loads the workstream template from the `templates` table,
  * builds the IPFS payload, and posts to the marketplace.
  */
 
 import { randomUUID } from 'node:crypto';
 import { workerLogger } from '../../logging/index.js';
-import { getVentureTemplate } from '../../data/ventureTemplates.js';
 import { getTemplate } from '../../scripts/templates/crud.js';
 import { dispatchToMarketplace } from '../../agent/shared/dispatch-core.js';
 import { extractToolPolicyFromBlueprint } from '../../shared/template-tools.js';
@@ -31,17 +30,15 @@ export async function dispatchFromTemplate(
   entry: ScheduleEntry,
   options?: DispatchFromTemplateOptions,
 ): Promise<{ requestIds: string[] }> {
-  // 1. Load template — try venture_templates first, fall back to shared templates
-  const ventureTemplate = await getVentureTemplate(entry.templateId);
-  const sharedTemplate = ventureTemplate ? null : await getTemplate(entry.templateId);
-  const template = ventureTemplate ?? sharedTemplate;
+  // 1. Load workstream template from templates table
+  const template = await getTemplate(entry.templateId);
   if (!template) {
-    throw new Error(`Template not found in venture_templates or templates: ${entry.templateId}`);
+    throw new Error(`Template not found: ${entry.templateId}`);
   }
 
-  // 2. Merge input: entry.input provides runtime overrides (+ input_schema defaults for shared templates)
-  const mergedInput = sharedTemplate?.input_schema
-    ? { ...extractDefaults(sharedTemplate.input_schema as Record<string, any>), ...entry.input }
+  // 2. Merge input: entry.input provides runtime overrides (+ input_schema defaults)
+  const mergedInput = template.input_schema
+    ? { ...extractDefaults(template.input_schema as Record<string, any>), ...entry.input }
     : (entry.input || {});
 
   // 3. Build blueprint with substitution
@@ -106,15 +103,15 @@ export async function dispatchFromTemplate(
         payload.additionalContext = { ventureContext };
       }
 
-      // Inject model preference from venture template
-      if (ventureTemplate?.model) {
+      // Inject model preference from schedule entry input
+      if (mergedInput.model) {
         payload.additionalContext = payload.additionalContext || {};
-        payload.additionalContext.model = ventureTemplate.model;
+        payload.additionalContext.model = mergedInput.model;
       }
 
-      // Include outputSpec from shared templates if available
-      if (sharedTemplate?.output_spec && typeof sharedTemplate.output_spec === 'object') {
-        payload.outputSpec = sharedTemplate.output_spec;
+      // Include outputSpec from template if available
+      if (template.output_spec && typeof template.output_spec === 'object') {
+        payload.outputSpec = template.output_spec;
       }
 
       return payload;
