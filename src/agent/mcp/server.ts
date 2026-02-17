@@ -27,7 +27,6 @@ export const REGISTERED_MCP_TOOLS = [
   'template_update',
   'template_delete',
   'list_tools', // Special tool registered separately
-  'verify_trade_ideas',
   // Blog management tools
   'blog_create_post',
   'blog_list_posts',
