@@ -39,6 +39,14 @@ export interface GeminiSettings {
     exclude?: string[];
     [key: string]: unknown;
   };
+  security?: {
+    auth?: {
+      selectedType?: string;
+      enforcedType?: string;
+      [key: string]: unknown;
+    };
+    [key: string]: unknown;
+  };
 }
 
 interface ToolCall {
@@ -1117,6 +1125,14 @@ export class Agent {
       // Substitute ${ENV_VAR} placeholders in MCP server env blocks
       // Done AFTER removing unused servers so we don't fail on missing env vars for disabled servers
       substituteEnvVariables(templateSettings);
+
+      // If GEMINI_API_KEY is set, inject auth config into settings so the CLI
+      // uses API key auth without an interactive prompt (critical for containers).
+      if (process.env.GEMINI_API_KEY) {
+        if (!templateSettings.security) templateSettings.security = {};
+        if (!templateSettings.security.auth) templateSettings.security.auth = {};
+        templateSettings.security.auth.selectedType = 'gemini-api-key';
+      }
 
       const serverName = templateSettings.mcpServers.metacog ? 'metacog' : Object.keys(templateSettings.mcpServers)[0];
       if (!serverName) throw new Error('No MCP servers found in template configuration');
