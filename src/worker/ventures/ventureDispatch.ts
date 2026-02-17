@@ -14,12 +14,21 @@ import { extractToolPolicyFromBlueprint } from '../../shared/template-tools.js';
 import type { Venture } from '../../data/ventures.js';
 import type { ScheduleEntry } from '../../data/types/scheduleEntry.js';
 
+type DispatchFromTemplateOptions = {
+  /**
+   * Optional deterministic job definition ID.
+   * If omitted, a random UUID is generated (legacy behavior).
+   */
+  jobDefinitionId?: string;
+};
+
 /**
  * Dispatch a finite workstream from a template + venture schedule entry.
  */
 export async function dispatchFromTemplate(
   venture: Venture,
   entry: ScheduleEntry,
+  options?: DispatchFromTemplateOptions,
 ): Promise<{ requestIds: string[] }> {
   // 1. Load template from Supabase
   const template = await getTemplate(entry.templateId);
@@ -63,8 +72,8 @@ export async function dispatchFromTemplate(
     ? toolPolicy.availableTools
     : (template.enabled_tools || []);
 
-  // 7. Generate a unique job definition ID
-  const jobDefinitionId = randomUUID();
+  // 7. Generate a unique job definition ID (or use deterministic override)
+  const jobDefinitionId = options?.jobDefinitionId || randomUUID();
   const jobName = entry.label
     ? `${venture.name} — ${entry.label}`
     : `${venture.name} — ${template.name}`;
