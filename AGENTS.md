@@ -19,7 +19,7 @@ Before collecting any credentials or running setup, inform the human:
 > - Major LLM providers (Google, Anthropic, OpenAI) **do not train on API inputs**. Your data is processed for the session and not retained for model training.
 > - The agent needs your password to write it to `.env` — there is no way around this. And the seed phrase is printed to the terminal by the setup script, which the agent captures.
 > - This wallet is purpose-built for node operations (gas fees + staking). **Do not use it as a personal wallet or store significant funds in it.** Keep only the operational amounts needed.
-> - You can export your private key at any time and import it into a self-custody wallet (MetaMask, hardware wallet) for direct control. See [Wallet Recovery](#wallet-recovery).
+> - You can export your keys at any time using `yarn wallet:export-keys`. See [Wallet Management](#wallet-management).
 >
 > **If you're not comfortable with this**, you can run `yarn setup` manually without a coding agent — the setup script works standalone. You'll need to fill in `.env` yourself (see the `.env.example` template) and watch the terminal output for your seed phrase when it appears.
 
@@ -146,6 +146,8 @@ GEMINI_API_KEY=<the human's API key>  # if using Option A
 - `X402_GATEWAY_URL` — Payment gateway
 - `STAKING_CONTRACT` — Jinn staking contract on Base
 - `WORKSTREAM_FILTER` — Growth Agency venture workstream ID
+- `WORKER_MECH_FILTER_MODE=staking` — Multi-operator mode: picks up requests for all staked mechs
+- `WORKER_STAKING_CONTRACT` — Staking contract used to discover peer mechs
 - `CHAIN_ID=8453` — Base chain ID
 
 **Optional values** (ask, but the human can skip):
@@ -197,7 +199,7 @@ Please save the mnemonic phrase for the Master EOA: word1 word2 word3 word4 word
 
 5. Wait for the human to confirm before proceeding.
 
-**On subsequent runs**, the wallet already exists and the mnemonic is NOT printed. If the human missed it and needs their keys, see [Wallet Recovery](#wallet-recovery) below.
+**On subsequent runs**, the wallet already exists and the mnemonic is NOT printed. If the human missed it and needs their keys, use `yarn wallet:export-keys` (see [Wallet Management](#wallet-management)).
 
 ### Running Setup
 
@@ -255,67 +257,226 @@ yarn worker
 
 The worker will:
 1. Connect to the Ponder indexer
-2. Poll for new job requests matching the workstream filter
+2. Poll for unclaimed requests from any mech staked in the Jinn staking contract
 3. Claim and execute jobs using Gemini
 4. Deliver results on-chain
 
----
-
-## Wallet Recovery
-
-If the human missed their mnemonic or needs their private key later, the wallet keystore is at:
-
-```
-jinn-node/.operate/wallets/ethereum.txt
-```
-
-This is a standard V3 JSON keystore encrypted with `OPERATE_PASSWORD`. To extract the private key:
-
-```python
-# Run with: poetry run python
-from eth_account import Account
-import json
-
-with open('.operate/wallets/ethereum.txt') as f:
-    keystore = json.load(f)
-
-password = "the_operate_password"  # Ask the human
-private_key = Account.decrypt(keystore, password)
-print(f"Private key: 0x{private_key.hex()}")
-print(f"Address: {Account.from_key(private_key).address}")
-```
-
-**Important:** The JavaScript `web3-eth-accounts` library has scrypt compatibility issues with these keystores. Use the Python `eth_account` library instead.
-
-The human can import this private key into MetaMask or any other wallet to manage the node's funds directly.
+**Multi-operator note:** The worker uses `staking` filter mode by default, so it sees requests dispatched to ANY mech in the Jinn staking contract — not just its own. Each request has a 61-second priority window for the original mech, after which any staked mech can deliver. In practice, the agent execution takes minutes, so the priority window is always expired by delivery time.
 
 ---
 
-## CLI Options
+## Phase 5: Deploy to Railway (Optional)
+
+If the operator wants to run their worker 24/7 without keeping a local machine on, [Railway](https://railway.com?referralCode=vEDcil) is the easiest cloud option. New accounts get **$5 free credit**, and using [this link](https://railway.com?referralCode=vEDcil) gives an **additional $5 credit**.
+
+### Prerequisites
+
+- Phases 1-3 completed locally (`.operate/` directory exists with encrypted keystore)
+- A GitHub account with a fork of [jinn-node](https://github.com/Jinn-Network/jinn-node)
+
+### Steps
+
+1. **Create a Railway account** at [railway.com](https://railway.com?referralCode=vEDcil)
+2. **Create a new project** → "Deploy from GitHub Repo" → select the jinn-node fork
+3. Railway auto-detects `railway.toml` and the Dockerfile — no build config needed
+4. **Add a persistent volume** in the service settings:
+   - Mount path: `/home/jinn`
+   - This stores the encrypted keystore (`.operate/`) and Gemini credentials (`.gemini/`)
+   - **Loss of this volume means loss of signing keys** — enable Railway backups
+5. **Set environment variables** in the Railway dashboard (Variables tab):
+
+   Copy the values from your local `.env` file. The required variables are:
+
+   | Variable | Description |
+   |----------|-------------|
+   | `RPC_URL` | Base chain RPC endpoint |
+   | `CHAIN_ID` | `8453` |
+   | `OPERATE_PASSWORD` | Decrypts `.operate/` keystore |
+   | `GEMINI_API_KEY` | Gemini API key |
+   | `GITHUB_TOKEN` | For code task repo cloning |
+   | `GIT_AUTHOR_NAME` | Git commit identity |
+   | `GIT_AUTHOR_EMAIL` | Git commit identity |
+
+   Service endpoints (`PONDER_GRAPHQL_URL`, `CONTROL_API_URL`, `X402_GATEWAY_URL`) are pre-filled in `.env.example` and can be copied as-is.
+
+6. **Import `.operate/` into the volume.** Use `railway shell` to access the running container, then copy your local `.operate/` directory contents into `/home/jinn/.operate/`. Alternatively, use `railway volume` commands or the Railway CLI.
+
+7. **Deploy.** Railway builds and deploys automatically on push. The healthcheck at `/health` confirms the worker is running.
+
+### CLI Deploy (Alternative)
+
+If the operator prefers the Railway CLI over the dashboard:
+
+```bash
+cd jinn-node
+railway login
+railway link    # Link to your Railway project
+railway up      # Deploy
+railway logs -f # Watch logs
+```
+
+### Monitoring
+
+- **Logs**: Railway dashboard → Deployments → Logs, or `railway logs -f`
+- **Health**: The worker exposes `GET /health` — Railway monitors this automatically
+- **Restarts**: `railway.toml` configures automatic restart on failure (up to 10 retries)
+
+---
+
+## Phase 5: Deploy to Railway (Optional)
+
+If the operator wants to run their worker 24/7 without keeping a local machine on, [Railway](https://railway.com?referralCode=vEDcil) is the easiest cloud option. New accounts get **$5 free credit**, and using [this link](https://railway.com?referralCode=vEDcil) gives an **additional $5 credit**.
+
+### Prerequisites
+
+- Phases 1-3 completed locally (`.operate/` directory exists with encrypted keystore)
+- A GitHub account with a fork of [jinn-node](https://github.com/Jinn-Network/jinn-node)
+
+### Steps
+
+1. **Create a Railway account** at [railway.com](https://railway.com?referralCode=vEDcil)
+2. **Create a new project** → "Deploy from GitHub Repo" → select the jinn-node fork
+3. Railway auto-detects `railway.toml` and the Dockerfile — no build config needed
+4. **Add a persistent volume** in the service settings:
+   - Mount path: `/home/jinn`
+   - This stores the encrypted keystore (`.operate/`) and Gemini credentials (`.gemini/`)
+   - **Loss of this volume means loss of signing keys** — enable Railway backups
+5. **Set environment variables** in the Railway dashboard (Variables tab):
+
+   Copy the values from your local `.env` file. The required variables are:
+
+   | Variable | Description |
+   |----------|-------------|
+   | `RPC_URL` | Base chain RPC endpoint |
+   | `CHAIN_ID` | `8453` |
+   | `OPERATE_PASSWORD` | Decrypts `.operate/` keystore |
+   | `GEMINI_API_KEY` | Gemini API key |
+   | `GITHUB_TOKEN` | For code task repo cloning |
+   | `GIT_AUTHOR_NAME` | Git commit identity |
+   | `GIT_AUTHOR_EMAIL` | Git commit identity |
+
+   Service endpoints (`PONDER_GRAPHQL_URL`, `CONTROL_API_URL`, `X402_GATEWAY_URL`) are pre-filled in `.env.example` and can be copied as-is.
+
+6. **Import `.operate/` into the volume.** Use `railway shell` to access the running container, then copy your local `.operate/` directory contents into `/home/jinn/.operate/`. Alternatively, use `railway volume` commands or the Railway CLI.
+
+7. **Deploy.** Railway builds and deploys automatically on push. The healthcheck at `/health` confirms the worker is running.
+
+### CLI Deploy (Alternative)
+
+If the operator prefers the Railway CLI over the dashboard:
+
+```bash
+cd jinn-node
+railway login
+railway link    # Link to your Railway project
+railway up      # Deploy
+railway logs -f # Watch logs
+```
+
+### Monitoring
+
+- **Logs**: Railway dashboard → Deployments → Logs, or `railway logs -f`
+- **Health**: The worker exposes `GET /health` — Railway monitors this automatically
+- **Restarts**: `railway.toml` configures automatic restart on failure (up to 10 retries)
+
+---
+
+## Staking Reward Claims
+
+OLAS staking rewards require two separate claim steps. Both require `OPERATE_PASSWORD` in `.env`.
+
+### 1. Claim L1 Dispenser Incentives (every ~14 days)
+
+Bridges OLAS from the Ethereum mainnet Dispenser to the Jinn staking contract on Base. This must be done after each tokenomics epoch ends (~14 days). Permissionless — any EOA with mainnet ETH can call it.
+
+```bash
+cd jinn-node
+yarn staking:claim-incentives              # Claim all pending epochs
+yarn staking:claim-incentives --dry-run    # Preview without sending txs
+```
+
+**Requirements:** Master EOA needs ~0.005 ETH on Ethereum mainnet for gas. The Dispenser enforces `maxNumClaimingEpochs=1`, so the script automatically loops to claim one epoch at a time. After claiming, OLAS arrives on Base via the Optimism bridge (~20 min delay).
+
+### 2. Claim Service Rewards (after each L2 checkpoint)
+
+Claims rewards allocated to a specific service by the staking contract on Base. The L2 `checkpoint()` (called automatically by the worker every ~24h) allocates rewards to eligible services. This script then claims those rewards via the Master Safe.
+
+```bash
+cd jinn-node
+yarn staking:claim-rewards              # Claim pending rewards for service 165
+yarn staking:claim-rewards --dry-run    # Preview without sending tx
+```
+
+**Requirements:** Master EOA needs Base ETH for gas. Safe threshold must be 1. Rewards are sent to the service multisig.
+
+### Reward Flow Summary
 
 ```
---chain=NETWORK     base, gnosis, mode, optimism (default: base)
---no-mech           Disable mech deployment
---no-staking        Disable staking
---unattended        Non-interactive mode (default)
+L1 Tokenomics Epoch ends (~14 days)
+  → yarn staking:claim-incentives     (L1 tx, bridges OLAS to Base)
+  → ~20 min bridge delay
+  → Worker calls checkpoint()         (automatic, allocates to services)
+  → yarn staking:claim-rewards        (L2 Safe tx, sends OLAS to multisig)
 ```
 
 ---
 
-## Mech Filtering (Multi-Operator)
+## Wallet Management
 
-By default the worker uses **single mech mode** — it reads `JINN_SERVICE_MECH_ADDRESS` (or falls back to the operate profile) and only processes requests for that one mech.
+All wallet commands require `OPERATE_PASSWORD` and `RPC_URL` in `.env` (unless noted).
 
-For multi-operator deployments where multiple services are staked in the same staking contract, use **staking-based filtering**:
+| Command | Purpose |
+|---------|---------|
+| `yarn wallet:info` | Show addresses, ETH/OLAS balances, staking status |
+| `yarn wallet:backup` | Timestamped `.tar.gz` of `.operate` directory (no password needed) |
+| `yarn wallet:export-keys` | Display BIP-39 mnemonic — **confirm with human first** |
+| `yarn wallet:withdraw --to <addr>` | Transfer funds from Safe to external address |
+| `yarn wallet:unstake` | Unstake service (72-hour cooldown applies) |
+| `yarn wallet:recover --to <addr>` | Terminate service + withdraw all — **confirm with human first** |
 
+**Destructive operations** (`recover`, `export-keys`): Always pause and get human confirmation before executing. Use `--dry-run` where available to preview first.
+
+**Key flags:**
+- `withdraw`: `--to <addr>` (required), `--asset ETH|OLAS|all` (default: all), `--dry-run`
+- `recover`: `--to <addr>` (required), `--dry-run`, `--skip-terminate` (if already unstaked)
+- `unstake`: `--service-id <id>` (optional, reads from config), `--dry-run`
+
+**72-hour staking cooldown**: OLAS requires minimum 72 hours staked before unstake. Recovery will fail if cooldown has not elapsed.
+
+---
+
+## Getting Help — Support Bundle
+
+If you're having issues and need help from the Jinn team, run the support bundle to collect diagnostic information:
+
+```bash
+cd jinn-node
+yarn support:bundle
 ```
-WORKER_MECH_FILTER_MODE=staking
-WORKER_STAKING_CONTRACT=0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139
-```
 
-This queries Ponder for all mechs whose services are staked in the given contract and filters requests accordingly.
+This outputs a JSON bundle containing:
+- System info (OS, Node/Python versions, git commit)
+- Which environment variables are set (never the actual values of secrets)
+- Wallet addresses and on-chain balances
+- Staking status
+- Connectivity checks (RPC, Ponder indexer, Control API)
+- `.operate` directory state
 
-**Gotcha:** Setting `JINN_SERVICE_MECH_ADDRESS` alone does NOT enable staking-based filtering. Without `WORKER_MECH_FILTER_MODE=staking` and `WORKER_STAKING_CONTRACT`, the worker falls back to single mech mode using `JINN_SERVICE_MECH_ADDRESS` directly.
+**No passwords, API keys, or private keys are ever included.** The output is safe to share.
+
+### How to share
+
+1. Run `yarn support:bundle` and copy the JSON output
+2. Share it with the Jinn team (Discord, GitHub issue, or direct message)
+3. If the worker is running on Railway, also include recent logs: `railway logs --tail 50`
+
+### What to include with the bundle
+
+When reporting an issue, also describe:
+- **What you expected** to happen
+- **What actually happened** (error messages, unexpected behavior)
+- **When it started** (after an update? after restaking? randomly?)
+- **Steps to reproduce** if you can
 
 ---
 

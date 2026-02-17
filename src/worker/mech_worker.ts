@@ -15,7 +15,7 @@ import marketplaceAbi from '@jinn-network/mech-client-ts/dist/abis/MechMarketpla
 import { workerLogger } from '../logging/index.js';
 import { claimRequest as apiClaimRequest } from './control_api_client.js';
 import { deliverViaSafe } from '@jinn-network/mech-client-ts/dist/post_deliver.js';
-import { getMechAddress, getServicePrivateKey, getMechChainConfig, getServiceSafeAddress } from '../env/operate-profile.js';
+import { getMechAddress, getServicePrivateKey, getMechChainConfig, getServiceSafeAddress, getMiddlewarePath } from '../env/operate-profile.js';
 import { dispatchExistingJob } from '../agent/mcp/tools/dispatch_existing_job.js';
 import { getInheritedEnv } from './status/autoDispatch.js';
 import { serializeError } from './logging/errors.js';
@@ -30,10 +30,19 @@ import {
   getOptionalWorkerMechFilterMode,
   getOptionalWorkerStakingContract,
   getOptionalWorkerMechFilterList,
+  getWorkerMultiServiceEnabled,
+  getWorkerActivityPollMs,
+  getWorkerActivityCacheTtlMs,
+  getRequiredRpcUrl as getConfigRpcUrl,
   type WorkerMechFilterMode,
 } from '../config/index.js';
 import { recordIdleCycle, recordExecutionTime } from './healthcheck.js';
 import { getMechAddressesForStakingContract } from './filters/stakingFilter.js';
+import { ServiceRotator } from './rotation/ServiceRotator.js';
+import { setActiveService } from './rotation/ActiveServiceContext.js';
+import { maybeCallCheckpoint } from './staking/checkpoint.js';
+import { checkEpochGate } from './staking/epochGate.js';
+import { maybeSubmitHeartbeat } from './staking/heartbeat.js';
 
 export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
 
@@ -63,9 +72,14 @@ const USE_CONTROL_API = getUseControlApi();
 
 // Track jobs executed in this session to prevent re-execution on delivery failure
 // This prevents infinite loops when delivery fails but Control API allows re-claiming
-const executedJobsThisSession = new Set<string>();
+// Uses Map<id, timestamp> instead of Set for TTL-based eviction
+const executedJobsThisSession = new Map<string, number>();
 let consecutiveStuckCycles = 0;
 let lastStuckRequestIds: string[] = [];
+
+// Earning window job tracking
+let earningWindowJobCount = 0;
+let earningWindowId: string | null = null;
 
 // Parse --runs=<N> flag for controlled execution cycles
 const MAX_RUNS = (() => {
@@ -104,6 +118,20 @@ const WORKER_POLL_BASE_MS = parseInt(process.env.WORKER_POLL_BASE_MS || '30000')
 const WORKER_POLL_MAX_MS = parseInt(process.env.WORKER_POLL_MAX_MS || '300000');
 const WORKER_POLL_BACKOFF_FACTOR = parseFloat(process.env.WORKER_POLL_BACKOFF_FACTOR || '1.5');
 
+// Earning schedule: "HH:MM-HH:MM" in local timezone (e.g., "22:00-08:00")
+// When set, worker only claims jobs during this window.
+// Supports overnight windows (start > end wraps past midnight).
+// Unset = always earning (current behavior).
+const EARNING_SCHEDULE = process.env.EARNING_SCHEDULE?.trim() || null;
+
+// Max jobs per earning window. Unset = unlimited (current behavior).
+const EARNING_MAX_JOBS = (() => {
+  const raw = process.env.EARNING_MAX_JOBS;
+  if (!raw) return undefined;
+  const value = parseInt(raw, 10);
+  return isNaN(value) || value < 1 ? undefined : value;
+})();
+
 // Workstream filtering: parse --workstream=<id> flag or WORKSTREAM_FILTER env var
 // Supports multiple workstreams via:
 //   - Comma-separated: "0x123,0x456,0x789"
@@ -130,31 +158,15 @@ const WORKSTREAM_FILTERS: string[] = (() => {
   return raw.split(',').map(s => s.trim()).filter(Boolean);
 })();
 
-// Venture filtering: parse --venture=<id> flag or VENTURE_FILTER env var
-// Same parsing conventions as WORKSTREAM_FILTERS
-const VENTURE_FILTERS: string[] = (() => {
-  const arg = process.argv.find(arg => arg.startsWith('--venture='));
-  const raw = arg ? arg.split('=')[1] : process.env.VENTURE_FILTER;
-  if (!raw) return [];
-
-  // Try parsing as JSON array first
-  if (raw.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return parsed.map(s => String(s).trim()).filter(Boolean);
-      }
-    } catch {
-      // Not valid JSON, fall through to comma-separated parsing
-    }
-  }
-
-  // Parse as comma-separated or single value
-  return raw.split(',').map(s => s.trim()).filter(Boolean);
-})();
-
 // Legacy single-value alias for backward compatibility in logging
 const WORKSTREAM_FILTER = WORKSTREAM_FILTERS.length === 1 ? WORKSTREAM_FILTERS[0] : undefined;
+
+// Template IDs for x402 gateway job pickup (legacy; dynamic validation uses Supabase)
+const VENTURE_TEMPLATE_IDS: string[] = (() => {
+  const raw = process.env.VENTURE_TEMPLATE_IDS;
+  if (!raw) return [];
+  return raw.split(',').map(s => s.trim()).filter(Boolean);
+})();
 
 // Always set WORKER_STOP_FILE so external stop signals can terminate the worker
 if (!process.env.WORKER_STOP_FILE) {
@@ -184,6 +196,63 @@ const MIN_TIME_BETWEEN_REPOSTS = 5 * 60 * 1000; // 5 minutes
 // Track recent reposts to prevent loops
 const recentReposts = new Map<string, number>();
 
+/**
+ * Parse "HH:MM-HH:MM" schedule and check if current time is inside the window.
+ * Handles overnight windows (e.g., "22:00-08:00").
+ */
+function checkEarningWindow(schedule: string): { inWindow: boolean; msUntilWindow: number } {
+  const match = schedule.match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    workerLogger.warn({ schedule }, 'Invalid EARNING_SCHEDULE format, expected HH:MM-HH:MM');
+    return { inWindow: true, msUntilWindow: 0 }; // fail open
+  }
+
+  const [, sh, sm, eh, em] = match;
+  const startMinutes = parseInt(sh) * 60 + parseInt(sm);
+  const endMinutes = parseInt(eh) * 60 + parseInt(em);
+
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+  let inWindow: boolean;
+  if (startMinutes <= endMinutes) {
+    // Same-day window (e.g., "09:00-17:00")
+    inWindow = nowMinutes >= startMinutes && nowMinutes < endMinutes;
+  } else {
+    // Overnight window (e.g., "22:00-08:00")
+    inWindow = nowMinutes >= startMinutes || nowMinutes < endMinutes;
+  }
+
+  if (inWindow) return { inWindow: true, msUntilWindow: 0 };
+
+  // Calculate ms until window opens
+  let minutesUntil = startMinutes - nowMinutes;
+  if (minutesUntil <= 0) minutesUntil += 24 * 60;
+
+  return { inWindow: false, msUntilWindow: minutesUntil * 60 * 1000 };
+}
+
+/**
+ * Get a stable ID for the current earning window (for resetting the job counter).
+ * Format: "YYYY-MM-DD-HH:MM" using the window's start time.
+ */
+function getCurrentWindowId(schedule: string): string {
+  const match = schedule.match(/^(\d{1,2}):(\d{2})-/);
+  if (!match) return 'unknown';
+  const startHour = parseInt(match[1]);
+  const startMin = parseInt(match[2]);
+  const now = new Date();
+  const nowMinutes = now.getHours() * 60 + now.getMinutes();
+  const startMinutes = startHour * 60 + startMin;
+
+  // If we're well before the start time (>12h away), the window started yesterday
+  const windowDate = new Date(now);
+  if (startMinutes > nowMinutes + 12 * 60) {
+    windowDate.setDate(windowDate.getDate() - 1);
+  }
+  return `${windowDate.toISOString().slice(0, 10)}-${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}`;
+}
+
 const DEFAULT_BASE_BRANCH = process.env.CODE_METADATA_DEFAULT_BASE_BRANCH || 'main';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -196,6 +265,47 @@ const ENABLE_DEPENDENCY_AUTOFAIL = process.env.WORKER_DEPENDENCY_AUTOFAIL !== '0
 
 const dependencyRedispatchAttempts = new Map<string, number>();
 const dependencyCancelAttempts = new Map<string, number>();
+
+// Staking checkpoint: check every N cycles if epoch is overdue and call checkpoint()
+// At 30s base poll, 60 cycles = ~30 min. checkpoint() is a no-op if epoch hasn't ended.
+const WORKER_CHECKPOINT_CYCLES = parseInt(process.env.WORKER_CHECKPOINT_CYCLES || '60');
+
+// Staking heartbeat: submit marketplace requests to meet liveness requirement.
+// At 30s base poll, 16 cycles = ~8 min. Submits 1 request per check if deficit exists.
+const WORKER_HEARTBEAT_CYCLES = parseInt(process.env.WORKER_HEARTBEAT_CYCLES || '16');
+
+// Periodic cleanup of global maps to prevent unbounded growth over weeks of uptime
+const MAP_CLEANUP_INTERVAL_CYCLES = 50;
+const EXECUTED_JOBS_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+const REPOST_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
+const DEPENDENCY_MAP_MAX_AGE_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+function cleanupGlobalMaps(): void {
+  const now = Date.now();
+  let cleaned = 0;
+
+  for (const [id, ts] of executedJobsThisSession) {
+    if (now - ts > EXECUTED_JOBS_MAX_AGE_MS) { executedJobsThisSession.delete(id); cleaned++; }
+  }
+  for (const [id, ts] of recentReposts) {
+    if (now - ts > REPOST_MAX_AGE_MS) { recentReposts.delete(id); cleaned++; }
+  }
+  for (const [key, ts] of dependencyRedispatchAttempts) {
+    if (now - ts > DEPENDENCY_MAP_MAX_AGE_MS) { dependencyRedispatchAttempts.delete(key); cleaned++; }
+  }
+  for (const [key, ts] of dependencyCancelAttempts) {
+    if (now - ts > DEPENDENCY_MAP_MAX_AGE_MS) { dependencyCancelAttempts.delete(key); cleaned++; }
+  }
+
+  if (cleaned > 0) {
+    workerLogger.debug({ cleaned, sizes: {
+      executedJobs: executedJobsThisSession.size,
+      reposts: recentReposts.size,
+      redispatch: dependencyRedispatchAttempts.size,
+      cancel: dependencyCancelAttempts.size,
+    }}, 'Cleaned up stale global map entries');
+  }
+}
 
 // Job processing logic has been moved to worker/orchestration/jobRunner.ts
 // This file now serves as a CLI wrapper that handles request discovery, claiming, and orchestration delegation
@@ -323,7 +433,7 @@ async function getJobDefinitionStatus(jobDefinitionId: string): Promise<JobDefin
   } catch (e: any) {
     workerLogger.warn({
       jobDefinitionId,
-      error: e instanceof Error ? e.message : String(e),
+      error: serializeError(e),
     }, 'Failed to fetch job definition status');
     return { exists: false };
   }
@@ -374,7 +484,7 @@ async function maybeRedispatchDependency(params: {
     workerLogger.warn({
       requestId: params.request.id,
       dependencyId: params.dependencyId,
-      error: e?.message || String(e),
+      error: serializeError(e),
     }, 'Failed to re-dispatch stale dependency');
   }
 }
@@ -436,7 +546,7 @@ async function maybeCancelMissingDependency(params: {
     workerLogger.warn({
       requestId: params.request.id,
       dependencyId: params.dependencyId,
-      error: e?.message || String(e),
+      error: serializeError(e),
     }, 'Failed to auto-cancel request for missing dependency');
   }
 }
@@ -458,8 +568,7 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       mechFilterMode: mechFilter.mode,
       mechFilterAddresses: mechFilter.mode === 'any' ? 'any' : mechFilter.addresses,
       stakingContract: mechFilter.stakingContract,
-      workstreamFilter: WORKSTREAM_FILTERS.length > 0 ? WORKSTREAM_FILTERS : 'none',
-      ventureFilter: VENTURE_FILTERS.length > 0 ? VENTURE_FILTERS : 'none'
+      workstreamFilter: WORKSTREAM_FILTERS.length > 0 ? WORKSTREAM_FILTERS : 'none'
     }, 'Fetching requests from Ponder');
 
     // Build where conditions based on filter mode
@@ -478,13 +587,6 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
     } else if (WORKSTREAM_FILTERS.length > 1) {
       whereConditions.push('workstreamId_in: $workstreamIds');
     }
-
-    // Venture filtering: single vs multiple
-    if (VENTURE_FILTERS.length === 1) {
-      whereConditions.push('ventureId: $ventureId');
-    } else if (VENTURE_FILTERS.length > 1) {
-      whereConditions.push('ventureId_in: $ventureIds');
-    }
     const whereClause = `{ ${whereConditions.join(', ')} }`;
 
     // Build query variables definition
@@ -498,11 +600,6 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       varDefs.push('$workstreamId: String!');
     } else if (WORKSTREAM_FILTERS.length > 1) {
       varDefs.push('$workstreamIds: [String!]!');
-    }
-    if (VENTURE_FILTERS.length === 1) {
-      varDefs.push('$ventureId: String!');
-    } else if (VENTURE_FILTERS.length > 1) {
-      varDefs.push('$ventureIds: [String!]!');
     }
 
     // Query our local Ponder GraphQL (custom schema) - FILTER BY MECH AND UNDELIVERED (and optionally WORKSTREAM)
@@ -518,7 +615,6 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       mech
       sender
       workstreamId
-      ventureId
       ipfsHash
       blockTimestamp
       delivered
@@ -538,11 +634,6 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
     } else if (WORKSTREAM_FILTERS.length > 1) {
       variables.workstreamIds = WORKSTREAM_FILTERS;
     }
-    if (VENTURE_FILTERS.length === 1) {
-      variables.ventureId = VENTURE_FILTERS[0];
-    } else if (VENTURE_FILTERS.length > 1) {
-      variables.ventureIds = VENTURE_FILTERS;
-    }
 
     const data = await graphQLRequest<{ requests: { items: any[] } }>({
       url: PONDER_GRAPHQL_URL,
@@ -551,8 +642,99 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       context: { operation: 'fetchRecentRequests', mechFilterMode: mechFilter.mode }
     });
     const items: any[] = data?.requests?.items || [];
-    workerLogger.info({ totalItems: items.length, items: items.map(r => ({ id: r.id, delivered: r.delivered, dependencies: r.dependencies })) }, 'Ponder GraphQL response');
-    return items.map((r: any) => ({
+    workerLogger.info({ totalItems: items.length, items: items.map(r => ({ id: r.id, delivered: r.delivered, dependencies: r.dependencies })) }, 'Ponder GraphQL response (workstream query)');
+
+    // Query 2: Template-based jobs from x402 gateway
+    // Runs when Supabase is configured (dynamic validation) OR VENTURE_TEMPLATE_IDS is set (legacy).
+    // These jobs have jobName containing "(via x402)" and may not match any workstream filter.
+    // Template ownership is validated later in jobRunner via Supabase query.
+    let templateItems: any[] = [];
+    const ENABLE_TEMPLATE_PICKUP = !!(process.env.SUPABASE_URL || VENTURE_TEMPLATE_IDS.length > 0);
+    if (ENABLE_TEMPLATE_PICKUP) {
+      try {
+        const templateWhereConditions: string[] = ['delivered: false', 'jobName_contains: "(via x402)"'];
+        if (mechFilter.mode === 'list' || mechFilter.mode === 'staking') {
+          templateWhereConditions.push('mech_in: $mechs');
+        } else if (mechFilter.mode === 'single') {
+          templateWhereConditions.push('mech: $mech');
+        }
+        const templateWhereClause = `{ ${templateWhereConditions.join(', ')} }`;
+
+        const templateVarDefs: string[] = ['$tLimit: Int!'];
+        if (mechFilter.mode === 'list' || mechFilter.mode === 'staking') {
+          templateVarDefs.push('$mechs: [String!]!');
+        } else if (mechFilter.mode === 'single') {
+          templateVarDefs.push('$mech: String!');
+        }
+
+        const templateQuery = `query TemplateRequests(${templateVarDefs.join(', ')}) {
+  requests(
+    where: ${templateWhereClause}
+    orderBy: "blockTimestamp"
+    orderDirection: "asc"
+    limit: $tLimit
+  ) {
+    items {
+      id
+      mech
+      sender
+      workstreamId
+      ipfsHash
+      blockTimestamp
+      delivered
+      dependencies
+    }
+  }
+}`;
+
+        const templateVars: any = { tLimit: limit };
+        if (mechFilter.mode === 'list' || mechFilter.mode === 'staking') {
+          templateVars.mechs = mechFilter.addresses;
+        } else if (mechFilter.mode === 'single') {
+          templateVars.mech = mechFilter.addresses[0];
+        }
+
+        const templateData = await graphQLRequest<{ requests: { items: any[] } }>({
+          url: PONDER_GRAPHQL_URL,
+          query: templateQuery,
+          variables: templateVars,
+          context: { operation: 'fetchTemplateRequests', mechFilterMode: mechFilter.mode }
+        });
+        templateItems = templateData?.requests?.items || [];
+        if (templateItems.length > 0) {
+          workerLogger.info({ count: templateItems.length }, 'Template-based requests found (via x402)');
+        }
+      } catch (e) {
+        workerLogger.warn({ error: serializeError(e) }, 'Template request query failed; continuing with workstream results only');
+      }
+    }
+
+    // Merge and deduplicate results from both queries
+    const seenIds = new Set<string>();
+    const allItems: any[] = [];
+
+    for (const r of items) {
+      const id = String(r.id);
+      if (!seenIds.has(id)) {
+        seenIds.add(id);
+        allItems.push(r);
+      }
+    }
+    for (const r of templateItems) {
+      const id = String(r.id);
+      if (!seenIds.has(id)) {
+        seenIds.add(id);
+        allItems.push(r);
+      }
+    }
+
+    workerLogger.info({
+      workstreamResults: items.length,
+      templateResults: templateItems.length,
+      mergedTotal: allItems.length,
+    }, 'Merged request results');
+
+    return allItems.map((r: any) => ({
       id: String(r.id),
       mech: String(r.mech),
       requester: String(r.sender || ''),
@@ -563,9 +745,29 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       dependencies: Array.isArray(r?.dependencies) ? r.dependencies.map((dep: any) => String(dep)) : undefined
     })) as UnclaimedRequest[];
   } catch (e) {
-    workerLogger.warn({ error: e instanceof Error ? e.message : String(e) }, 'Ponder GraphQL not reachable; returning empty set');
+    workerLogger.warn({ error: serializeError(e) }, 'Ponder GraphQL not reachable; returning empty set');
     return [];
   }
+}
+
+// Cached Web3/contract instances — avoids re-creation on every poll cycle
+let cachedWeb3: InstanceType<typeof Web3> | null = null;
+let cachedWeb3RpcUrl: string | null = null;
+let cachedMarketplaceContract: any = null;
+const MARKETPLACE_ADDRESS = '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020';
+
+function getWeb3Singleton(rpcUrl: string): InstanceType<typeof Web3> {
+  if (cachedWeb3 && cachedWeb3RpcUrl === rpcUrl) return cachedWeb3;
+  cachedWeb3 = new Web3(rpcUrl);
+  cachedWeb3RpcUrl = rpcUrl;
+  cachedMarketplaceContract = null; // Invalidate contract on new provider
+  return cachedWeb3;
+}
+
+function getMarketplaceContract(web3: InstanceType<typeof Web3>): any {
+  if (cachedMarketplaceContract) return cachedMarketplaceContract;
+  cachedMarketplaceContract = new (web3 as any).eth.Contract(marketplaceAbi, MARKETPLACE_ADDRESS);
+  return cachedMarketplaceContract;
 }
 
 async function filterUnclaimed(requests: UnclaimedRequest[]): Promise<UnclaimedRequest[]> {
@@ -581,9 +783,8 @@ async function filterUnclaimed(requests: UnclaimedRequest[]): Promise<UnclaimedR
       return notDelivered;
     }
 
-    const web3 = new Web3(rpcHttpUrl);
-    const MARKETPLACE_ADDRESS = '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020';
-    const marketplace = new (web3 as any).eth.Contract(marketplaceAbi, MARKETPLACE_ADDRESS);
+    const web3 = getWeb3Singleton(rpcHttpUrl);
+    const marketplace = getMarketplaceContract(web3);
 
     const filtered: UnclaimedRequest[] = [];
 
@@ -602,14 +803,14 @@ async function filterUnclaimed(requests: UnclaimedRequest[]): Promise<UnclaimedR
           }, 'Request already delivered in marketplace by another mech - filtering out');
         }
       } catch (err) {
-        workerLogger.warn({ requestId, error: err instanceof Error ? err.message : String(err) }, 'Failed to check marketplace status for request; keeping request');
+        workerLogger.warn({ requestId, error: serializeError(err) }, 'Failed to check marketplace status for request; keeping request');
         filtered.push(request);
       }
     }
 
     return filtered;
   } catch (e) {
-    workerLogger.warn({ error: e instanceof Error ? e.message : String(e) }, 'Error checking marketplace status, falling back to Ponder status');
+    workerLogger.warn({ error: serializeError(e) }, 'Error checking marketplace status, falling back to Ponder status');
     return notDelivered;
   }
 }
@@ -680,7 +881,7 @@ async function resolveJobDefinitionId(
     workerLogger.warn({
       identifier,
       workstreamId,
-      error: e instanceof Error ? e.message : String(e)
+      error: serializeError(e)
     }, 'Failed to resolve dependency identifier');
     return identifier;
   }
@@ -716,7 +917,7 @@ export async function isJobDefinitionComplete(jobDefinitionId: string): Promise<
   } catch (e: any) {
     workerLogger.warn({
       jobDefinitionId,
-      error: e instanceof Error ? e.message : String(e)
+      error: serializeError(e)
     }, 'Failed to check job definition completion - assuming not complete');
     return false;
   }
@@ -782,7 +983,7 @@ async function checkDependenciesMet(request: UnclaimedRequest): Promise<boolean>
   } catch (e: any) {
     workerLogger.warn({
       requestId: request.id,
-      error: e instanceof Error ? e.message : String(e)
+      error: serializeError(e)
     }, 'Failed to check dependencies - assuming not met');
     return false;
   }
@@ -845,7 +1046,7 @@ async function tryClaim(request: UnclaimedRequest, workerAddress: string): Promi
     } catch (e: any) {
       workerLogger.info({
         requestId: request.id,
-        reason: e?.message || String(e),
+        reason: serializeError(e),
         workstreamId: resolvedWorkstreamId
       }, 'Control API claim failed');
       return false;
@@ -927,7 +1128,7 @@ export async function getDependencyBranchInfo(jobDefinitionId: string): Promise<
   } catch (e: any) {
     workerLogger.warn({
       jobDefinitionId,
-      error: e instanceof Error ? e.message : String(e)
+      error: serializeError(e)
     }, 'Failed to get dependency branch info');
     return null;
   }
@@ -1128,6 +1329,24 @@ async function processOnce(): Promise<boolean> {
     return false;
   }
 
+  // Staking target gate: stop claiming if request target met for this epoch
+  const stakingContract = getOptionalWorkerStakingContract();
+  if (stakingContract) {
+    const multisig = getServiceSafeAddress();
+    if (multisig) {
+      const gate = await checkEpochGate(stakingContract, multisig);
+      if (gate.targetMet) {
+        const resetIn = Math.max(0, gate.nextCheckpoint - Math.floor(Date.now() / 1000));
+        workerLogger.info({
+          requests: gate.requestCount,
+          target: gate.target,
+          resetsInSeconds: resetIn,
+        }, `Staking target met (${gate.requestCount}/${gate.target}) — skipping job pickup`);
+        return false;
+      }
+    }
+  }
+
   // Optional: target a specific request id if provided (for deterministic tests)
   const targetIdEnv = (getOptionalMechTargetRequestId() || '').trim();
   let candidates: UnclaimedRequest[];
@@ -1214,6 +1433,43 @@ async function processOnce(): Promise<boolean> {
 
   if (!target) return false;
 
+  // Check if this is a heartbeat request — deliver immediately without agent execution
+  if (target.ipfsHash) {
+    try {
+      const meta = await fetchIpfsMetadata(target.ipfsHash);
+      if (meta && (meta as any).heartbeat === true) {
+        workerLogger.info({ requestId: target.id }, 'Heartbeat request — auto-delivering');
+        const mechAddress = getMechAddress();
+        const safeAddress = getServiceSafeAddress();
+        const privateKey = getServicePrivateKey();
+        const rpcHttpUrl = getRequiredRpcUrl();
+        const chainConfig = getMechChainConfig();
+
+        if (mechAddress && safeAddress && privateKey) {
+          try {
+            await (deliverViaSafe as any)({
+              chainConfig,
+              requestId: target.id,
+              resultContent: { heartbeat: true, ts: Date.now() },
+              targetMechAddress: mechAddress,
+              safeAddress,
+              privateKey,
+              rpcHttpUrl,
+              wait: true,
+            });
+            workerLogger.info({ requestId: target.id }, 'Heartbeat delivered');
+          } catch (deliveryErr: any) {
+            workerLogger.warn({ requestId: target.id, error: deliveryErr.message }, 'Heartbeat delivery failed');
+          }
+        }
+        executedJobsThisSession.set(target.id, Date.now());
+        return true;
+      }
+    } catch {
+      // If metadata fetch fails, treat as normal job
+    }
+  }
+
   // Wait for quota only after successful claim (lazy quota check)
   // This eliminates quota API calls during idle periods
   await waitForGeminiQuota({ reason: 'pre_execution' });
@@ -1223,7 +1479,7 @@ async function processOnce(): Promise<boolean> {
     await processJobOnce(target, workerAddress);
   } finally {
     // Mark as executed even if delivery fails to prevent re-execution loop
-    executedJobsThisSession.add(target.id);
+    executedJobsThisSession.set(target.id, Date.now());
     workerLogger.debug({ requestId: target.id }, 'Marked job as executed this session');
   }
 
@@ -1246,36 +1502,67 @@ async function checkControlApiHealth(): Promise<void> {
   }
 
   try {
-    // Simple health check query
-    const query = `query { __typename }`;
-    await graphQLRequest({
-      url: CONTROL_API_URL,
-      query,
-      maxRetries: 0,
-      context: { operation: 'healthCheck' }
-    });
-    workerLogger.info({ controlApiUrl: CONTROL_API_URL }, 'Control API health check passed');
+    // Use the REST /health endpoint which bypasses ERC-8128 auth
+    const healthUrl = CONTROL_API_URL!.replace(/\/graphql\/?$/, '/health');
+    const res = await fetch(healthUrl, { method: 'GET', signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    const body = await res.json() as any;
+    if (body?.status !== 'ok') {
+      throw new Error(`Unhealthy response: ${JSON.stringify(body)}`);
+    }
+    workerLogger.info({ controlApiUrl: CONTROL_API_URL, nodeId: body.nodeId }, 'Control API health check passed');
   } catch (e: any) {
     workerLogger.error({
       error: serializeError(e),
       controlApiUrl: CONTROL_API_URL
     }, 'Control API is not running - worker cannot start');
-    throw new Error('Control API health check failed: ' + (e?.message || String(e)) + '\n\nPlease start Control API with: yarn control:dev');
+    throw new Error('Control API health check failed: ' + serializeError(e) + '\n\nPlease start Control API with: yarn control:dev');
   }
 }
 
 // Repost check frequency limiting configuration
 const WORKER_REPOST_CHECK_CYCLES = parseInt(process.env.WORKER_REPOST_CHECK_CYCLES || '10');
 
-// Venture watcher configuration (opt-in via ENABLE_VENTURE_WATCHER=1)
-const ENABLE_VENTURE_WATCHER = process.env.ENABLE_VENTURE_WATCHER === '1';
-const WORKER_VENTURE_CHECK_CYCLES = parseInt(process.env.WORKER_VENTURE_CHECK_CYCLES || '5');
-
 async function main() {
   workerLogger.info('Mech worker starting');
 
   // Verify Control API is running before processing any jobs
   await checkControlApiHealth();
+
+  // Initialize multi-service rotation if enabled
+  let rotator: ServiceRotator | null = null;
+  if (getWorkerMultiServiceEnabled()) {
+    const middlewarePath = getMiddlewarePath();
+    if (middlewarePath) {
+      try {
+        rotator = new ServiceRotator({
+          rpcUrl: getConfigRpcUrl(),
+          middlewarePath,
+          activityPollMs: getWorkerActivityPollMs(),
+          activityCacheTtlMs: getWorkerActivityCacheTtlMs(),
+        });
+        const initial = await rotator.initialize();
+        setActiveService(rotator.buildIdentity(initial.service));
+        workerLogger.info({
+          activeService: initial.service.serviceConfigId,
+          serviceId: initial.service.serviceId,
+          reason: initial.reason,
+        }, 'Multi-service rotation active');
+      } catch (err: any) {
+        workerLogger.error({ error: err?.message || String(err) }, 'Failed to initialize multi-service rotation, falling back to single-service');
+        rotator = null;
+      }
+    } else {
+      workerLogger.warn('WORKER_MULTI_SERVICE enabled but no middleware path found');
+    }
+  }
+
+  // Log earning schedule at startup
+  if (EARNING_SCHEDULE) {
+    workerLogger.info({ schedule: EARNING_SCHEDULE, maxJobs: EARNING_MAX_JOBS ?? 'unlimited' }, 'Earning schedule configured');
+  }
 
   if (SINGLE_SHOT) {
     await processOnce();
@@ -1290,7 +1577,9 @@ async function main() {
 
   // Repost check frequency limiting
   let cyclesSinceLastRepostCheck = 0;
-  let cyclesSinceLastVentureCheck = 0;
+  let cyclesSinceLastCleanup = 0;
+  let cyclesSinceLastCheckpoint = 0;
+  let cyclesSinceLastHeartbeat = 0;
 
   for (; ;) {
     const cycleStart = Date.now();
@@ -1300,6 +1589,32 @@ async function main() {
         return;
       }
 
+      // Earning schedule gate: skip polling if outside earning window
+      if (EARNING_SCHEDULE) {
+        const { inWindow, msUntilWindow } = checkEarningWindow(EARNING_SCHEDULE);
+        if (!inWindow) {
+          workerLogger.info({ schedule: EARNING_SCHEDULE, sleepMs: msUntilWindow }, 'Outside earning window - sleeping until window opens');
+          // Sleep until window opens (capped at 1 hour to recheck for stop signals)
+          await new Promise(r => setTimeout(r, Math.min(msUntilWindow, 60 * 60 * 1000)));
+          continue;
+        }
+
+        // Reset job counter if this is a new window
+        const windowId = getCurrentWindowId(EARNING_SCHEDULE);
+        if (windowId !== earningWindowId) {
+          earningWindowJobCount = 0;
+          earningWindowId = windowId;
+          workerLogger.info({ windowId, maxJobs: EARNING_MAX_JOBS ?? 'unlimited' }, 'New earning window started');
+        }
+      }
+
+      // Earning job cap: skip polling if cap reached for this window
+      if (EARNING_MAX_JOBS !== undefined && earningWindowJobCount >= EARNING_MAX_JOBS) {
+        workerLogger.info({ jobCount: earningWindowJobCount, maxJobs: EARNING_MAX_JOBS }, 'Earning job cap reached for this window - sleeping');
+        await new Promise(r => setTimeout(r, 5 * 60 * 1000));
+        continue;
+      }
+
       // Check for completed chains only every Nth cycle (reduces DB queries when idle)
       cyclesSinceLastRepostCheck++;
       if (cyclesSinceLastRepostCheck >= WORKER_REPOST_CHECK_CYCLES) {
@@ -1307,26 +1622,36 @@ async function main() {
         cyclesSinceLastRepostCheck = 0;
       }
 
-      // Check venture dispatch schedules every Nth cycle (opt-in)
-      if (ENABLE_VENTURE_WATCHER) {
-        cyclesSinceLastVentureCheck++;
-        if (cyclesSinceLastVentureCheck >= WORKER_VENTURE_CHECK_CYCLES) {
-          try {
-            const { checkAndDispatchScheduledVentures } = await import('./ventures/ventureWatcher.js');
-            await checkAndDispatchScheduledVentures();
-          } catch (ventureErr: any) {
-            workerLogger.error({ error: ventureErr?.message }, 'Venture watcher error (non-fatal)');
-          }
-          cyclesSinceLastVentureCheck = 0;
-        }
+      // Evict stale entries from global maps to prevent unbounded growth
+      cyclesSinceLastCleanup++;
+      if (cyclesSinceLastCleanup >= MAP_CLEANUP_INTERVAL_CYCLES) {
+        cleanupGlobalMaps();
+        cyclesSinceLastCleanup = 0;
       }
 
-      // Heartbeat deadline burst: submit heartbeats near checkpoint if under target
-      try {
-        const { checkHeartbeatSchedule } = await import('./staking/heartbeat.js');
-        await checkHeartbeatSchedule();
-      } catch (err: any) {
-        workerLogger.error({ error: err?.message }, 'Heartbeat check error (non-fatal)');
+      // Call staking checkpoint if epoch is overdue (permissionless, any EOA can trigger)
+      {
+        const stakingContract = getOptionalWorkerStakingContract();
+        cyclesSinceLastCheckpoint++;
+        if (stakingContract && cyclesSinceLastCheckpoint >= WORKER_CHECKPOINT_CYCLES) {
+          cyclesSinceLastCheckpoint = 0;
+          try {
+            await maybeCallCheckpoint(stakingContract);
+          } catch (e: any) {
+            workerLogger.warn({ error: serializeError(e) }, 'Staking checkpoint call failed (non-fatal)');
+          }
+        }
+
+        // Submit heartbeat requests to meet staking liveness requirement
+        cyclesSinceLastHeartbeat++;
+        if (stakingContract && cyclesSinceLastHeartbeat >= WORKER_HEARTBEAT_CYCLES) {
+          cyclesSinceLastHeartbeat = 0;
+          try {
+            await maybeSubmitHeartbeat(stakingContract);
+          } catch (e: any) {
+            workerLogger.warn({ error: serializeError(e) }, 'Staking heartbeat failed (non-fatal)');
+          }
+        }
       }
 
       const jobProcessed = await processOnce();
@@ -1338,6 +1663,7 @@ async function main() {
         recordExecutionTime(cycleDurationMs);
         consecutiveIdleCycles = 0;
         currentPollIntervalMs = WORKER_POLL_BASE_MS;
+        earningWindowJobCount++;
       } else {
         recordIdleCycle(cycleDurationMs);
         consecutiveIdleCycles++;
@@ -1351,6 +1677,24 @@ async function main() {
       if (shouldStop()) {
         workerLogger.info('Stop signal detected after job processing - exiting worker loop');
         return;
+      }
+
+      // Multi-service rotation check (no-op when rotator is null)
+      if (rotator) {
+        try {
+          const decision = await rotator.reevaluate();
+          if (decision.switched) {
+            setActiveService(rotator.buildIdentity(decision.service));
+            workerLogger.info({
+              activeService: decision.service.serviceConfigId,
+              serviceId: decision.service.serviceId,
+              reason: decision.reason,
+              rotationState: rotator.getState(),
+            }, 'Rotated to new service');
+          }
+        } catch (rotErr: any) {
+          workerLogger.warn({ error: rotErr?.message || String(rotErr) }, 'Service rotation check failed');
+        }
       }
 
       // Check if we've reached the max runs limit

@@ -82,6 +82,11 @@ yarn worker
 
 For a single-job test run: `yarn worker --single`
 
+## Detailed Guides
+
+- **Setup (advanced)**: [references/setup.md](references/setup.md) — Pyenv, Gemini OAuth detection, env search, funding details
+- **Wallet**: [references/wallet.md](references/wallet.md) — Balances, backup, key export, withdraw, recovery
+
 ## Troubleshooting
 
 | Issue | Solution |
@@ -91,6 +96,18 @@ For a single-job test run: `yarn worker --single`
 | Python 3.12+ errors | Install Python 3.11 via pyenv: `pyenv install 3.11.9` |
 | Setup stuck | Waiting for funding — send ETH/OLAS and re-run `yarn setup` |
 | Gemini auth errors | Run `npx @google/gemini-cli auth login` |
+
+## Quick Reference
+
+| Command | Purpose |
+|---------|---------|
+| `yarn setup` | Initial service setup |
+| `yarn worker` | Run worker (continuous) |
+| `yarn worker --single` | Test with one job |
+| `yarn wallet:info` | Show addresses + balances |
+| `yarn wallet:backup` | Backup .operate directory |
+| `yarn wallet:withdraw --to <addr>` | Withdraw funds from Safe |
+| `yarn wallet:recover --to <addr>` | Emergency recovery (destructive) |
 
 ## Need Help?
 

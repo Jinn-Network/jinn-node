@@ -78,11 +78,11 @@ export async function isUndeliveredOnChain(params: {
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore
       const agentMechArtifact = await import('@jinn-network/mech-client-ts/dist/abis/AgentMech.json', { with: { type: 'json' } });
-      // ESM JSON imports may nest under .default; extract .abi array from the artifact object
-      const raw = (agentMechArtifact as any)?.default ?? agentMechArtifact;
-      const abi: any = Array.isArray(raw) ? raw : raw?.abi;
-      if (!Array.isArray(abi)) {
-        throw new Error('AgentMech ABI not found or not an array');
+      const raw = (agentMechArtifact as any)?.default || agentMechArtifact;
+      const abi: any = raw?.abi || (Array.isArray(raw) ? raw : null);
+      if (!abi) {
+        workerLogger.warn({ keys: Object.keys(raw || {}) }, 'Could not extract ABI from AgentMech artifact');
+        return false;
       }
       const web3 = new Web3(rpcHttpUrl);
       const contract = new (web3 as any).eth.Contract(abi, mechAddress);
@@ -167,10 +167,11 @@ export async function wasRequestRevoked(params: {
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
     const agentMechArtifact = await import('@jinn-network/mech-client-ts/dist/abis/AgentMech.json', { with: { type: 'json' } });
-    const raw = (agentMechArtifact as any)?.default ?? agentMechArtifact;
-    const abi: any = Array.isArray(raw) ? raw : raw?.abi;
-    if (!Array.isArray(abi)) {
-      throw new Error('AgentMech ABI not found or not an array');
+    const raw = (agentMechArtifact as any)?.default || agentMechArtifact;
+    const abi: any = raw?.abi || (Array.isArray(raw) ? raw : null);
+    if (!abi) {
+      workerLogger.warn({ keys: Object.keys(raw || {}) }, 'Could not extract ABI from AgentMech artifact');
+      return false;
     }
     const web3 = new Web3(rpcHttpUrl);
 

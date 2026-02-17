@@ -1,228 +1,202 @@
 /**
- * Smart Heartbeat Throttling
+ * Staking Heartbeat — Request Count Booster
  *
- * Keeps staking activity at exactly the target (default 60) requests per epoch
- * instead of the ~255 the worker naturally produces. Two mechanisms:
+ * The WhitelistedRequesterActivityChecker counts marketplace REQUESTS
+ * (mapRequestCounts) to determine liveness, but the service is a mech
+ * that primarily DELIVERS rather than requests. This module submits
+ * periodic lightweight marketplace requests to satisfy the liveness
+ * requirement of 60 requests per epoch.
  *
- * 1. Shadow heartbeats — one heartbeat per real delivery (doubles real work)
- * 2. Deadline burst — within N hours of checkpoint, heartbeats every 5 min
+ * Each heartbeat request targets our own mech with a trivial payload.
+ * The worker auto-delivers these immediately so the ETH round-trips
+ * and both request + delivery counts increment.
  *
- * IMPORTANT: The staking multisig (from getServiceInfo on the staking contract)
- * may differ from the worker's configured Safe. Heartbeats MUST be submitted
- * from the staking multisig to count toward activity. The agent EOA private key
- * must be an owner of that multisig.
- *
- * All state is read from on-chain contracts (cached 5 min). This module never
- * crashes the worker — every public function swallows errors.
+ * Math: 60 requests / 24h epoch. At default interval of 8 min,
+ * the module checks remaining deficit and submits 1 request if needed.
+ * Over 8 active hours: 60/8 = 7.5/hr ≈ 1 every 8 min.
  */
 
 import { ethers } from 'ethers';
-import { logger } from '../../logging/index.js';
-import { getServicePrivateKey, getMechAddress } from '../../env/operate-profile.js';
+import { workerLogger } from '../../logging/index.js';
+import { getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
+import { getServicePrivateKey, getServiceSafeAddress, getMechAddress } from '../../env/operate-profile.js';
+// NOTE: getServiceSafeAddress is only used for the warning log comparing worker vs staking multisig
 import { submitMarketplaceRequest } from '../MechMarketplaceRequester.js';
 
-const hbLogger = logger.child({ component: 'HEARTBEAT' });
+const log = workerLogger.child({ component: 'HEARTBEAT' });
 
-// ---------------------------------------------------------------------------
-// Configuration (env vars, no schema changes)
-// ---------------------------------------------------------------------------
-
-const TARGET = parseInt(process.env.HEARTBEAT_TARGET || '60', 10);
-const DEADLINE_HOURS = parseInt(process.env.HEARTBEAT_DEADLINE_HOURS || '5', 10);
-const BURST_INTERVAL_MS = parseInt(process.env.HEARTBEAT_BURST_INTERVAL_MS || '300000', 10);
-
-// Contract addresses (defaults for Jinn on Base)
-const STAKING_CONTRACT = process.env.WORKER_STAKING_CONTRACT || '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139';
-const MECH_MARKETPLACE = process.env.MECH_MARKETPLACE_ADDRESS_BASE || '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020';
-const SERVICE_ID = parseInt(process.env.WORKER_SERVICE_ID || '165', 10);
-
-const RPC_URL = process.env.BASE_LEDGER_RPC || process.env.BASE_RPC_URL || 'https://base.publicnode.com';
-
-// ---------------------------------------------------------------------------
-// ABIs (minimal — only what we read)
-// ---------------------------------------------------------------------------
+const MECH_MARKETPLACE = '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020';
+const TARGET_REQUESTS_PER_EPOCH = 60;
+// Safety margin: aim for a few extra to account for timing jitter
+const TARGET_WITH_MARGIN = TARGET_REQUESTS_PER_EPOCH + 5;
 
 const STAKING_ABI = [
   'function tsCheckpoint() view returns (uint256)',
-  'function livenessPeriod() view returns (uint256)',
+  'function getNextRewardCheckpointTimestamp() view returns (uint256)',
   'function getServiceInfo(uint256 serviceId) view returns (tuple(address multisig, address owner, uint256[] nonces, uint256 tsStart, uint256 reward, uint256 inactivity))',
 ];
 
 const MARKETPLACE_ABI = [
-  'function mapRequestCounts(address requester) view returns (uint256)',
+  'function mapRequestCounts(address) view returns (uint256)',
 ];
 
-// ---------------------------------------------------------------------------
-// Cached epoch state
-// ---------------------------------------------------------------------------
+const SERVICE_ID = parseInt(process.env.WORKER_SERVICE_ID || '165', 10);
 
-interface EpochState {
-  stakingMultisig: string;        // on-chain source of truth
-  tsCheckpoint: number;
-  livenessPeriod: number;
-  baselineRequestCount: number;   // nonces[1] at staking time
-  currentRequestCount: number;    // mapRequestCounts(stakingMultisig)
-  fetchedAt: number;
-}
+// Cached staking multisig — resolved once from on-chain getServiceInfo()
+let resolvedMultisig: string | null = null;
 
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+/**
+ * Calculate how many more requests we need to submit this epoch.
+ *
+ * IMPORTANT: The staking multisig (from getServiceInfo on the staking contract)
+ * may differ from the worker's configured Safe (JINN_SERVICE_SAFE_ADDRESS).
+ * We derive the correct multisig from on-chain and use it for both querying
+ * mapRequestCounts and submitting heartbeat requests.
+ *
+ * The baseline is the on-chain nonces[1] from getServiceInfo — the authoritative
+ * request count recorded when the service was staked/checkpointed.
+ */
+async function getRequestDeficit(
+  stakingContract: string,
+): Promise<{ deficit: number; current: number; epochSecondsRemaining: number; multisig: string }> {
+  const rpcUrl = getRequiredRpcUrl();
+  const provider = new ethers.JsonRpcProvider(rpcUrl);
 
-let cachedEpochState: EpochState | null = null;
-let lastKnownCheckpointTs = 0;
-let lastBurstHeartbeatAt = 0;
-
-async function fetchEpochState(): Promise<EpochState> {
-  // Return cached if fresh
-  if (cachedEpochState && Date.now() - cachedEpochState.fetchedAt < CACHE_TTL_MS) {
-    return cachedEpochState;
-  }
-
-  const provider = new ethers.JsonRpcProvider(RPC_URL);
-  const staking = new ethers.Contract(STAKING_CONTRACT, STAKING_ABI, provider);
+  const staking = new ethers.Contract(stakingContract, STAKING_ABI, provider);
   const marketplace = new ethers.Contract(MECH_MARKETPLACE, MARKETPLACE_ABI, provider);
 
-  // First get service info to learn the staking multisig
-  const [tsCheckpoint, livenessPeriod, serviceInfo] = await Promise.all([
-    staking.tsCheckpoint() as Promise<bigint>,
-    staking.livenessPeriod() as Promise<bigint>,
+  const [nextCheckpoint, serviceInfo] = await Promise.all([
+    staking.getNextRewardCheckpointTimestamp().then(Number),
     staking.getServiceInfo(SERVICE_ID),
   ]);
 
-  const stakingMultisig: string = serviceInfo.multisig;
-
-  // Now query request count for the correct multisig
-  const requestCount = await marketplace.mapRequestCounts(stakingMultisig) as bigint;
-
-  const state: EpochState = {
-    stakingMultisig,
-    tsCheckpoint: Number(tsCheckpoint),
-    livenessPeriod: Number(livenessPeriod),
-    baselineRequestCount: Number(serviceInfo.nonces[1]),
-    currentRequestCount: Number(requestCount),
-    fetchedAt: Date.now(),
-  };
-
-  // Detect epoch rollover — reset burst state
-  if (lastKnownCheckpointTs !== 0 && state.tsCheckpoint !== lastKnownCheckpointTs) {
-    hbLogger.info(
-      { oldCheckpoint: lastKnownCheckpointTs, newCheckpoint: state.tsCheckpoint },
-      'Epoch rollover detected — resetting burst state',
-    );
-    lastBurstHeartbeatAt = 0;
+  // Use the staking multisig from on-chain (may differ from worker Safe)
+  const multisig: string = serviceInfo.multisig;
+  if (!resolvedMultisig) {
+    const workerSafe = getServiceSafeAddress();
+    if (workerSafe?.toLowerCase() !== multisig.toLowerCase()) {
+      log.warn({ workerSafe, stakingMultisig: multisig }, 'Worker Safe differs from staking multisig — using staking multisig for heartbeats');
+    }
+    resolvedMultisig = multisig;
   }
-  lastKnownCheckpointTs = state.tsCheckpoint;
 
-  hbLogger.debug({
-    stakingMultisig,
-    baseline: state.baselineRequestCount,
-    current: state.currentRequestCount,
-    epochRequests: state.currentRequestCount - state.baselineRequestCount,
-  }, 'Epoch state fetched');
+  // Baseline from on-chain nonces[1] — authoritative epoch-start request count
+  const baselineRequestCount = Number(serviceInfo.nonces[1]);
+  const currentRequestCount = await marketplace.mapRequestCounts(multisig).then(Number);
 
-  cachedEpochState = state;
-  return state;
+  const now = Math.floor(Date.now() / 1000);
+  const epochSecondsRemaining = Math.max(0, nextCheckpoint - now);
+
+  const requestsThisEpoch = currentRequestCount - baselineRequestCount;
+  const deficit = Math.max(0, TARGET_WITH_MARGIN - requestsThisEpoch);
+
+  log.debug({
+    multisig,
+    baseline: baselineRequestCount,
+    current: currentRequestCount,
+    requestsThisEpoch,
+    deficit,
+    epochSecondsRemaining,
+  }, 'Epoch deficit check');
+
+  return { deficit, current: currentRequestCount, epochSecondsRemaining, multisig };
 }
 
-function remaining(state: EpochState): number {
-  const epochRequests = state.currentRequestCount - state.baselineRequestCount;
-  return Math.max(0, TARGET - epochRequests);
-}
-
-// ---------------------------------------------------------------------------
-// Submit heartbeat via existing Safe tx flow
-// ---------------------------------------------------------------------------
-
-async function submitHeartbeat(): Promise<void> {
+/**
+ * Submit a single heartbeat request to the marketplace.
+ * Returns true if successful.
+ */
+async function submitHeartbeat(multisig: string, mechAddress: string): Promise<boolean> {
   const privateKey = getServicePrivateKey();
-  const mechAddress = getMechAddress();
+  const rpcUrl = getRequiredRpcUrl();
 
-  if (!privateKey || !mechAddress) {
-    hbLogger.warn('Missing service profile (private key or mech address) — skipping heartbeat');
-    return;
+  if (!privateKey) {
+    log.warn('No service private key — cannot submit heartbeat');
+    return false;
   }
 
-  // Re-check on-chain count right before submitting (invalidate cache)
-  cachedEpochState = null;
-  const freshState = await fetchEpochState();
-  const rem = remaining(freshState);
-
-  if (rem <= 0) {
-    hbLogger.debug({ target: TARGET, epochRequests: freshState.currentRequestCount - freshState.baselineRequestCount }, 'Target already met — skipping heartbeat');
-    return;
-  }
-
-  hbLogger.info({
-    remaining: rem,
-    target: TARGET,
-    stakingMultisig: freshState.stakingMultisig,
-  }, 'Submitting heartbeat');
+  const prompt = JSON.stringify({
+    heartbeat: true,
+    ts: Date.now(),
+    service: 165,
+  });
 
   const result = await submitMarketplaceRequest({
-    serviceSafeAddress: freshState.stakingMultisig,
+    serviceSafeAddress: multisig,
     agentEoaPrivateKey: privateKey,
     mechContractAddress: mechAddress,
     mechMarketplaceAddress: MECH_MARKETPLACE,
-    prompt: '__heartbeat__',
-    rpcUrl: RPC_URL,
+    prompt,
+    rpcUrl,
+    ipfsExtraAttributes: {
+      heartbeat: true,
+      jobName: '__heartbeat__',
+    },
   });
 
   if (result.success) {
-    hbLogger.info({ tx: result.transactionHash, remaining: rem - 1 }, 'Heartbeat submitted');
-    // Invalidate cache so next call sees updated count
-    cachedEpochState = null;
+    log.info({ txHash: result.transactionHash, gasUsed: result.gasUsed }, 'Heartbeat request submitted');
   } else {
-    hbLogger.warn({ error: result.error }, 'Heartbeat submission failed');
+    log.warn({ error: result.error }, 'Heartbeat request failed');
   }
+
+  return result.success;
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
+// Minimum seconds between heartbeat submissions to avoid gas waste
+const HEARTBEAT_MIN_INTERVAL_SEC = parseInt(process.env.HEARTBEAT_MIN_INTERVAL_SEC || '60');
+
+let lastHeartbeatTimestamp = 0;
 
 /**
- * Shadow heartbeat — call after every real job delivery.
- * Submits one heartbeat if we haven't hit the target yet.
+ * Maybe submit heartbeat requests to meet the staking liveness requirement.
+ * Called periodically from the worker loop.
+ *
+ * Only submits if there's a deficit of requests for the current epoch.
+ * Submits a batch of requests per call to compensate for slow worker cycles.
  */
-export async function onJobDelivered(): Promise<void> {
-  const state = await fetchEpochState();
-  const rem = remaining(state);
+export async function maybeSubmitHeartbeat(stakingContract: string): Promise<void> {
+  const mechAddress = getMechAddress();
 
-  hbLogger.debug({ remaining: rem, target: TARGET }, 'Shadow heartbeat check');
+  if (!mechAddress) {
+    log.debug('No mech address — skipping heartbeat');
+    return;
+  }
 
-  if (rem <= 0) return;
-
-  await submitHeartbeat();
-}
-
-/**
- * Deadline burst — call every main loop cycle.
- * Within DEADLINE_HOURS of the next checkpoint, submits a heartbeat every
- * BURST_INTERVAL_MS until the target is met.
- */
-export async function checkHeartbeatSchedule(): Promise<void> {
-  const state = await fetchEpochState();
-  const rem = remaining(state);
-
-  if (rem <= 0) return;
-
-  // How far are we from the next checkpoint?
+  // Throttle: don't submit more often than HEARTBEAT_MIN_INTERVAL_SEC
   const now = Math.floor(Date.now() / 1000);
-  const nextCheckpoint = state.tsCheckpoint + state.livenessPeriod;
-  const secondsUntil = nextCheckpoint - now;
-
-  if (secondsUntil > DEADLINE_HOURS * 3600) {
-    hbLogger.debug({ secondsUntil, deadlineSeconds: DEADLINE_HOURS * 3600 }, 'Outside burst window');
+  if (now - lastHeartbeatTimestamp < HEARTBEAT_MIN_INTERVAL_SEC) {
     return;
   }
 
-  // Throttle burst heartbeats
-  const msSinceLastBurst = Date.now() - lastBurstHeartbeatAt;
-  if (msSinceLastBurst < BURST_INTERVAL_MS) {
-    hbLogger.debug({ msSinceLastBurst, burstIntervalMs: BURST_INTERVAL_MS }, 'Burst throttled');
-    return;
-  }
+  try {
+    const { deficit, current, epochSecondsRemaining, multisig } = await getRequestDeficit(stakingContract);
 
-  hbLogger.info({ remaining: rem, secondsUntilCheckpoint: secondsUntil }, 'Deadline burst heartbeat');
-  lastBurstHeartbeatAt = Date.now();
-  await submitHeartbeat();
+    if (deficit <= 0) {
+      log.debug({ current, deficit: 0 }, 'Request target met for this epoch — no heartbeat needed');
+      return;
+    }
+
+    // Don't submit if epoch is almost over (< 5 min) — let checkpoint handle it
+    if (epochSecondsRemaining < 300) {
+      log.debug({ epochSecondsRemaining, deficit }, 'Epoch ending soon — skipping heartbeat');
+      return;
+    }
+
+    // Submit only 1 request per call — the worker cycles frequently enough
+    // and the on-chain baseline is authoritative, preventing overshoot.
+    log.info({
+      deficit,
+      currentRequestCount: current,
+      target: TARGET_WITH_MARGIN,
+      epochSecondsRemaining,
+      multisig,
+    }, `Request deficit: ${deficit} — submitting 1 heartbeat`);
+
+    await submitHeartbeat(multisig, mechAddress);
+
+    lastHeartbeatTimestamp = Math.floor(Date.now() / 1000);
+  } catch (error: any) {
+    log.warn({ error: error.message }, 'Heartbeat check failed (non-fatal)');
+  }
 }

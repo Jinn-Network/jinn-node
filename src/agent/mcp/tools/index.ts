@@ -10,7 +10,6 @@ export { searchJobs, searchJobsParams, searchJobsSchema, type SearchJobsParams }
 export { searchArtifacts, searchArtifactsParams, searchArtifactsSchema, type SearchArtifactsParams } from './search-artifacts.js';
 export { searchSimilarSituations, searchSimilarSituationsParams, searchSimilarSituationsSchema } from './search_similar_situations.js';
 export { inspectSituation, inspectSituationParams, inspectSituationSchema } from './inspect_situation.js';
-export { loadMcpServer, stopMcpServer } from './shared/mcp-bootstrap.js';
 
 // Inspection tools (workstream/job analysis)
 export { inspectJobRun, inspectJobRunParams, inspectJobRunSchema, type InspectJobRunParams } from './inspect-job-run.js';

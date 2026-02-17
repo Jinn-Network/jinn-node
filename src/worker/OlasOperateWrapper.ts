@@ -1708,4 +1708,67 @@ export class OlasOperateWrapper {
   isServerRunning(): boolean {
     return this.isServerReady && this.serverProcess !== null && !this.serverProcess.killed;
   }
+
+  /**
+   * Get the server port (for wallet scripts that need the base URL)
+   */
+  getServerPort(): number {
+    return this.serverPort;
+  }
+
+  /**
+   * Terminate and withdraw a service (v2 API)
+   * Used by wallet recovery scripts to unstake and get funds back
+   */
+  async terminateAndWithdraw(serviceConfigId: string, withdrawalAddress: string): Promise<OperateResult> {
+    const result = await this.makeRequest(
+      `/api/v2/service/${serviceConfigId}/terminate_and_withdraw`,
+      'POST',
+      { withdrawal_address: withdrawalAddress }
+    );
+    if (result.success) {
+      operateLogger.info({ serviceConfigId, withdrawalAddress }, "Service terminated and withdrawal initiated");
+      return { success: true };
+    }
+    operateLogger.error({ serviceConfigId, error: result.error }, "Terminate and withdraw failed");
+    return { success: false, error: result.error || 'Terminate and withdraw failed' };
+  }
+
+  /**
+   * Withdraw funds from wallet/safes to an external address
+   * Used by wallet withdrawal scripts
+   */
+  async withdrawFunds(
+    to: string,
+    withdrawAssets: Record<string, Record<string, string>>
+  ): Promise<{ success: boolean; transferTxs?: Record<string, Record<string, string[]>>; error?: string }> {
+    const result = await this.makeRequest('/api/wallet/withdraw', 'POST', {
+      password: this.password,
+      to,
+      withdraw_assets: withdrawAssets,
+    });
+    if (result.success) {
+      operateLogger.info({ to }, "Withdrawal completed successfully");
+      return { success: true, transferTxs: result.data?.transfer_txs };
+    }
+    operateLogger.error({ to, error: result.error }, "Withdrawal failed");
+    return { success: false, error: result.error || 'Withdrawal failed' };
+  }
+
+  /**
+   * Export wallet mnemonic/seed phrase
+   * Used by wallet export scripts for recovery purposes
+   */
+  async exportMnemonic(ledgerType: string = 'ethereum'): Promise<{ success: boolean; mnemonic?: string[]; error?: string }> {
+    const result = await this.makeRequest('/api/wallet/mnemonic', 'POST', {
+      password: this.password,
+      ledger_type: ledgerType,
+    });
+    if (result.success && result.data?.mnemonic) {
+      operateLogger.info({ ledgerType }, "Mnemonic exported successfully");
+      return { success: true, mnemonic: result.data.mnemonic };
+    }
+    operateLogger.error({ ledgerType, error: result.error }, "Mnemonic export failed");
+    return { success: false, error: result.error || 'Mnemonic export failed' };
+  }
 }

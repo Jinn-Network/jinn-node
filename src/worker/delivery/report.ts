@@ -25,7 +25,7 @@ export async function storeOnchainReport(
       total_tokens: result?.telemetry?.totalTokens || 0,
       tools_called: JSON.stringify(result?.telemetry?.toolCalls ?? []),
       final_output: result?.output || null,
-      error_message: error ? (error.message || String(error)) : null,
+      error_message: error ? serializeError(error) : null,
       error_type: error ? 'AGENT_ERROR' : null,
       raw_telemetry: JSON.stringify({
         ...result?.telemetry ?? {},
