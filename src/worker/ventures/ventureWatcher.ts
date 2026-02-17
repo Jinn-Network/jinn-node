@@ -131,6 +131,10 @@ async function processScheduleEntry(venture: Venture, entry: ScheduleEntry): Pro
     'Venture watcher: dispatching due schedule entry'
   );
 
+  // Record BEFORE dispatch so failed attempts don't retry every loop iteration.
+  // Next attempt happens at the next cron tick.
+  recordDispatch(venture.id, entry.templateId);
+
   await dispatchFromTemplate(venture, entry);
 }
 

@@ -14,7 +14,7 @@ import { dispatchToMarketplace } from '../../agent/shared/dispatch-core.js';
 import { extractToolPolicyFromBlueprint } from '../../shared/template-tools.js';
 import type { Venture } from '../../data/ventures.js';
 import type { ScheduleEntry } from '../../data/types/scheduleEntry.js';
-import { recordDispatch } from './ventureWatcher.js';
+
 
 /**
  * Dispatch a finite workstream from a template + venture schedule entry.
@@ -112,9 +112,6 @@ export async function dispatchFromTemplate(
       return payload;
     },
   });
-
-  // Record dispatch in memory to prevent double-dispatch during Ponder indexing lag
-  recordDispatch(venture.id, template.id);
 
   workerLogger.info(
     { ventureId: venture.id, templateId: template.id, requestIds: result.requestIds },
