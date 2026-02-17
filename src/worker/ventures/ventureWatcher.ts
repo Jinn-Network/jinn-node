@@ -29,39 +29,10 @@ import type { ScheduleEntry } from '../../data/types/scheduleEntry.js';
 const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
 
 /**
- * In-memory dispatch tracking to prevent double-dispatches
- * caused by Ponder indexing lag (10-30s).
- * Key: `${ventureId}:${templateId}`, Value: timestamp of last dispatch.
- */
-const recentDispatches = new Map<string, Date>();
-
-/** Record a successful dispatch in the in-memory tracker. */
-export function recordDispatch(ventureId: string, templateId: string): void {
-  recentDispatches.set(`${ventureId}:${templateId}`, new Date());
-}
-
-/** Check if a dispatch was recorded in-memory since the given timestamp. */
-function hasInMemoryDispatch(ventureId: string, templateId: string, since: Date): boolean {
-  const key = `${ventureId}:${templateId}`;
-  const lastDispatch = recentDispatches.get(key);
-  if (!lastDispatch) return false;
-  return lastDispatch.getTime() >= since.getTime();
-}
-
-/** Evict entries older than 24 hours to prevent unbounded growth. */
-function evictStaleEntries(): void {
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  for (const [key, date] of recentDispatches) {
-    if (date.getTime() < cutoff) recentDispatches.delete(key);
-  }
-}
-
-/**
  * Check all active ventures and dispatch any due schedule entries.
  */
 export async function checkAndDispatchScheduledVentures(): Promise<void> {
   try {
-    evictStaleEntries();
     const ventures = await listVentures({ status: 'active' });
 
     // Respect VENTURE_FILTER env var — only dispatch for filtered ventures
@@ -113,19 +84,8 @@ async function processScheduleEntry(
   const scheduleTick = buildScheduleTick(lastTick, entry.id);
   const scheduledJobDefinitionId = buildScheduledJobDefinitionId(venture.id, entry.id, lastTick);
 
-  // Fast path: check in-memory tracker first (avoids Ponder lag issue)
-  if (hasInMemoryDispatch(venture.id, entry.templateId, lastTick)) {
-    workerLogger.debug(
-      { ventureId: venture.id, entryId: entry.id, templateId: entry.templateId },
-      'Venture watcher: skipping (in-memory dispatch record exists)'
-    );
-    return;
-  }
-
   const alreadyDispatched = await hasRecentDispatchForScheduledJobDefinition(scheduledJobDefinitionId);
   if (alreadyDispatched) {
-    // Record in memory so we don't query Ponder again this tick
-    recordDispatch(venture.id, entry.templateId);
     workerLogger.debug(
       { ventureId: venture.id, entryId: entry.id, templateId: entry.templateId, scheduledJobDefinitionId },
       'Venture watcher: skipping (already dispatched for this entry tick)'
@@ -162,10 +122,6 @@ async function processScheduleEntry(
     },
     'Venture watcher: dispatching due schedule entry'
   );
-
-  // Record BEFORE dispatch so failed attempts don't retry every loop iteration.
-  // Next attempt happens at the next cron tick.
-  recordDispatch(venture.id, entry.templateId);
 
   try {
     await dispatchFromTemplate(venture, entry, { jobDefinitionId: scheduledJobDefinitionId });
