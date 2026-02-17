@@ -1321,6 +1321,14 @@ async function main() {
         }
       }
 
+      // Heartbeat deadline burst: submit heartbeats near checkpoint if under target
+      try {
+        const { checkHeartbeatSchedule } = await import('./staking/heartbeat.js');
+        await checkHeartbeatSchedule();
+      } catch (err: any) {
+        workerLogger.error({ error: err?.message }, 'Heartbeat check error (non-fatal)');
+      }
+
       const jobProcessed = await processOnce();
       const cycleEnd = Date.now();
       const cycleDurationMs = cycleEnd - cycleStart;

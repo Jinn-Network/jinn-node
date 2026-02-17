@@ -883,6 +883,14 @@ export async function processOnce(
     });
     workerLogger.info({ requestId: target.id, tx: delivery?.tx_hash, status: delivery?.status }, 'Delivered via Safe');
 
+    // Shadow heartbeat: one heartbeat per real delivery
+    try {
+      const { onJobDelivered } = await import('../staking/heartbeat.js');
+      await onJobDelivered();
+    } catch (err: any) {
+      workerLogger.warn({ error: err?.message }, 'Shadow heartbeat failed (non-fatal)');
+    }
+
     // Dispatch parent if needed (after delivery so Ponder has indexed this job's completion)
     await dispatchParentIfNeeded(finalStatus, metadata!, target.id, result?.output || '', {
       telemetry,
