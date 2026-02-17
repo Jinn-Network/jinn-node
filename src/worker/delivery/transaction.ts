@@ -4,12 +4,197 @@
 
 import { deliverViaSafe } from '@jinn-network/mech-client-ts/dist/post_deliver.js';
 import { Web3 } from 'web3';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
 import { workerLogger } from '../../logging/index.js';
 import { getOptionalMechChainConfig, getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
 import { getServiceSafeAddress, getServicePrivateKey } from '../../env/operate-profile.js';
 import type { UnclaimedRequest, AgentExecutionResult, FinalStatus, IpfsMetadata, RecognitionPhaseResult, ReflectionResult } from '../types.js';
 import { buildDeliveryPayload } from './payload.js';
 import { checkDeliveryStatusViaPonder } from './ponderVerification.js';
+
+/**
+ * Known Safe error codes for decoding revert reasons
+ */
+const SAFE_ERROR_CODES: Record<string, string> = {
+  GS000: 'Could not finish initialization',
+  GS001: 'Threshold needs to be defined',
+  GS010: 'Not enough gas to execute Safe transaction',
+  GS011: 'Could not pay gas costs with ether',
+  GS012: 'Could not pay gas costs with token',
+  GS013: 'Safe transaction failed when gasPrice and safeTxGas were 0',
+  GS020: 'Signatures data too short',
+  GS021: 'Invalid contract signature location: inside static part',
+  GS022: 'Invalid contract signature location: length not present',
+  GS023: 'Invalid contract signature provided',
+  GS024: 'Invalid owner provided by ecrecover (address(0))',
+  GS025: 'Invalid owner provided by ecrecover (not an owner)',
+  GS026: 'Invalid owner provided',
+  GS030: 'Only owners can approve a hash',
+  GS031: 'Method can only be called from this Safe',
+};
+
+/**
+ * Decode revert data from a failed Safe transaction.
+ * Returns a human-readable string or null if decoding fails.
+ */
+function decodeSafeRevertData(data: string | undefined): string | null {
+  if (!data || data === '0x') return null;
+
+  // Check for standard Error(string) selector: 0x08c379a2
+  if (data.startsWith('0x08c379a2') && data.length >= 138) {
+    try {
+      const web3 = new Web3();
+      const decoded = web3.eth.abi.decodeParameter('string', '0x' + data.slice(10));
+      const reason = String(decoded);
+      const safeExplanation = SAFE_ERROR_CODES[reason] || '';
+      return safeExplanation ? `${reason}: ${safeExplanation}` : reason;
+    } catch { /* fall through */ }
+  }
+
+  // Check for Panic(uint256) selector: 0x4e487b71
+  if (data.startsWith('0x4e487b71') && data.length >= 74) {
+    try {
+      const web3 = new Web3();
+      const code = web3.eth.abi.decodeParameter('uint256', '0x' + data.slice(10));
+      return `Panic(${code})`;
+    } catch { /* fall through */ }
+  }
+
+  // Check for custom error selectors (first 4 bytes)
+  const selector = data.slice(0, 10);
+  return `Unknown revert (selector: ${selector}, data length: ${data.length} bytes)`;
+}
+
+/**
+ * Simulate a Safe execTransaction via eth_call to capture revert data.
+ * This replicates the same logic as deliverViaSafe but uses eth_call
+ * instead of estimateGas/sendTransaction, giving us the actual revert reason.
+ */
+async function simulateSafeDelivery(params: {
+  requestId: string;
+  targetMechAddress: string;
+  safeAddress: string;
+  privateKey: string;
+  rpcHttpUrl: string;
+}): Promise<{ success: boolean; revertReason?: string; revertData?: string }> {
+  const { requestId, targetMechAddress, safeAddress, privateKey, rpcHttpUrl } = params;
+  const logger = workerLogger.child({ component: 'safe-simulation', requestId });
+
+  try {
+    const web3 = new Web3(rpcHttpUrl);
+
+    // Load ABIs from mech-client-ts
+    let mechAbi: any;
+    let safeAbi: any;
+    try {
+      // Resolve from mech-client-ts package
+      const mechClientPath = dirname(require.resolve('@jinn-network/mech-client-ts/dist/post_deliver.js'));
+      const mechAbiRaw = JSON.parse(readFileSync(join(mechClientPath, 'abis', 'AgentMech.json'), 'utf8'));
+      const safeAbiRaw = JSON.parse(readFileSync(join(mechClientPath, 'abis', 'GnosisSafe_v1.3.0.json'), 'utf8'));
+      mechAbi = mechAbiRaw.abi || mechAbiRaw;
+      safeAbi = safeAbiRaw.abi || safeAbiRaw;
+    } catch (abiErr: any) {
+      logger.warn({ error: abiErr.message }, 'Failed to load ABIs for simulation; skipping');
+      return { success: false, revertReason: `ABI load failed: ${abiErr.message}` };
+    }
+
+    const agentMech = new web3.eth.Contract(mechAbi, web3.utils.toChecksumAddress(targetMechAddress));
+    const safe = new web3.eth.Contract(safeAbi, web3.utils.toChecksumAddress(safeAddress));
+
+    // Build inner deliverToMarketplace calldata with a dummy digest (32 zero bytes)
+    // The actual digest doesn't matter — we're testing the Safe wrapping, not the mech logic
+    const requestIdHex = String(requestId).startsWith('0x')
+      ? String(requestId)
+      : '0x' + BigInt(String(requestId)).toString(16);
+    const requestIdBytes32 = '0x' + BigInt(requestIdHex).toString(16).padStart(64, '0');
+    const dummyDigest = '0x' + '00'.repeat(32);
+
+    const innerCallData = agentMech.methods.deliverToMarketplace(
+      [requestIdBytes32],
+      [dummyDigest]
+    ).encodeABI();
+
+    // Get Safe nonce
+    const nonce = Number(await (safe.methods as any).nonce().call());
+
+    // Prepare execTransaction params (same as mech-client-ts)
+    const execParams = {
+      to: web3.utils.toChecksumAddress(targetMechAddress),
+      value: 0,
+      data: innerCallData,
+      operation: 0, // CALL
+      safeTxGas: 0,
+      baseGas: 0,
+      gasPrice: 0,
+      gasToken: '0x0000000000000000000000000000000000000000',
+      refundReceiver: '0x0000000000000000000000000000000000000000',
+    };
+
+    // Compute transaction hash
+    const txHashToSign = String(await (safe.methods as any).getTransactionHash(
+      execParams.to, execParams.value, execParams.data, execParams.operation,
+      execParams.safeTxGas, execParams.baseGas, execParams.gasPrice,
+      execParams.gasToken, execParams.refundReceiver, nonce
+    ).call());
+
+    // Sign with EOA private key (eth_sign semantics, v+4 for Safe)
+    const account = web3.eth.accounts.privateKeyToAccount(privateKey);
+    const signedMsg = account.sign(txHashToSign);
+    const vAdjusted = Number(signedMsg.v) + 4;
+    const signature = '0x' +
+      signedMsg.r.slice(2) +
+      signedMsg.s.slice(2) +
+      vAdjusted.toString(16).padStart(2, '0');
+
+    // Encode full execTransaction call
+    const execCallData = (safe.methods as any).execTransaction(
+      execParams.to, execParams.value, execParams.data, execParams.operation,
+      execParams.safeTxGas, execParams.baseGas, execParams.gasPrice,
+      execParams.gasToken, execParams.refundReceiver, signature
+    ).encodeABI();
+
+    // Simulate via eth_call
+    logger.info({
+      safeAddress,
+      safeNonce: nonce,
+      signerAddress: account.address,
+      targetMechAddress,
+    }, 'Running Safe execTransaction simulation via eth_call');
+
+    const result = await web3.eth.call({
+      to: safeAddress,
+      from: account.address,
+      data: execCallData,
+    });
+
+    // If we get here, the call succeeded
+    // Decode the boolean return value
+    const decoded = web3.eth.abi.decodeParameter('bool', result);
+    logger.info({ result, decoded }, 'Safe simulation succeeded');
+    return { success: Boolean(decoded) };
+
+  } catch (err: any) {
+    // Extract revert data from the error
+    const revertData = err.data || err.innerError?.data || err.cause?.data;
+    const revertReason = decodeSafeRevertData(revertData);
+
+    logger.error({
+      revertData,
+      revertReason,
+      errorMessage: err.message,
+      errorCode: err.code,
+      innerError: err.innerError?.message,
+      cause: err.cause?.message,
+    }, `Safe simulation FAILED: ${revertReason || err.message}`);
+
+    return {
+      success: false,
+      revertReason: revertReason || err.message,
+      revertData: revertData || undefined,
+    };
+  }
+}
 
 /**
  * Custom error for RPC verification failures
@@ -404,7 +589,30 @@ export async function deliverViaSafeTransaction(
   } as const;
 
   workerLogger.info({ requestId: context.requestId }, '[DELIVERY_DEBUG] Starting delivery transaction attempt');
-  
+
+  // Pre-flight: simulate the Safe execTransaction via eth_call to capture revert data
+  // This helps diagnose generic "execution reverted" errors from estimateGas
+  try {
+    const simResult = await simulateSafeDelivery({
+      requestId: context.requestId,
+      targetMechAddress,
+      safeAddress,
+      privateKey,
+      rpcHttpUrl,
+    });
+    if (!simResult.success) {
+      workerLogger.error({
+        requestId: context.requestId,
+        revertReason: simResult.revertReason,
+        revertData: simResult.revertData,
+      }, `[DELIVERY_PREFLIGHT] Safe simulation FAILED — ${simResult.revertReason}. Proceeding with actual delivery for full error context.`);
+    } else {
+      workerLogger.info({ requestId: context.requestId }, '[DELIVERY_PREFLIGHT] Safe simulation OK');
+    }
+  } catch (simErr: any) {
+    workerLogger.warn({ requestId: context.requestId, error: simErr.message }, '[DELIVERY_PREFLIGHT] Simulation threw unexpectedly; proceeding with delivery');
+  }
+
   // Get agent wallet address for nonce debugging
   const web3ForNonce = new Web3(rpcHttpUrl || getRequiredRpcUrl());
   const agentAccount = web3ForNonce.eth.accounts.privateKeyToAccount(privateKey);
@@ -477,20 +685,27 @@ export async function deliverViaSafeTransaction(
         lastError = e;
 
         // Extract detailed error info for debugging
+        const rawRevertData = e.data || e.innerError?.data || e.cause?.data;
+        const decodedRevert = decodeSafeRevertData(rawRevertData);
         const errorDetails = {
           message: e.message,
           code: e.code,
           reason: e.reason,
           data: e.data,
+          rawRevertData,
+          decodedRevert,
           // Web3 specific
           innerError: e.innerError?.message,
+          innerErrorData: e.innerError?.data,
           cause: e.cause?.message,
+          causeData: e.cause?.data,
           // Transaction details if available
           receipt: e.receipt ? { status: e.receipt.status, gasUsed: e.receipt.gasUsed?.toString() } : undefined,
           // Stack trace (first 500 chars)
           stack: e.stack?.slice(0, 500),
         };
-        workerLogger.error({ requestId: context.requestId, attempt, errorDetails }, 'Safe delivery error details');
+        workerLogger.error({ requestId: context.requestId, attempt, errorDetails },
+          `Safe delivery error: ${decodedRevert || e.message}`);
 
         // Only retry on specific transient errors
         if (e.message?.includes('nonce too low') || e.message?.includes('replacement transaction underpriced')) {
