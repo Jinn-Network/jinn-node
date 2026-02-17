@@ -38,7 +38,10 @@ interface OutputField {
 }
 
 /**
- * OutputSpec structure from blueprint
+ * OutputSpec structure — supports multiple formats:
+ * - { fields: [...] } — venture-foundry style
+ * - { schema: { properties, required } } — x402 gateway style (nested)
+ * - { type: "object", properties, required } — raw JSON Schema (template output_spec column)
  */
 interface OutputSpec {
   version?: string;
@@ -48,6 +51,10 @@ interface OutputSpec {
     properties?: Record<string, { type: string; description?: string }>;
     required?: string[];
   };
+  // Raw JSON Schema format (top-level properties/required)
+  type?: string;
+  properties?: Record<string, { type: string; description?: string }>;
+  required?: string[];
 }
 
 /**
@@ -70,7 +77,8 @@ export class OutputInvariantProvider implements InvariantProvider {
       return [];
     }
 
-    // Parse the blueprint to extract outputSpec
+    // Extract outputSpec: check blueprint.outputSpec first, fall back to metadata.outputSpec
+    // (venture dispatches put outputSpec as a sibling of blueprint, not inside it)
     let outputSpec: OutputSpec | undefined;
     try {
       const blueprint = typeof blueprintStr === 'object'
@@ -79,7 +87,10 @@ export class OutputInvariantProvider implements InvariantProvider {
       outputSpec = blueprint.outputSpec;
     } catch {
       // Invalid blueprint JSON - GoalInvariantProvider will handle the error
-      return [];
+    }
+
+    if (!outputSpec && ctx.metadata?.outputSpec) {
+      outputSpec = ctx.metadata.outputSpec as OutputSpec;
     }
 
     if (!outputSpec) {
@@ -149,10 +160,23 @@ export class OutputInvariantProvider implements InvariantProvider {
       }
     }
 
-    // Check for schema format (x402 gateway style)
+    // Check for nested schema format (x402 gateway style: { schema: { properties, required } })
     if (outputSpec.schema?.properties) {
       const requiredSet = new Set(outputSpec.schema.required || []);
       for (const [name, prop] of Object.entries(outputSpec.schema.properties)) {
+        fields.push({
+          name,
+          type: prop.type,
+          required: requiredSet.has(name),
+          description: prop.description || 'No description',
+        });
+      }
+    }
+
+    // Check for raw JSON Schema format (template output_spec column: { type, properties, required })
+    if (!outputSpec.schema && !outputSpec.fields && outputSpec.properties) {
+      const requiredSet = new Set(outputSpec.required || []);
+      for (const [name, prop] of Object.entries(outputSpec.properties)) {
         fields.push({
           name,
           type: prop.type,
