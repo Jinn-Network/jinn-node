@@ -155,9 +155,9 @@ async function createPaymentHeader(opts: {
  * Handles x402 payment if the provider requires it.
  */
 export async function getCredential(provider: string): Promise<string> {
-  // Check cache (with 5-minute buffer)
+  // Check cache (with 10-minute buffer to avoid mid-request expiry)
   const cached = tokenCache.get(provider);
-  if (cached && cached.expiresAt > Date.now() + 5 * 60 * 1000) {
+  if (cached && cached.expiresAt > Date.now() + 10 * 60 * 1000) {
     return cached.token;
   }
 
