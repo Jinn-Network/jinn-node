@@ -6,6 +6,7 @@ import { deliverViaSafe } from '@jinn-network/mech-client-ts/dist/post_deliver.j
 import { Web3 } from 'web3';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
+import { createRequire } from 'module';
 import { workerLogger } from '../../logging/index.js';
 import { getOptionalMechChainConfig, getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
 import { getServiceSafeAddress, getServicePrivateKey } from '../../env/operate-profile.js';
@@ -41,8 +42,8 @@ const SAFE_ERROR_CODES: Record<string, string> = {
 function decodeSafeRevertData(data: string | undefined): string | null {
   if (!data || data === '0x') return null;
 
-  // Check for standard Error(string) selector: 0x08c379a2
-  if (data.startsWith('0x08c379a2') && data.length >= 138) {
+  // Check for standard Error(string) selector: 0x08c379a0
+  if (data.startsWith('0x08c379a0') && data.length >= 138) {
     try {
       const web3 = new Web3();
       const decoded = web3.eth.abi.decodeParameter('string', '0x' + data.slice(10));
@@ -88,8 +89,9 @@ async function simulateSafeDelivery(params: {
     let mechAbi: any;
     let safeAbi: any;
     try {
-      // Resolve from mech-client-ts package
-      const mechClientPath = dirname(require.resolve('@jinn-network/mech-client-ts/dist/post_deliver.js'));
+      // Resolve from mech-client-ts package (use createRequire for ESM compatibility)
+      const esmRequire = createRequire(import.meta.url);
+      const mechClientPath = dirname(esmRequire.resolve('@jinn-network/mech-client-ts/dist/post_deliver.js'));
       const mechAbiRaw = JSON.parse(readFileSync(join(mechClientPath, 'abis', 'AgentMech.json'), 'utf8'));
       const safeAbiRaw = JSON.parse(readFileSync(join(mechClientPath, 'abis', 'GnosisSafe_v1.3.0.json'), 'utf8'));
       mechAbi = mechAbiRaw.abi || mechAbiRaw;
