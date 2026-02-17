@@ -90,7 +90,7 @@ async function getRequestDeficit(
   const requestsThisEpoch = currentRequestCount - baselineRequestCount;
   const deficit = Math.max(0, TARGET_WITH_MARGIN - requestsThisEpoch);
 
-  log.debug({
+  log.info({
     multisig,
     baseline: baselineRequestCount,
     current: currentRequestCount,
@@ -156,16 +156,18 @@ let lastHeartbeatTimestamp = 0;
  * Submits a batch of requests per call to compensate for slow worker cycles.
  */
 export async function maybeSubmitHeartbeat(stakingContract: string): Promise<void> {
+  log.info({ stakingContract, serviceId: SERVICE_ID }, 'Heartbeat check starting');
   const mechAddress = getMechAddress();
 
   if (!mechAddress) {
-    log.debug('No mech address — skipping heartbeat');
+    log.warn('No mech address — skipping heartbeat');
     return;
   }
 
   // Throttle: don't submit more often than HEARTBEAT_MIN_INTERVAL_SEC
   const now = Math.floor(Date.now() / 1000);
   if (now - lastHeartbeatTimestamp < HEARTBEAT_MIN_INTERVAL_SEC) {
+    log.info({ secondsSinceLast: now - lastHeartbeatTimestamp, minInterval: HEARTBEAT_MIN_INTERVAL_SEC }, 'Heartbeat throttled');
     return;
   }
 
@@ -173,13 +175,13 @@ export async function maybeSubmitHeartbeat(stakingContract: string): Promise<voi
     const { deficit, current, epochSecondsRemaining, multisig } = await getRequestDeficit(stakingContract);
 
     if (deficit <= 0) {
-      log.debug({ current, deficit: 0 }, 'Request target met for this epoch — no heartbeat needed');
+      log.info({ current, deficit: 0 }, 'Request target met for this epoch — no heartbeat needed');
       return;
     }
 
     // Don't submit if epoch is almost over (< 5 min) — let checkpoint handle it
     if (epochSecondsRemaining < 300) {
-      log.debug({ epochSecondsRemaining, deficit }, 'Epoch ending soon — skipping heartbeat');
+      log.info({ epochSecondsRemaining, deficit }, 'Epoch ending soon — skipping heartbeat');
       return;
     }
 
