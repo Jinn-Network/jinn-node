@@ -29,9 +29,7 @@ export const SERVICE_CONSTANTS = {
   DEFAULT_SERVICE_BOND_WEI: "50000000000000000000", // 50 ETH in wei (Pearl template)
   
   // Fund requirements (wei as integers for middleware)
-  // Agent must cover marketplace dispatch payment + gas.
-  // 0.005 ETH was insufficient in practice for E2E dispatch flows.
-  DEFAULT_AGENT_FUNDING_WEI: 50000000000000000, // 0.05 ETH for gas + dispatch headroom
+  DEFAULT_AGENT_FUNDING_WEI: 5000000000000000, // 0.005 ETH for gas
   DEFAULT_SAFE_FUNDING_WEI: 1628500000000000, // 0.0016285 ETH for gas
   
   // OLAS token requirements (Base mainnet: 0x54330d28ca3357F294334BDC454a032e7f353416)

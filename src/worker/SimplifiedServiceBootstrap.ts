@@ -55,7 +55,7 @@ export interface SimplifiedBootstrapConfig {
   mechMarketplaceAddress?: string;
   /**
    * Mech request price in wei (e.g., '5000000000000' for 0.000005 ETH)
-   * Defaults to '10000000000000000' (0.01 ETH) if not specified
+   * Defaults to '5000000000000' (0.000005 ETH) if not specified
    */
   mechRequestPrice?: string;
   /**
@@ -225,11 +225,11 @@ export class SimplifiedServiceBootstrap {
   }
 
   /**
-   * Run the complete bootstrap process using middleware's native attended mode
+   * Run the complete bootstrap process using middleware's configured attended mode.
    */
   async bootstrap(): Promise<SimplifiedBootstrapResult> {
     try {
-      // Step 1: Create operate wrapper with ATTENDED=true
+      // Step 1: Create operate wrapper with configured ATTENDED mode
       await this.initializeWrapper();
       
       // Step 2: Create service config
@@ -251,7 +251,7 @@ export class SimplifiedServiceBootstrap {
   }
 
   /**
-   * Initialize OlasOperateWrapper with ATTENDED=true configuration
+   * Initialize OlasOperateWrapper with configured ATTENDED mode.
    */
   private async initializeWrapper(): Promise<void> {
     const effectiveRpcUrl = this.config.tenderlyRpcUrl || this.config.rpcUrl;
@@ -341,7 +341,7 @@ export class SimplifiedServiceBootstrap {
     
     // Add mech configuration if requested
     if (this.config.deployMech) {
-      const mechPrice = this.config.mechRequestPrice || '10000000000000000'; // Default: 0.01 ETH
+      const mechPrice = this.config.mechRequestPrice || '5000000000000'; // Default: 0.000005 ETH
       bootstrapLogger.info({ mechRequestPrice: mechPrice }, "Enabling mech marketplace deployment");
       enableMechMarketplaceInConfig(
         serviceConfig,
