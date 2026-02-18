@@ -27,6 +27,9 @@ const LEGACY_MODEL_ALIASES: Record<string, string> = {
   // Gemini 2.0 Flash variants — removed from Google API as of Feb 2026
   'gemini-2.0-flash-001': 'gemini-3-flash',
   'gemini-2.0-flash': 'gemini-3-flash',
+  // Gemini 2.0 Pro experimental variants — removed from Google API as of Feb 2026
+  'gemini-2.0-pro-exp-02-05': 'gemini-3-flash',
+  'gemini-2.0-pro-exp': 'gemini-3-flash',
 };
 
 /**
@@ -41,6 +44,9 @@ const DEPRECATED_MODELS = new Set([
   // Gemini 2.0 Flash variants — removed from Google API as of Feb 2026
   'gemini-2.0-flash-001',
   'gemini-2.0-flash',
+  // Gemini 2.0 Pro experimental variants — removed from Google API as of Feb 2026
+  'gemini-2.0-pro-exp-02-05',
+  'gemini-2.0-pro-exp',
 ]);
 
 /**
@@ -49,6 +55,10 @@ const DEPRECATED_MODELS = new Set([
 function matchesDeprecatedPattern(model: string): boolean {
   // All gemini-2.0-flash-thinking experimental models are deprecated
   if (model.startsWith('gemini-2.0-flash-thinking')) {
+    return true;
+  }
+  // All gemini-2.0-pro-exp experimental models are deprecated
+  if (model.startsWith('gemini-2.0-pro-exp')) {
     return true;
   }
   return false;
@@ -114,6 +124,16 @@ export function normalizeGeminiModel(
       normalized: aliasTarget,
       changed: aliasTarget !== requested,
       reason: `legacy_alias:${stripped}`,
+    };
+  }
+
+  // Pattern-match deprecated models not in the explicit alias map
+  if (matchesDeprecatedPattern(stripped)) {
+    return {
+      requested,
+      normalized: defaultModel,
+      changed: true,
+      reason: `deprecated_pattern:${stripped}`,
     };
   }
 
