@@ -53,9 +53,11 @@ async function signedBridgePost(
   headers: Record<string, string> = {},
 ): Promise<Response> {
   const signer = await getBridgeSigner();
-  // Deterministic idempotency key from provider + requestId
+  // Deterministic idempotency key from provider + requestId.
+  // Gateway validates: /^[a-zA-Z0-9_-]{1,64}$/ — no colons or dots allowed.
   const provider = url.split('/credentials/').pop() || 'unknown';
-  const idempotencyKey = `cred:${provider}:${body.requestId || 'no-request'}`;
+  const requestSlug = (body.requestId || 'no-request').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40);
+  const idempotencyKey = `cred-${provider}-${requestSlug}`;
 
   const request = await signRequestWithErc8128({
     signer,

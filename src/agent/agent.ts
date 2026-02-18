@@ -800,8 +800,10 @@ export class Agent {
         args.push('--debug');
       }
 
-      // Telemetry outfile - use os.tmpdir() to ensure Seatbelt sandbox allows writes
-      const telemetryFile = join(tmpdir(), `telemetry-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.json`);
+      // Telemetry outfile — JINN_TELEMETRY_DIR overrides tmpdir() so Docker can mount
+      // a host volume for telemetry without polluting TMPDIR with non-telemetry temp files.
+      const telemetryDir = process.env.JINN_TELEMETRY_DIR || tmpdir();
+      const telemetryFile = join(telemetryDir, `telemetry-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.json`);
       this.lastTelemetryFile = telemetryFile;
 
       // Persist the last prompt locally for debugging/repro
