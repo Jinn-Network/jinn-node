@@ -14,10 +14,13 @@ export interface VentureTemplate {
   description: string | null;
   version: string;
   blueprint: object;
+  input_schema: object;
+  output_spec: object;
   enabled_tools: string[];
-  tags: string[];
   model: string;
+  safety_tier: 'public' | 'private' | 'restricted';
   venture_id: string | null;
+  olas_agent_id: number | null;
   status: string;
   created_at: string;
   updated_at: string;
