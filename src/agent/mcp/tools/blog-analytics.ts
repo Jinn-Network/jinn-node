@@ -5,13 +5,15 @@
  * enabling data-driven content strategy decisions.
  *
  * Environment variables:
- * - UMAMI_HOST: Umami API host (e.g., https://analytics.example.com)
- * - UMAMI_WEBSITE_ID: Umami website ID
- * - UMAMI_API_KEY: Umami API key for authentication
+ * - JINN_JOB_UMAMI_WEBSITE_ID: Venture-scoped Umami website ID
+ *
+ * Credential bridge:
+ * - Provider: umami
+ * - Static config: UMAMI_HOST
  */
 
 import { z } from 'zod';
-import { getCredential } from '../../shared/credential-client.js';
+import { getCredentialBundle } from '../../shared/credential-client.js';
 
 // ============================================
 // Type Definitions
@@ -61,7 +63,7 @@ export const blogGetStatsSchema = {
 Returns pageviews, visitors, visits, bounces, and total time with
 current and previous period values for trend comparison.
 
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_WEBSITE_ID, UMAMI_USERNAME, UMAMI_PASSWORD
+REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
 
 Returns: {
   stats: { pageviews, visitors, visits, bounces, totaltime },
@@ -81,7 +83,7 @@ export const blogGetTopPagesSchema = {
 Use this to identify popular content and understand what resonates with readers.
 Pages are sorted by view count in descending order.
 
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_WEBSITE_ID, UMAMI_USERNAME, UMAMI_PASSWORD
+REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
 
 Returns: { pages: [{ url, views }], count, period }`,
   inputSchema: blogGetTopPagesParams.shape,
@@ -98,7 +100,7 @@ export const blogGetReferrersSchema = {
 Shows where readers are coming from (search engines, social media, direct links, etc.).
 Use this to understand traffic sources and optimize distribution strategy.
 
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_WEBSITE_ID, UMAMI_USERNAME, UMAMI_PASSWORD
+REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
 
 Returns: { referrers: [{ source, visits }], count, period }`,
   inputSchema: blogGetReferrersParams.shape,
@@ -123,7 +125,7 @@ Types available:
 - country: Geographic distribution
 - event: Custom events
 
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_WEBSITE_ID, UMAMI_USERNAME, UMAMI_PASSWORD
+REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
 
 Returns: { metrics: [{ name, count }], type, count, period }`,
   inputSchema: blogGetMetricsParams.shape,
@@ -140,7 +142,7 @@ export const blogGetPageviewsSchema = {
 Returns daily or hourly pageviews and sessions over the specified period.
 Useful for visualizing traffic trends and identifying patterns.
 
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_WEBSITE_ID, UMAMI_USERNAME, UMAMI_PASSWORD
+REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
 
 Returns: { pageviews: [{ date, count }], sessions: [{ date, count }], period }`,
   inputSchema: blogGetPageviewsParams.shape,
@@ -163,7 +165,7 @@ ANALYSIS TIPS:
 - Cross-reference top pages with referrers to understand traffic sources
 - Use this data to inform future content topics and distribution
 
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_WEBSITE_ID, UMAMI_USERNAME, UMAMI_PASSWORD
+REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
 
 Returns: { stats, topPages, referrers, period, insights }`,
   inputSchema: blogGetPerformanceSummaryParams.shape,
@@ -176,23 +178,26 @@ Returns: { stats, topPages, referrers, period, insights }`,
 interface UmamiConfig {
   host: string;
   websiteId: string;
+  token: string;
 }
 
-function getUmamiConfig(): UmamiConfig {
-  const host = process.env.UMAMI_HOST;
-  const websiteId = process.env.UMAMI_WEBSITE_ID;
+async function getUmamiConfig(): Promise<UmamiConfig> {
+  const bundle = await getCredentialBundle('umami');
+  const host = bundle.config.UMAMI_HOST;
+  const websiteId = process.env.JINN_JOB_UMAMI_WEBSITE_ID;
 
   const missing: string[] = [];
-  if (!host) missing.push('UMAMI_HOST');
-  if (!websiteId) missing.push('UMAMI_WEBSITE_ID');
+  if (!host) missing.push('credential bridge config UMAMI_HOST');
+  if (!websiteId) missing.push('JINN_JOB_UMAMI_WEBSITE_ID');
 
   if (missing.length > 0) {
-    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+    throw new Error(`Missing required Umami configuration: ${missing.join(', ')}`);
   }
 
   return {
     host: host!.replace(/\/$/, ''),
     websiteId: websiteId!,
+    token: bundle.access_token,
   };
 }
 
@@ -201,7 +206,6 @@ async function umamiApiCall<T>(
   config: UmamiConfig,
   params?: Record<string, string>
 ): Promise<T> {
-  const token = await getCredential('umami');
   const url = new URL(`${config.host}/api/websites/${config.websiteId}${endpoint}`);
 
   if (params) {
@@ -212,7 +216,7 @@ async function umamiApiCall<T>(
 
   const response = await fetch(url.toString(), {
     headers: {
-      'Authorization': `Bearer ${token}`,
+      'Authorization': `Bearer ${config.token}`,
       'Content-Type': 'application/json',
     },
   });
@@ -312,7 +316,7 @@ export async function blogGetStats(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig();
+    const config = await getUmamiConfig();
     const { days } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -359,7 +363,7 @@ export async function blogGetTopPages(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig();
+    const config = await getUmamiConfig();
     const { days, limit } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -415,7 +419,7 @@ export async function blogGetReferrers(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig();
+    const config = await getUmamiConfig();
     const { days, limit } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -471,7 +475,7 @@ export async function blogGetMetrics(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig();
+    const config = await getUmamiConfig();
     const { type, days, limit } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -528,7 +532,7 @@ export async function blogGetPageviews(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig();
+    const config = await getUmamiConfig();
     const { days, unit } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -579,7 +583,7 @@ export async function blogGetPerformanceSummary(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig();
+    const config = await getUmamiConfig();
     const { days } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
     const timeParams = getTimeParams(startAt, endAt);

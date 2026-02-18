@@ -239,7 +239,7 @@ export function getEnabledExtensions(enabledTools: string[]): ExtensionMetaTool[
 
 /**
  * Telegram messaging tools (custom MCP tools)
- * Reads chat_id from TELEGRAM_CHAT_ID env var
+ * Reads chat_id from JINN_JOB_TELEGRAM_CHAT_ID payload env var
  */
 export const TELEGRAM_TOOLS = [
   'telegram_send_message',
@@ -398,7 +398,9 @@ export const VALID_JOB_TOOLS: ReadonlySet<string> = new Set([
   // Civitai (shared/civitai.ts → getCredential('civitai'))
   'civitai_generate_image',
   // Twitter (twitter-social.ts → getCredential('twitter'))
-  'verify_trade_ideas',
+  'twitter_post_tweet',
+  'twitter_get_mentions',
+  'twitter_get_timeline',
 ]);
 
 /**
@@ -529,4 +531,3 @@ export function computeToolPolicy(
     cliAllowedTools: uniqueCliAllowedTools
   };
 }
-

@@ -5,9 +5,8 @@
  * Chat ID and Topic ID are configured via environment variables, not passed by agent.
  *
  * Environment variables:
- * - TELEGRAM_BOT_TOKEN: Bot API token from @BotFather
- * - TELEGRAM_CHAT_ID: Target chat ID (group, channel, or user)
- * - TELEGRAM_TOPIC_ID: (Optional) Forum topic/thread ID for supergroups
+ * - JINN_JOB_TELEGRAM_CHAT_ID: Target chat ID (group, channel, or user)
+ * - JINN_JOB_TELEGRAM_TOPIC_ID: (Optional) Forum topic/thread ID for supergroups
  */
 
 import { z } from 'zod';
@@ -85,11 +84,11 @@ Returns: { message_id, chat_id, date } on success`,
 
 async function getTelegramConfig() {
     const botToken = await getCredential('telegram');
-    const chatId = process.env.TELEGRAM_CHAT_ID;
-    const topicIdRaw = process.env.TELEGRAM_TOPIC_ID;
+    const chatId = process.env.JINN_JOB_TELEGRAM_CHAT_ID;
+    const topicIdRaw = process.env.JINN_JOB_TELEGRAM_TOPIC_ID;
 
     if (!chatId) {
-        throw new Error('Missing required environment variable: TELEGRAM_CHAT_ID');
+        throw new Error('Missing required environment variable: JINN_JOB_TELEGRAM_CHAT_ID');
     }
 
     // Parse topic ID as number if provided

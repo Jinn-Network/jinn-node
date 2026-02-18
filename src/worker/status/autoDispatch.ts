@@ -26,15 +26,15 @@ import { claimParentDispatch } from '../control_api_client.js';
 
 /**
  * Get inherited environment variables for workstream-level config propagation.
- * This ensures env vars like TELEGRAM_CHAT_ID flow through the entire job hierarchy.
+ * This ensures venture-scoped JINN_JOB_* vars flow through the entire job hierarchy.
  */
 export function getInheritedEnv(): Record<string, string> {
-  const envJson = process.env.JINN_INHERITED_ENV;
+  const envJson = process.env.JINN_CTX_INHERITED_ENV;
   if (!envJson) return {};
   try {
     return JSON.parse(envJson);
   } catch {
-    workerLogger.warn('Failed to parse JINN_INHERITED_ENV');
+    workerLogger.warn('Failed to parse JINN_CTX_INHERITED_ENV');
     return {};
   }
 }

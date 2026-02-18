@@ -40,7 +40,7 @@ export async function sendMessage(params: z.infer<typeof sendMessageParams>) {
             meta: {
               ok: false,
               code: 'NO_JOB_DEFINITION_CONTEXT',
-              message: 'Cannot send message: missing parent job definition in context. Ensure the worker passes JINN_JOB_DEFINITION_ID.'
+              message: 'Cannot send message: missing parent job definition in context. Ensure the worker passes JINN_CTX_JOB_DEFINITION_ID.'
             }
           })
         }]
@@ -62,8 +62,8 @@ export async function sendMessage(params: z.infer<typeof sendMessageParams>) {
     // If context carries project definition, include it
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
-    if (process.env.JINN_PROJECT_DEFINITION_ID) {
-      payload.project_definition_id = process.env.JINN_PROJECT_DEFINITION_ID;
+    if (process.env.JINN_CTX_PROJECT_DEFINITION_ID) {
+      payload.project_definition_id = process.env.JINN_CTX_PROJECT_DEFINITION_ID;
     }
 
     // Enforce DB-function-only write path

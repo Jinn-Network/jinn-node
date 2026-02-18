@@ -37,7 +37,7 @@ Writes an MDX file with proper frontmatter directly to the filesystem.
 The post will be included in the next commit when the job completes.
 Changes are pushed when the worker's git workflow runs (auto-commit + push).
 
-Returns a URL in the format https://{BLOG_DOMAIN}/blog/{slug} if BLOG_DOMAIN is set.
+Returns a URL in the format https://{JINN_JOB_BLOG_DOMAIN}/blog/{slug} if JINN_JOB_BLOG_DOMAIN is set.
 Note: The URL will only be live after changes are deployed to production.
 
 USAGE:
@@ -61,7 +61,7 @@ export const blogListPostsSchema = {
 Returns file names and basic metadata for posts in the blog directory.
 Use this to check what content exists before creating new posts.
 
-Each post includes a URL field (https://{BLOG_DOMAIN}/blog/{slug}) if BLOG_DOMAIN is set.
+Each post includes a URL field (https://{JINN_JOB_BLOG_DOMAIN}/blog/{slug}) if JINN_JOB_BLOG_DOMAIN is set.
 
 Returns: { posts: [{ name, slug, path, size, modified, url }], count }`,
   inputSchema: blogListPostsParams.shape,
@@ -300,8 +300,8 @@ export async function blogCreatePost(args: unknown) {
     // Write file to local filesystem
     fs.writeFileSync(fullPath, mdxContent, 'utf-8');
 
-    // Get blog domain from environment for full URL
-    const blogDomain = process.env.BLOG_DOMAIN;
+    // Get blog domain from job payload env for full URL
+    const blogDomain = process.env.JINN_JOB_BLOG_DOMAIN;
     const postUrl = blogDomain ? `https://${blogDomain}/blog/${slug}` : null;
 
     return {
@@ -369,8 +369,8 @@ export async function blogListPosts(args: unknown) {
 
     const entries = fs.readdirSync(fullPath, { withFileTypes: true });
 
-    // Get blog domain from environment for full URLs
-    const blogDomain = process.env.BLOG_DOMAIN;
+    // Get blog domain from job payload env for full URLs
+    const blogDomain = process.env.JINN_JOB_BLOG_DOMAIN;
 
     const posts = entries
       .filter((entry) => entry.isFile() && (entry.name.endsWith('.mdx') || entry.name.endsWith('.md')))

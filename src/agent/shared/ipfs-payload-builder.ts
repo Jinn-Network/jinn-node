@@ -18,6 +18,7 @@ import { ensureUniversalTools } from '../toolPolicy.js';
 import { parseAnnotatedTools, type TemplateToolSpec } from '../../shared/template-tools.js';
 import { DEFAULT_WORKER_MODEL, normalizeGeminiModel } from '../../shared/gemini-models.js';
 import { getCodeMetadataDefaultBaseBranch } from '../../config/index.js';
+import { assertValidJinnJobEnvMap } from '../../shared/job-env.js';
 import {
     ensureJobBranch,
     collectLocalCodeMetadata,
@@ -177,21 +178,26 @@ export async function buildIpfsPayload(
         };
     }
 
-    // Inherit parent's additionalContext.env for workstream-level config propagation
-    // This ensures env vars like UMAMI_WEBSITE_ID flow from root job to all children
-    const inheritedEnvJson = process.env.JINN_INHERITED_ENV;
+    // Inherit parent job payload env for workstream-level config propagation.
+    const inheritedEnvJson = process.env.JINN_CTX_INHERITED_ENV;
     if (inheritedEnvJson && !additionalContextOverrides?.env) {
+        let parsedInheritedEnv: unknown;
         try {
-            additionalContext.env = JSON.parse(inheritedEnvJson);
-        } catch {
-            console.warn('[buildIpfsPayload] Failed to parse JINN_INHERITED_ENV');
+            parsedInheritedEnv = JSON.parse(inheritedEnvJson);
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`Invalid JINN_CTX_INHERITED_ENV JSON: ${message}`);
         }
+        additionalContext.env = assertValidJinnJobEnvMap(parsedInheritedEnv, 'JINN_CTX_INHERITED_ENV');
     }
 
     // Merge additionalContextOverrides (human-only fields, takes precedence)
     if (additionalContextOverrides) {
         if (additionalContextOverrides.env) {
-            additionalContext.env = additionalContextOverrides.env;
+            additionalContext.env = assertValidJinnJobEnvMap(
+                additionalContextOverrides.env,
+                'additionalContextOverrides.env',
+            );
         }
         if (additionalContextOverrides.workspaceRepo) {
             additionalContext.workspaceRepo = additionalContextOverrides.workspaceRepo;

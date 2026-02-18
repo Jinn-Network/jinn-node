@@ -37,6 +37,7 @@ import { createSituationArtifactForRequest } from '../situation_artifact.js';
 import { createArtifact as apiCreateArtifact } from '../control_api_client.js';
 import { safeParseToolResponse } from '../tool_utils.js';
 import { getJinnWorkspaceDir, extractRepoName, getRepoRoot, normalizeSshUrl } from '../../shared/repo_utils.js';
+import { assertValidJinnJobEnvMap } from '../../shared/job-env.js';
 import { extractMemoryArtifacts } from '../reflection/memoryArtifacts.js';
 import { DEFAULT_WORKER_MODEL, normalizeGeminiModel, validateModelAllowed } from '../../shared/gemini-models.js';
 import type { UnclaimedRequest, IpfsMetadata, AgentExecutionResult, FinalStatus, ExecutionSummaryDetails, RecognitionPhaseResult, ReflectionResult, AdditionalContext } from '../types.js';
@@ -113,30 +114,24 @@ export async function processOnce(
         workstreamId: resolvedWorkstreamId
       }, 'Processing request');
 
-      // Inject environment variables from additionalContext.env
-      // Only vars matching JINN_JOB_* prefix are allowed to prevent env injection attacks
-      // (e.g. NODE_OPTIONS, GIT_SSH_COMMAND, HTTP_PROXY could hijack worker behavior)
+      // Inject environment variables from additionalContext.env.
+      // Invalid keys/values fail fast to avoid processing tampered payloads.
       if (metadata?.additionalContext?.env) {
-        const ALLOWED_ENV_PREFIX = /^JINN_JOB_[A-Z0-9_]+$/;
-        const filteredEnv: Record<string, string> = {};
+        const validatedEnv = assertValidJinnJobEnvMap(
+          metadata.additionalContext.env,
+          'metadata.additionalContext.env',
+        );
 
-        for (const [key, value] of Object.entries(metadata.additionalContext.env)) {
-          if (typeof value !== 'string') {
-            workerLogger.warn({ key, type: typeof value }, 'Skipped non-string environment variable');
-            continue;
-          }
-          if (ALLOWED_ENV_PREFIX.test(key)) {
-            process.env[key] = value;
-            filteredEnv[key] = value;
-            workerLogger.info({ key }, 'Injected job environment variable from additionalContext.env');
-          } else {
-            workerLogger.warn({ key }, 'Skipped environment variable: does not match JINN_JOB_* prefix');
-          }
+        for (const [key, value] of Object.entries(validatedEnv)) {
+          process.env[key] = value;
+          workerLogger.info({ key }, 'Injected job environment variable from additionalContext.env');
         }
 
-        // Store filtered vars as JSON for child job inheritance via dispatch_new_job
-        if (Object.keys(filteredEnv).length > 0) {
-          process.env.JINN_INHERITED_ENV = JSON.stringify(filteredEnv);
+        // Store injected vars as JSON for child job inheritance via dispatch_new_job.
+        if (Object.keys(validatedEnv).length > 0) {
+          process.env.JINN_CTX_INHERITED_ENV = JSON.stringify(validatedEnv);
+        } else {
+          delete process.env.JINN_CTX_INHERITED_ENV;
         }
       }
 
@@ -166,7 +161,7 @@ export async function processOnce(
 
       // Handle code metadata if present (artifact-only jobs may not have it)
       if (metadata?.codeMetadata) {
-        process.env.JINN_BASE_BRANCH = metadata.codeMetadata.branch?.name ||
+        process.env.JINN_CTX_BASE_BRANCH = metadata.codeMetadata.branch?.name ||
           metadata.codeMetadata.baseBranch ||
           DEFAULT_BASE_BRANCH;
 

@@ -6,17 +6,18 @@
  *
  * Environment variables:
  * - X402_GATEWAY_URL: URL of the x402-gateway (e.g., https://gateway.example.com)
- * - JINN_SIGNING_PROXY_URL: Signing proxy base URL
- * - JINN_SIGNING_PROXY_SECRET: Signing proxy bearer token
+ * - AGENT_SIGNING_PROXY_URL: Signing proxy base URL
+ * - AGENT_SIGNING_PROXY_TOKEN: Signing proxy bearer token
  */
 
 import { proxySignTypedData, proxyGetAddress, createProxyHttpSigner } from './signing-proxy-client.js';
 import { resolveChainId, signRequestWithErc8128, type Erc8128Signer } from '../../http/erc8128.js';
 
-interface CredentialResponse {
+export interface CredentialBundle {
   access_token: string;
   expires_in: number;
   provider: string;
+  config: Record<string, string>;
 }
 
 interface CredentialError {
@@ -28,8 +29,8 @@ interface BridgeCredentialRequest {
   requestId?: string;
 }
 
-// In-memory cache: provider → { token, expiresAt }
-const tokenCache = new Map<string, { token: string; expiresAt: number }>();
+// In-memory cache: provider → { bundle, expiresAt }
+const bundleCache = new Map<string, { bundle: CredentialBundle; expiresAt: number }>();
 
 // USDC contract addresses (6 decimals) — must match x402-verify.ts
 const USDC_ADDRESSES: Record<string, string> = {
@@ -150,17 +151,46 @@ async function createPaymentHeader(opts: {
   return Buffer.from(JSON.stringify(payload)).toString('base64');
 }
 
+function parseCredentialBundle(data: unknown, provider: string): CredentialBundle {
+  if (!data || typeof data !== 'object') {
+    throw new Error(`Credential bridge response for ${provider} must be a JSON object`);
+  }
+  const payload = data as Partial<CredentialBundle>;
+  if (typeof payload.access_token !== 'string' || payload.access_token.length === 0) {
+    throw new Error(`Credential bridge response for ${provider} is missing access_token`);
+  }
+  if (typeof payload.expires_in !== 'number' || !Number.isFinite(payload.expires_in) || payload.expires_in <= 0) {
+    throw new Error(`Credential bridge response for ${provider} has invalid expires_in`);
+  }
+  if (payload.provider !== provider) {
+    throw new Error(`Credential bridge response provider mismatch: expected ${provider}, got ${payload.provider ?? 'unknown'}`);
+  }
+  if (!payload.config || typeof payload.config !== 'object' || Array.isArray(payload.config)) {
+    throw new Error(`Credential bridge response for ${provider} is missing config`);
+  }
+  const configEntries = Object.entries(payload.config);
+  for (const [key, value] of configEntries) {
+    if (typeof value !== 'string') {
+      throw new Error(`Credential bridge config for ${provider} has non-string value at key ${key}`);
+    }
+  }
+
+  return {
+    access_token: payload.access_token,
+    expires_in: payload.expires_in,
+    provider: payload.provider,
+    config: Object.fromEntries(configEntries),
+  };
+}
+
 /**
- * Get a fresh OAuth access token for a provider via the Credential Bridge.
- *
- * Caches tokens in memory with a 5-minute safety buffer before expiry.
- * Handles x402 payment if the provider requires it.
+ * Get a fresh credential bundle (token + provider config) from the bridge.
  */
-export async function getCredential(provider: string): Promise<string> {
+export async function getCredentialBundle(provider: string): Promise<CredentialBundle> {
   // Check cache (with 10-minute buffer to avoid mid-request expiry)
-  const cached = tokenCache.get(provider);
+  const cached = bundleCache.get(provider);
   if (cached && cached.expiresAt > Date.now() + 10 * 60 * 1000) {
-    return cached.token;
+    return cached.bundle;
   }
 
   const bridgeUrl = process.env.X402_GATEWAY_URL;
@@ -169,7 +199,7 @@ export async function getCredential(provider: string): Promise<string> {
   }
 
   // Include requestId for job-bound credentials when available
-  const requestId = process.env.JINN_REQUEST_ID || process.env.JINN_JOB_ID;
+  const requestId = process.env.JINN_CTX_REQUEST_ID || process.env.JINN_CTX_JOB_ID;
   const body: BridgeCredentialRequest = requestId ? { requestId } : {};
 
   const credentialUrl = `${bridgeUrl.replace(/\/$/, '')}/credentials/${provider}`;
@@ -195,28 +225,44 @@ export async function getCredential(provider: string): Promise<string> {
     throw new Error(`Credential bridge error (${response.status}): ${error.error} [${error.code}]`);
   }
 
-  const data = await response.json() as CredentialResponse;
+  const bundle = parseCredentialBundle(await response.json(), provider);
 
-  // Cache the token (evict oldest if at capacity)
-  if (tokenCache.size >= 100) {
-    const oldestKey = tokenCache.keys().next().value;
-    if (oldestKey !== undefined) tokenCache.delete(oldestKey);
+  // Cache the bundle (evict oldest if at capacity)
+  if (bundleCache.size >= 100) {
+    const oldestKey = bundleCache.keys().next().value;
+    if (oldestKey !== undefined) bundleCache.delete(oldestKey);
   }
-  tokenCache.set(provider, {
-    token: data.access_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
+  bundleCache.set(provider, {
+    bundle,
+    expiresAt: Date.now() + bundle.expires_in * 1000,
   });
 
-  return data.access_token;
+  return bundle;
 }
 
 /**
- * Clear cached token for a provider (useful after token rejection).
+ * Get credential token for a provider.
+ */
+export async function getCredential(provider: string): Promise<string> {
+  const bundle = await getCredentialBundle(provider);
+  return bundle.access_token;
+}
+
+/**
+ * Get static configuration returned by the bridge for a provider.
+ */
+export async function getCredentialConfig(provider: string): Promise<Record<string, string>> {
+  const bundle = await getCredentialBundle(provider);
+  return bundle.config;
+}
+
+/**
+ * Clear cached bundle for a provider (useful after token rejection).
  */
 export function clearCredentialCache(provider?: string): void {
   if (provider) {
-    tokenCache.delete(provider);
+    bundleCache.delete(provider);
   } else {
-    tokenCache.clear();
+    bundleCache.clear();
   }
 }

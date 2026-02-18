@@ -171,7 +171,8 @@ export interface AdditionalContext {
 
   /**
    * Public environment variables to inject into the worker/agent process.
-   * Only keys matching /^JINN_JOB_[A-Z0-9_]+$/ are injected; all others are dropped.
+   * Only keys matching /^JINN_JOB_[A-Z0-9_]+$/ with string values are allowed.
+   * Any invalid key/value causes job initialization to fail.
    * NOTE: Do NOT put secrets here (passwords, API keys) as this is stored on IPFS.
    */
   env?: Record<string, string>;

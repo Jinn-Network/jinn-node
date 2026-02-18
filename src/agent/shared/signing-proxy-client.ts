@@ -5,17 +5,17 @@
  * All private key operations are delegated to the proxy over localhost HTTP.
  *
  * Environment variables:
- * - JINN_SIGNING_PROXY_URL: Proxy base URL (e.g., http://127.0.0.1:12345)
- * - JINN_SIGNING_PROXY_SECRET: Bearer token for auth
+ * - AGENT_SIGNING_PROXY_URL: Proxy base URL (e.g., http://127.0.0.1:12345)
+ * - AGENT_SIGNING_PROXY_TOKEN: Bearer token for auth
  */
 
 import type { EthHttpSigner, Hex } from '@slicekit/erc8128';
 
 function getConfig(): { url: string; secret: string } {
-  const url = process.env.JINN_SIGNING_PROXY_URL;
-  const secret = process.env.JINN_SIGNING_PROXY_SECRET;
+  const url = process.env.AGENT_SIGNING_PROXY_URL;
+  const secret = process.env.AGENT_SIGNING_PROXY_TOKEN;
   if (!url || !secret) {
-    throw new Error('Signing proxy not configured (JINN_SIGNING_PROXY_URL / JINN_SIGNING_PROXY_SECRET)');
+    throw new Error('Signing proxy not configured (AGENT_SIGNING_PROXY_URL / AGENT_SIGNING_PROXY_TOKEN)');
   }
   return { url, secret };
 }

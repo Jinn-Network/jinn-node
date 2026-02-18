@@ -206,10 +206,10 @@ export async function civitaiGenerateImage(params: CivitaiGenerateImageParams) {
     }
 
     // 3) Persist artifact when on-chain job context is available via Control API; otherwise return URL only
-    const hasRequestContext = !!process.env.JINN_REQUEST_ID;
+    const hasRequestContext = !!process.env.JINN_CTX_REQUEST_ID;
     if (hasRequestContext && isControlApiEnabled()) {
       try {
-        const requestId = String(process.env.JINN_REQUEST_ID);
+        const requestId = String(process.env.JINN_CTX_REQUEST_ID);
         const newId = await apiCreateArtifact(requestId, {
           cid: 'inline',
           topic: 'image.generated',

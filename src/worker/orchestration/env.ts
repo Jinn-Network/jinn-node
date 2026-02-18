@@ -4,8 +4,8 @@
 
 interface EnvironmentSnapshot {
   CODE_METADATA_REPO_ROOT?: string;
-  JINN_BASE_BRANCH?: string;
-  JINN_INHERITED_ENV?: string;
+  JINN_CTX_BASE_BRANCH?: string;
+  JINN_CTX_INHERITED_ENV?: string;
   jinnJobVars: Record<string, string>;
 }
 
@@ -22,8 +22,8 @@ export function snapshotEnvironment(): EnvironmentSnapshot {
   }
   return {
     CODE_METADATA_REPO_ROOT: process.env.CODE_METADATA_REPO_ROOT,
-    JINN_BASE_BRANCH: process.env.JINN_BASE_BRANCH,
-    JINN_INHERITED_ENV: process.env.JINN_INHERITED_ENV,
+    JINN_CTX_BASE_BRANCH: process.env.JINN_CTX_BASE_BRANCH,
+    JINN_CTX_INHERITED_ENV: process.env.JINN_CTX_INHERITED_ENV,
     jinnJobVars,
   };
 }
@@ -39,16 +39,16 @@ export function restoreEnvironment(snapshot: EnvironmentSnapshot): void {
     delete process.env.CODE_METADATA_REPO_ROOT;
   }
 
-  if (snapshot.JINN_BASE_BRANCH !== undefined) {
-    process.env.JINN_BASE_BRANCH = snapshot.JINN_BASE_BRANCH;
+  if (snapshot.JINN_CTX_BASE_BRANCH !== undefined) {
+    process.env.JINN_CTX_BASE_BRANCH = snapshot.JINN_CTX_BASE_BRANCH;
   } else {
-    delete process.env.JINN_BASE_BRANCH;
+    delete process.env.JINN_CTX_BASE_BRANCH;
   }
 
-  if (snapshot.JINN_INHERITED_ENV !== undefined) {
-    process.env.JINN_INHERITED_ENV = snapshot.JINN_INHERITED_ENV;
+  if (snapshot.JINN_CTX_INHERITED_ENV !== undefined) {
+    process.env.JINN_CTX_INHERITED_ENV = snapshot.JINN_CTX_INHERITED_ENV;
   } else {
-    delete process.env.JINN_INHERITED_ENV;
+    delete process.env.JINN_CTX_INHERITED_ENV;
   }
 
   // Remove any JINN_JOB_* vars injected during this job
