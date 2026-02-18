@@ -22,8 +22,6 @@ const DEFAULT_TARGET_REQUESTS = 60;
 const EPOCH_CACHE_TTL_MS = 5 * 60_000; // 5 min — checkpoint only changes daily
 const REQUEST_CACHE_TTL_MS = 2 * 60_000; // 2 min — requests change frequently
 
-const MECH_MARKETPLACE = '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020';
-
 const STAKING_ABI = [
   'function tsCheckpoint() view returns (uint256)',
   'function getNextRewardCheckpointTimestamp() view returns (uint256)',
@@ -33,8 +31,6 @@ const STAKING_ABI = [
 const MARKETPLACE_ABI = [
   'function mapRequestCounts(address) view returns (uint256)',
 ];
-
-const SERVICE_ID = parseInt(process.env.WORKER_SERVICE_ID || '165', 10);
 
 export interface EpochGateResult {
   targetMet: boolean;
@@ -83,6 +79,8 @@ async function getEpochRequestCount(
 
 export async function checkEpochGate(
   stakingContractAddress: string,
+  serviceId: number,
+  marketplaceAddress: string,
 ): Promise<EpochGateResult> {
   const target = parseInt(process.env.WORKER_STAKING_TARGET || '', 10) || DEFAULT_TARGET_REQUESTS;
 
@@ -95,11 +93,11 @@ export async function checkEpochGate(
     const rpcUrl = getRequiredRpcUrl();
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const stakingContract = new ethers.Contract(stakingContractAddress, STAKING_ABI, provider);
-    const marketplace = new ethers.Contract(MECH_MARKETPLACE, MARKETPLACE_ABI, provider);
+    const marketplace = new ethers.Contract(marketplaceAddress, MARKETPLACE_ABI, provider);
 
     const [{ tsCheckpoint, nextCheckpoint }, serviceInfo] = await Promise.all([
       getEpochBounds(stakingContract),
-      stakingContract.getServiceInfo(SERVICE_ID),
+      stakingContract.getServiceInfo(serviceId),
     ]);
 
     // Use the staking contract's multisig — authoritative source

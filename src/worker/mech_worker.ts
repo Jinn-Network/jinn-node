@@ -43,6 +43,7 @@ import { setActiveService } from './rotation/ActiveServiceContext.js';
 import { maybeCallCheckpoint } from './staking/checkpoint.js';
 import { checkEpochGate } from './staking/epochGate.js';
 import { maybeSubmitHeartbeat } from './staking/heartbeat.js';
+import { resolveServiceConfig, type ResolvedServiceConfig } from './onchain/serviceResolver.js';
 
 export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
 
@@ -196,6 +197,9 @@ if (process.env.WORKER_STOP_FILE && existsSync(process.env.WORKER_STOP_FILE)) {
     // Ignore errors - file might have been deleted between check and unlink
   }
 }
+
+// On-chain resolved service config (populated at startup)
+let resolvedConfig: ResolvedServiceConfig | null = null;
 
 // Auto-reposting configuration
 const ENABLE_AUTO_REPOST = getEnableAutoRepost();
@@ -1371,9 +1375,10 @@ async function processOnce(): Promise<boolean> {
   }
 
   // Staking target gate: stop claiming if request target met for this epoch
-  const stakingContract = getOptionalWorkerStakingContract();
-  if (stakingContract) {
-    const gate = await checkEpochGate(stakingContract);
+  // Use resolved config (on-chain derived) with env var override
+  const stakingContract = getOptionalWorkerStakingContract() || resolvedConfig?.stakingContract || null;
+  if (stakingContract && resolvedConfig) {
+    const gate = await checkEpochGate(stakingContract, resolvedConfig.serviceId, resolvedConfig.marketplace);
     if (gate.targetMet) {
       const resetIn = Math.max(0, gate.nextCheckpoint - Math.floor(Date.now() / 1000));
       workerLogger.info({
@@ -1566,6 +1571,19 @@ const WORKER_REPOST_CHECK_CYCLES = parseInt(process.env.WORKER_REPOST_CHECK_CYCL
 async function main() {
   workerLogger.info('Mech worker starting');
 
+  // Resolve on-chain service config from mech address
+  // This derives serviceId, safe, marketplace, and staking contract from chain state
+  const mechAddress = getMechAddress();
+  const rpcUrl = getRequiredRpcUrl();
+  if (mechAddress && rpcUrl) {
+    try {
+      resolvedConfig = await resolveServiceConfig(mechAddress, rpcUrl);
+      workerLogger.info({ resolved: resolvedConfig }, 'On-chain service config resolved');
+    } catch (e: any) {
+      workerLogger.warn({ error: serializeError(e) }, 'On-chain service resolution failed — falling back to env vars');
+    }
+  }
+
   // Verify Control API is running before processing any jobs
   await checkControlApiHealth();
 
@@ -1669,7 +1687,7 @@ async function main() {
 
       // Call staking checkpoint if epoch is overdue (permissionless, any EOA can trigger)
       {
-        const stakingContract = getOptionalWorkerStakingContract();
+        const stakingContract = getOptionalWorkerStakingContract() || resolvedConfig?.stakingContract || null;
         cyclesSinceLastCheckpoint++;
         if (stakingContract && cyclesSinceLastCheckpoint >= WORKER_CHECKPOINT_CYCLES) {
           cyclesSinceLastCheckpoint = 0;
@@ -1683,12 +1701,12 @@ async function main() {
         // Submit heartbeat requests to meet staking liveness requirement
         // Check epoch gate first — skip heartbeat if target already met
         cyclesSinceLastHeartbeat++;
-        if (stakingContract && cyclesSinceLastHeartbeat >= WORKER_HEARTBEAT_CYCLES) {
+        if (stakingContract && resolvedConfig && cyclesSinceLastHeartbeat >= WORKER_HEARTBEAT_CYCLES) {
           cyclesSinceLastHeartbeat = 0;
           try {
-            const gate = await checkEpochGate(stakingContract);
+            const gate = await checkEpochGate(stakingContract, resolvedConfig.serviceId, resolvedConfig.marketplace);
             if (!gate.targetMet) {
-              await maybeSubmitHeartbeat(stakingContract);
+              await maybeSubmitHeartbeat(stakingContract, resolvedConfig.serviceId, resolvedConfig.marketplace);
             } else {
               workerLogger.debug({ requests: gate.requestCount, target: gate.target }, 'Epoch target met — skipping heartbeat');
             }

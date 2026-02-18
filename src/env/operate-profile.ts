@@ -24,6 +24,7 @@ import {
   getActivePrivateKey,
   getActiveChainConfig,
 } from '../worker/rotation/ActiveServiceContext.js';
+import { getCachedServiceConfig } from '../worker/onchain/serviceResolver.js';
 
 // Resolve repo root so this works from both src/ and dist/ builds
 const __filename = fileURLToPath(import.meta.url);
@@ -361,6 +362,13 @@ export function getServiceSafeAddress(): string | null {
   if (safeAddress) {
     configLogger.info(` Found safe address: ${safeAddress}`);
     return safeAddress;
+  }
+
+  // Final fallback: on-chain resolved multisig (from serviceResolver cache)
+  const resolved = getCachedServiceConfig();
+  if (resolved?.multisig) {
+    configLogger.info(` Using safe address from on-chain resolver: ${resolved.multisig}`);
+    return resolved.multisig;
   }
 
   configLogger.warn('safe_address not found in service config');

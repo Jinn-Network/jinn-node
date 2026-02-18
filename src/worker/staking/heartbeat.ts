@@ -25,7 +25,6 @@ import { submitMarketplaceRequest } from '../MechMarketplaceRequester.js';
 
 const log = workerLogger.child({ component: 'HEARTBEAT' });
 
-const MECH_MARKETPLACE = '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020';
 const TARGET_REQUESTS_PER_EPOCH = 60;
 
 const STAKING_ABI = [
@@ -37,8 +36,6 @@ const STAKING_ABI = [
 const MARKETPLACE_ABI = [
   'function mapRequestCounts(address) view returns (uint256)',
 ];
-
-const SERVICE_ID = parseInt(process.env.WORKER_SERVICE_ID || '165', 10);
 
 // Cached staking multisig — resolved once from on-chain getServiceInfo()
 let resolvedMultisig: string | null = null;
@@ -56,16 +53,18 @@ let resolvedMultisig: string | null = null;
  */
 async function getRequestDeficit(
   stakingContract: string,
+  serviceId: number,
+  marketplaceAddress: string,
 ): Promise<{ deficit: number; current: number; epochSecondsRemaining: number; multisig: string }> {
   const rpcUrl = getRequiredRpcUrl();
   const provider = new ethers.JsonRpcProvider(rpcUrl);
 
   const staking = new ethers.Contract(stakingContract, STAKING_ABI, provider);
-  const marketplace = new ethers.Contract(MECH_MARKETPLACE, MARKETPLACE_ABI, provider);
+  const marketplace = new ethers.Contract(marketplaceAddress, MARKETPLACE_ABI, provider);
 
   const [nextCheckpoint, serviceInfo] = await Promise.all([
     staking.getNextRewardCheckpointTimestamp().then(Number),
-    staking.getServiceInfo(SERVICE_ID),
+    staking.getServiceInfo(serviceId),
   ]);
 
   // Use the staking multisig from on-chain (may differ from worker Safe)
@@ -104,7 +103,12 @@ async function getRequestDeficit(
  * Submit a single heartbeat request to the marketplace.
  * Returns true if successful.
  */
-async function submitHeartbeat(multisig: string, mechAddress: string): Promise<boolean> {
+async function submitHeartbeat(
+  multisig: string,
+  mechAddress: string,
+  serviceId: number,
+  marketplaceAddress: string,
+): Promise<boolean> {
   const privateKey = getServicePrivateKey();
   const rpcUrl = getRequiredRpcUrl();
 
@@ -116,14 +120,14 @@ async function submitHeartbeat(multisig: string, mechAddress: string): Promise<b
   const prompt = JSON.stringify({
     heartbeat: true,
     ts: Date.now(),
-    service: 165,
+    service: serviceId,
   });
 
   const result = await submitMarketplaceRequest({
     serviceSafeAddress: multisig,
     agentEoaPrivateKey: privateKey,
     mechContractAddress: mechAddress,
-    mechMarketplaceAddress: MECH_MARKETPLACE,
+    mechMarketplaceAddress: marketplaceAddress,
     prompt,
     rpcUrl,
     ipfsExtraAttributes: {
@@ -153,8 +157,12 @@ let lastHeartbeatTimestamp = 0;
  * Only submits if there's a deficit of requests for the current epoch.
  * Submits a batch of requests per call to compensate for slow worker cycles.
  */
-export async function maybeSubmitHeartbeat(stakingContract: string): Promise<void> {
-  log.info({ stakingContract, serviceId: SERVICE_ID }, 'Heartbeat check starting');
+export async function maybeSubmitHeartbeat(
+  stakingContract: string,
+  serviceId: number,
+  marketplaceAddress: string,
+): Promise<void> {
+  log.info({ stakingContract, serviceId }, 'Heartbeat check starting');
   const mechAddress = getMechAddress();
 
   if (!mechAddress) {
@@ -170,7 +178,7 @@ export async function maybeSubmitHeartbeat(stakingContract: string): Promise<voi
   }
 
   try {
-    const { deficit, current, epochSecondsRemaining, multisig } = await getRequestDeficit(stakingContract);
+    const { deficit, current, epochSecondsRemaining, multisig } = await getRequestDeficit(stakingContract, serviceId, marketplaceAddress);
 
     if (deficit <= 0) {
       log.info({ current, deficit: 0 }, 'Request target met for this epoch — no heartbeat needed');
@@ -193,7 +201,7 @@ export async function maybeSubmitHeartbeat(stakingContract: string): Promise<voi
       multisig,
     }, `Request deficit: ${deficit} — submitting 1 heartbeat`);
 
-    await submitHeartbeat(multisig, mechAddress);
+    await submitHeartbeat(multisig, mechAddress, serviceId, marketplaceAddress);
 
     lastHeartbeatTimestamp = Math.floor(Date.now() / 1000);
   } catch (error: any) {
