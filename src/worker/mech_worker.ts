@@ -168,6 +168,14 @@ const VENTURE_TEMPLATE_IDS: string[] = (() => {
   return raw.split(',').map(s => s.trim()).filter(Boolean);
 })();
 
+// Venture filtering: when set, only claim requests belonging to these venture IDs.
+// Requests with ventureId=null are excluded when this filter is active.
+const VENTURE_FILTERS: string[] = (() => {
+  const raw = process.env.VENTURE_FILTER;
+  if (!raw) return [];
+  return raw.split(',').map(s => s.trim()).filter(Boolean);
+})();
+
 // Always set WORKER_STOP_FILE so external stop signals can terminate the worker
 if (!process.env.WORKER_STOP_FILE) {
   const stopFileSuffix = WORKSTREAM_FILTERS.length > 0
@@ -568,7 +576,8 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       mechFilterMode: mechFilter.mode,
       mechFilterAddresses: mechFilter.mode === 'any' ? 'any' : mechFilter.addresses,
       stakingContract: mechFilter.stakingContract,
-      workstreamFilter: WORKSTREAM_FILTERS.length > 0 ? WORKSTREAM_FILTERS : 'none'
+      workstreamFilter: WORKSTREAM_FILTERS.length > 0 ? WORKSTREAM_FILTERS : 'none',
+      ventureFilter: VENTURE_FILTERS.length > 0 ? VENTURE_FILTERS : 'none'
     }, 'Fetching requests from Ponder');
 
     // Build where conditions based on filter mode
@@ -587,6 +596,13 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
     } else if (WORKSTREAM_FILTERS.length > 1) {
       whereConditions.push('workstreamId_in: $workstreamIds');
     }
+
+    // Venture filtering: only claim requests belonging to allowed ventures
+    if (VENTURE_FILTERS.length === 1) {
+      whereConditions.push('ventureId: $ventureId');
+    } else if (VENTURE_FILTERS.length > 1) {
+      whereConditions.push('ventureId_in: $ventureIds');
+    }
     const whereClause = `{ ${whereConditions.join(', ')} }`;
 
     // Build query variables definition
@@ -600,6 +616,11 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       varDefs.push('$workstreamId: String!');
     } else if (WORKSTREAM_FILTERS.length > 1) {
       varDefs.push('$workstreamIds: [String!]!');
+    }
+    if (VENTURE_FILTERS.length === 1) {
+      varDefs.push('$ventureId: String!');
+    } else if (VENTURE_FILTERS.length > 1) {
+      varDefs.push('$ventureIds: [String!]!');
     }
 
     // Query our local Ponder GraphQL (custom schema) - FILTER BY MECH AND UNDELIVERED (and optionally WORKSTREAM)
@@ -634,6 +655,11 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
     } else if (WORKSTREAM_FILTERS.length > 1) {
       variables.workstreamIds = WORKSTREAM_FILTERS;
     }
+    if (VENTURE_FILTERS.length === 1) {
+      variables.ventureId = VENTURE_FILTERS[0];
+    } else if (VENTURE_FILTERS.length > 1) {
+      variables.ventureIds = VENTURE_FILTERS;
+    }
 
     const data = await graphQLRequest<{ requests: { items: any[] } }>({
       url: PONDER_GRAPHQL_URL,
@@ -658,6 +684,11 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
         } else if (mechFilter.mode === 'single') {
           templateWhereConditions.push('mech: $mech');
         }
+        if (VENTURE_FILTERS.length === 1) {
+          templateWhereConditions.push('ventureId: $ventureId');
+        } else if (VENTURE_FILTERS.length > 1) {
+          templateWhereConditions.push('ventureId_in: $ventureIds');
+        }
         const templateWhereClause = `{ ${templateWhereConditions.join(', ')} }`;
 
         const templateVarDefs: string[] = ['$tLimit: Int!'];
@@ -665,6 +696,11 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
           templateVarDefs.push('$mechs: [String!]!');
         } else if (mechFilter.mode === 'single') {
           templateVarDefs.push('$mech: String!');
+        }
+        if (VENTURE_FILTERS.length === 1) {
+          templateVarDefs.push('$ventureId: String!');
+        } else if (VENTURE_FILTERS.length > 1) {
+          templateVarDefs.push('$ventureIds: [String!]!');
         }
 
         const templateQuery = `query TemplateRequests(${templateVarDefs.join(', ')}) {
@@ -692,6 +728,11 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
           templateVars.mechs = mechFilter.addresses;
         } else if (mechFilter.mode === 'single') {
           templateVars.mech = mechFilter.addresses[0];
+        }
+        if (VENTURE_FILTERS.length === 1) {
+          templateVars.ventureId = VENTURE_FILTERS[0];
+        } else if (VENTURE_FILTERS.length > 1) {
+          templateVars.ventureIds = VENTURE_FILTERS;
         }
 
         const templateData = await graphQLRequest<{ requests: { items: any[] } }>({
