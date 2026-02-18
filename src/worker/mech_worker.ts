@@ -24,6 +24,7 @@ import { processOnce as processJobOnce } from './orchestration/jobRunner.js';
 import { fetchIpfsMetadata } from './metadata/fetchIpfsMetadata.js';
 import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
 import { shouldStop } from './cycleControl.js';
+import { checkAndDispatchScheduledVentures } from './ventures/ventureWatcher.js';
 import { waitForGeminiQuota } from './llm/geminiQuota.js';
 import {
   getOptionalWorkerJobDelayMs,
@@ -285,6 +286,10 @@ const WORKER_CHECKPOINT_CYCLES = parseInt(process.env.WORKER_CHECKPOINT_CYCLES |
 // Staking heartbeat: submit marketplace requests to meet liveness requirement.
 // At 30s base poll, 16 cycles = ~8 min. Submits 1 request per check if deficit exists.
 const WORKER_HEARTBEAT_CYCLES = parseInt(process.env.WORKER_HEARTBEAT_CYCLES || '16');
+
+// Venture watcher: check dispatch schedules every N cycles (~ every 2-3 min at default polling)
+const ENABLE_VENTURE_WATCHER = process.env.ENABLE_VENTURE_WATCHER === '1';
+const WORKER_VENTURE_WATCHER_CYCLES = parseInt(process.env.WORKER_VENTURE_WATCHER_CYCLES || '3');
 
 // Periodic cleanup of global maps to prevent unbounded growth over weeks of uptime
 const MAP_CLEANUP_INTERVAL_CYCLES = 50;
@@ -1620,6 +1625,10 @@ async function main() {
     workerLogger.info({ schedule: EARNING_SCHEDULE, maxJobs: EARNING_MAX_JOBS ?? 'unlimited' }, 'Earning schedule configured');
   }
 
+  if (ENABLE_VENTURE_WATCHER) {
+    workerLogger.info({ everyCycles: WORKER_VENTURE_WATCHER_CYCLES }, 'Venture watcher enabled');
+  }
+
   if (SINGLE_SHOT) {
     await processOnce();
     return;
@@ -1636,6 +1645,7 @@ async function main() {
   let cyclesSinceLastCleanup = 0;
   let cyclesSinceLastCheckpoint = 0;
   let cyclesSinceLastHeartbeat = 0;
+  let cyclesSinceLastVentureCheck = 0;
 
   for (; ;) {
     const cycleStart = Date.now();
@@ -1712,6 +1722,19 @@ async function main() {
             }
           } catch (e: any) {
             workerLogger.warn({ error: serializeError(e) }, 'Staking heartbeat failed (non-fatal)');
+          }
+        }
+      }
+
+      // Venture watcher: check dispatch schedules periodically
+      if (ENABLE_VENTURE_WATCHER) {
+        cyclesSinceLastVentureCheck++;
+        if (cyclesSinceLastVentureCheck >= WORKER_VENTURE_WATCHER_CYCLES) {
+          cyclesSinceLastVentureCheck = 0;
+          try {
+            await checkAndDispatchScheduledVentures();
+          } catch (e: any) {
+            workerLogger.warn({ error: serializeError(e) }, 'Venture watcher check failed (non-fatal)');
           }
         }
       }
