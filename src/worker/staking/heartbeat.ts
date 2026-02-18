@@ -27,8 +27,6 @@ const log = workerLogger.child({ component: 'HEARTBEAT' });
 
 const MECH_MARKETPLACE = '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020';
 const TARGET_REQUESTS_PER_EPOCH = 60;
-// Safety margin: aim for a few extra to account for timing jitter
-const TARGET_WITH_MARGIN = TARGET_REQUESTS_PER_EPOCH + 5;
 
 const STAKING_ABI = [
   'function tsCheckpoint() view returns (uint256)',
@@ -88,7 +86,7 @@ async function getRequestDeficit(
   const epochSecondsRemaining = Math.max(0, nextCheckpoint - now);
 
   const requestsThisEpoch = currentRequestCount - baselineRequestCount;
-  const deficit = Math.max(0, TARGET_WITH_MARGIN - requestsThisEpoch);
+  const deficit = Math.max(0, TARGET_REQUESTS_PER_EPOCH - requestsThisEpoch);
 
   log.info({
     multisig,
@@ -190,7 +188,7 @@ export async function maybeSubmitHeartbeat(stakingContract: string): Promise<voi
     log.info({
       deficit,
       currentRequestCount: current,
-      target: TARGET_WITH_MARGIN,
+      target: TARGET_REQUESTS_PER_EPOCH,
       epochSecondsRemaining,
       multisig,
     }, `Request deficit: ${deficit} — submitting 1 heartbeat`);

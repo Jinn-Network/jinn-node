@@ -1332,18 +1332,15 @@ async function processOnce(): Promise<boolean> {
   // Staking target gate: stop claiming if request target met for this epoch
   const stakingContract = getOptionalWorkerStakingContract();
   if (stakingContract) {
-    const multisig = getServiceSafeAddress();
-    if (multisig) {
-      const gate = await checkEpochGate(stakingContract, multisig);
-      if (gate.targetMet) {
-        const resetIn = Math.max(0, gate.nextCheckpoint - Math.floor(Date.now() / 1000));
-        workerLogger.info({
-          requests: gate.requestCount,
-          target: gate.target,
-          resetsInSeconds: resetIn,
-        }, `Staking target met (${gate.requestCount}/${gate.target}) — skipping job pickup`);
-        return false;
-      }
+    const gate = await checkEpochGate(stakingContract);
+    if (gate.targetMet) {
+      const resetIn = Math.max(0, gate.nextCheckpoint - Math.floor(Date.now() / 1000));
+      workerLogger.info({
+        requests: gate.requestCount,
+        target: gate.target,
+        resetsInSeconds: resetIn,
+      }, `Staking target met (${gate.requestCount}/${gate.target}) — skipping job pickup`);
+      return false;
     }
   }
 
@@ -1643,11 +1640,17 @@ async function main() {
         }
 
         // Submit heartbeat requests to meet staking liveness requirement
+        // Check epoch gate first — skip heartbeat if target already met
         cyclesSinceLastHeartbeat++;
         if (stakingContract && cyclesSinceLastHeartbeat >= WORKER_HEARTBEAT_CYCLES) {
           cyclesSinceLastHeartbeat = 0;
           try {
-            await maybeSubmitHeartbeat(stakingContract);
+            const gate = await checkEpochGate(stakingContract);
+            if (!gate.targetMet) {
+              await maybeSubmitHeartbeat(stakingContract);
+            } else {
+              workerLogger.debug({ requests: gate.requestCount, target: gate.target }, 'Epoch target met — skipping heartbeat');
+            }
           } catch (e: any) {
             workerLogger.warn({ error: serializeError(e) }, 'Staking heartbeat failed (non-fatal)');
           }
