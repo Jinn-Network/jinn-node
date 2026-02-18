@@ -336,12 +336,15 @@ export async function blogGetStats(args: unknown) {
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
+    const code = message.includes('Credential bridge') || message.includes('STATIC_PROVIDER_ERROR')
+      ? 'CREDENTIAL_ERROR'
+      : 'EXECUTION_ERROR';
     return {
       content: [{
         type: 'text' as const,
         text: JSON.stringify({
           data: null,
-          meta: { ok: false, code: 'EXECUTION_ERROR', message },
+          meta: { ok: false, code, message },
         }),
       }],
     };
