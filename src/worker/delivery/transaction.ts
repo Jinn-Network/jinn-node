@@ -7,6 +7,7 @@ import { Web3 } from 'web3';
 import { workerLogger } from '../../logging/index.js';
 import { getOptionalMechChainConfig, getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
 import { getServiceSafeAddress, getServicePrivateKey } from '../../env/operate-profile.js';
+import { getActiveMechAddress, getServiceByMech } from '../rotation/ActiveServiceContext.js';
 import type { UnclaimedRequest, AgentExecutionResult, FinalStatus, IpfsMetadata, RecognitionPhaseResult, ReflectionResult } from '../types.js';
 import { buildDeliveryPayload } from './payload.js';
 import { checkDeliveryStatusViaPonder } from './ponderVerification.js';
@@ -289,11 +290,44 @@ export async function deliverViaSafeTransaction(
 ): Promise<{ tx_hash?: string; status?: string }> {
   workerLogger.info({ requestId: context.requestId }, '[DELIVERY_START] Function entered');
   const chainConfig = getOptionalMechChainConfig() || 'base';
-  const safeAddress = getServiceSafeAddress();
   const targetMechAddress = context.request.mech;
-  const privateKey = getServicePrivateKey();
   const rpcHttpUrl = getRequiredRpcUrl();
-  workerLogger.info({ requestId: context.requestId, hasRpc: !!rpcHttpUrl }, '[DELIVERY_START] Config loaded');
+
+  // Cross-mech credential resolution: when WORKER_MECH_FILTER_MODE=any, the
+  // request's mech may belong to a different service than the active one.
+  // Look up the service that owns the target mech and use its Safe/key.
+  let safeAddress: string | null;
+  let privateKey: string | null;
+
+  const activeMech = getActiveMechAddress();
+  const isCrossMech = !!(activeMech && targetMechAddress &&
+    activeMech.toLowerCase() !== targetMechAddress.toLowerCase());
+
+  if (isCrossMech) {
+    const owningService = getServiceByMech(targetMechAddress);
+    if (owningService?.serviceSafeAddress && owningService?.agentPrivateKey) {
+      workerLogger.info({
+        requestId: context.requestId,
+        activeMech,
+        targetMech: targetMechAddress,
+        resolveTo: owningService.serviceConfigId,
+      }, 'Cross-mech delivery: using owning service credentials');
+      safeAddress = owningService.serviceSafeAddress;
+      privateKey = owningService.agentPrivateKey;
+    } else {
+      workerLogger.warn({
+        requestId: context.requestId,
+        targetMech: targetMechAddress,
+      }, 'Cross-mech delivery: no matching service found, falling back to active');
+      safeAddress = getServiceSafeAddress();
+      privateKey = getServicePrivateKey();
+    }
+  } else {
+    safeAddress = getServiceSafeAddress();
+    privateKey = getServicePrivateKey();
+  }
+
+  workerLogger.info({ requestId: context.requestId, hasRpc: !!rpcHttpUrl, isCrossMech }, '[DELIVERY_START] Config loaded');
 
   if (!safeAddress || !privateKey) {
     workerLogger.warn({ safeAddress: !!safeAddress, privateKey: !!privateKey }, 'Missing Safe delivery configuration; skipping on-chain delivery');
@@ -491,6 +525,17 @@ export async function deliverViaSafeTransaction(
           stack: e.stack?.slice(0, 500),
         };
         workerLogger.error({ requestId: context.requestId, attempt, errorDetails }, 'Safe delivery error details');
+
+        // GS013-specific diagnostic: inner call to deliverToMarketplace reverted
+        if (e.message?.includes('GS013')) {
+          workerLogger.error({
+            requestId: context.requestId,
+            safeAddress,
+            targetMech: targetMechAddress,
+            activeMech: getActiveMechAddress(),
+            isCrossMech,
+          }, 'GS013: Inner call to deliverToMarketplace reverted. Likely mech↔safe authorization mismatch — the Safe calling the mech is not its operator.');
+        }
 
         // Only retry on specific transient errors
         if (e.message?.includes('nonce too low') || e.message?.includes('replacement transaction underpriced')) {

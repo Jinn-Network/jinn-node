@@ -2,6 +2,10 @@ export {
   setActiveService,
   getActiveService,
   clearActiveService,
+  getActiveMechAddress,
+  setAllServices,
+  getAllRegisteredServices,
+  getServiceByMech,
   type ActiveServiceIdentity,
 } from './ActiveServiceContext.js';
 
