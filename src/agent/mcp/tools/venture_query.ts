@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { mcpLogger } from '../../../logging/index.js';
-import { getVenture, getVentureBySlug, listVentures } from '../../../data/ventures.js';
+import { getSupabase } from './shared/supabase.js';
 
 /**
  * Input schema for querying ventures.
@@ -56,6 +56,7 @@ export async function ventureQuery(args: unknown) {
     }
 
     const { mode, id, slug, workstreamId, status, limit, offset } = parsed.data;
+    const supabase = await getSupabase();
 
     switch (mode) {
       case 'get': {
@@ -63,10 +64,12 @@ export async function ventureQuery(args: unknown) {
           return errorResponse('VALIDATION_ERROR', 'get mode requires id');
         }
 
-        const venture = await getVenture(id);
+        const { data: venture, error } = await supabase
+          .from('ventures').select('*').eq('id', id).single();
 
-        if (!venture) {
-          return errorResponse('NOT_FOUND', `Venture not found: ${id}`);
+        if (error) {
+          if (error.code === 'PGRST116') return errorResponse('NOT_FOUND', `Venture not found: ${id}`);
+          throw new Error(`Failed to get venture: ${error.message}`);
         }
 
         mcpLogger.info({ ventureId: id }, 'Retrieved venture by ID');
@@ -78,10 +81,12 @@ export async function ventureQuery(args: unknown) {
           return errorResponse('VALIDATION_ERROR', 'by_slug mode requires slug');
         }
 
-        const venture = await getVentureBySlug(slug);
+        const { data: venture, error } = await supabase
+          .from('ventures').select('*').eq('slug', slug).single();
 
-        if (!venture) {
-          return errorResponse('NOT_FOUND', `Venture not found with slug: ${slug}`);
+        if (error) {
+          if (error.code === 'PGRST116') return errorResponse('NOT_FOUND', `Venture not found with slug: ${slug}`);
+          throw new Error(`Failed to get venture by slug: ${error.message}`);
         }
 
         mcpLogger.info({ slug }, 'Retrieved venture by slug');
@@ -93,14 +98,12 @@ export async function ventureQuery(args: unknown) {
           return errorResponse('VALIDATION_ERROR', 'by_workstream mode requires workstreamId');
         }
 
-        // For by_workstream, we use listVentures with a filter
-        // Note: The script doesn't have a direct by_workstream function yet
-        // We'll use list and filter, but this could be optimized
-        const ventures = await listVentures({ limit: 1 });
-        const venture = ventures.find(v => v.root_workstream_id === workstreamId);
+        const { data: venture, error } = await supabase
+          .from('ventures').select('*').eq('root_workstream_id', workstreamId).limit(1).single();
 
-        if (!venture) {
-          return errorResponse('NOT_FOUND', `Venture not found for workstream: ${workstreamId}`);
+        if (error) {
+          if (error.code === 'PGRST116') return errorResponse('NOT_FOUND', `Venture not found for workstream: ${workstreamId}`);
+          throw new Error(`Failed to get venture by workstream: ${error.message}`);
         }
 
         mcpLogger.info({ workstreamId }, 'Retrieved venture by workstream');
@@ -109,16 +112,22 @@ export async function ventureQuery(args: unknown) {
 
       case 'list':
       default: {
-        const ventures = await listVentures({
-          status,
-          limit: limit || 20,
-          offset: offset || 0,
-        });
+        let query = supabase
+          .from('ventures').select('*')
+          .order('created_at', { ascending: false });
 
-        mcpLogger.info({ count: ventures.length }, 'Listed ventures');
+        if (status) query = query.eq('status', status);
+        if (limit) query = query.limit(limit);
+        if (offset) query = query.range(offset, offset + (limit || 20) - 1);
+
+        const { data: ventures, error } = await query;
+
+        if (error) throw new Error(`Failed to list ventures: ${error.message}`);
+
+        mcpLogger.info({ count: ventures?.length ?? 0 }, 'Listed ventures');
         return successResponse({
-          ventures,
-          total: ventures.length,
+          ventures: ventures ?? [],
+          total: ventures?.length ?? 0,
         });
       }
     }

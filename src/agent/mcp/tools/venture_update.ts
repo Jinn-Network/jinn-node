@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { mcpLogger } from '../../../logging/index.js';
-import { updateVenture, type UpdateVentureArgs } from '../../../data/ventures.js';
+import { getSupabase } from './shared/supabase.js';
 
 /**
  * Input schema for updating a venture.
@@ -95,26 +95,53 @@ export async function ventureUpdate(args: unknown) {
       poolAddress,
     } = parsed.data;
 
-    // Build update args - only include defined fields
-    const scriptArgs: UpdateVentureArgs = { id };
-    if (name !== undefined) scriptArgs.name = name;
-    if (slug !== undefined) scriptArgs.slug = slug;
-    if (description !== undefined) scriptArgs.description = description;
-    if (blueprint !== undefined) scriptArgs.blueprint = blueprint;
-    if (rootWorkstreamId !== undefined) scriptArgs.rootWorkstreamId = rootWorkstreamId;
-    if (rootJobInstanceId !== undefined) scriptArgs.rootJobInstanceId = rootJobInstanceId;
-    if (status !== undefined) scriptArgs.status = status;
-    if (tokenAddress !== undefined) scriptArgs.tokenAddress = tokenAddress;
-    if (tokenSymbol !== undefined) scriptArgs.tokenSymbol = tokenSymbol;
-    if (tokenName !== undefined) scriptArgs.tokenName = tokenName;
-    if (stakingContractAddress !== undefined) scriptArgs.stakingContractAddress = stakingContractAddress;
-    if (tokenLaunchPlatform !== undefined) scriptArgs.tokenLaunchPlatform = tokenLaunchPlatform;
-    if (tokenMetadata !== undefined) scriptArgs.tokenMetadata = JSON.parse(tokenMetadata);
-    if (governanceAddress !== undefined) scriptArgs.governanceAddress = governanceAddress;
-    if (poolAddress !== undefined) scriptArgs.poolAddress = poolAddress;
+    // Build update record — only include defined fields
+    const record: Record<string, any> = {};
+    if (name !== undefined) record.name = name;
+    if (slug !== undefined) record.slug = slug;
+    if (description !== undefined) record.description = description;
+    if (rootWorkstreamId !== undefined) record.root_workstream_id = rootWorkstreamId;
+    if (rootJobInstanceId !== undefined) record.root_job_instance_id = rootJobInstanceId;
+    if (status !== undefined) record.status = status;
+    if (tokenAddress !== undefined) record.token_address = tokenAddress;
+    if (tokenSymbol !== undefined) record.token_symbol = tokenSymbol;
+    if (tokenName !== undefined) record.token_name = tokenName;
+    if (stakingContractAddress !== undefined) record.staking_contract_address = stakingContractAddress;
+    if (tokenLaunchPlatform !== undefined) record.token_launch_platform = tokenLaunchPlatform;
+    if (tokenMetadata !== undefined) record.token_metadata = JSON.parse(tokenMetadata);
+    if (governanceAddress !== undefined) record.governance_address = governanceAddress;
+    if (poolAddress !== undefined) record.pool_address = poolAddress;
 
-    // Use the script function which handles all Supabase logic
-    const venture = await updateVenture(scriptArgs);
+    if (blueprint !== undefined) {
+      const blueprintObj = typeof blueprint === 'string' ? JSON.parse(blueprint) : blueprint;
+      if (!blueprintObj.invariants || !Array.isArray(blueprintObj.invariants)) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              data: null,
+              meta: { ok: false, code: 'VALIDATION_ERROR', message: 'Blueprint must contain an "invariants" array' }
+            })
+          }]
+        };
+      }
+      record.blueprint = blueprintObj;
+    }
+
+    if (Object.keys(record).length === 0) {
+      return errorResponse('VALIDATION_ERROR', 'No fields to update');
+    }
+
+    const supabase = await getSupabase();
+    const { data: venture, error } = await supabase
+      .from('ventures')
+      .update(record)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw new Error(`Failed to update venture: ${error.message}`);
+    if (!venture) return errorResponse('NOT_FOUND', `Venture not found: ${id}`);
 
     mcpLogger.info({ ventureId: venture.id, name: venture.name }, 'Updated venture');
 
@@ -141,4 +168,13 @@ export async function ventureUpdate(args: unknown) {
       }]
     };
   }
+}
+
+function errorResponse(code: string, message: string) {
+  return {
+    content: [{
+      type: 'text' as const,
+      text: JSON.stringify({ data: null, meta: { ok: false, code, message } })
+    }]
+  };
 }

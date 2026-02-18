@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { mcpLogger } from '../../../logging/index.js';
-import { archiveVenture, deleteVenture } from '../../../data/ventures.js';
+import { getSupabase } from './shared/supabase.js';
 
 /**
  * Input schema for deleting a venture.
@@ -58,6 +58,8 @@ export async function ventureDelete(args: unknown) {
 
     const { id, mode, confirm } = parsed.data;
 
+    const supabase = await getSupabase();
+
     if (mode === 'hard') {
       if (!confirm) {
         return {
@@ -71,8 +73,8 @@ export async function ventureDelete(args: unknown) {
         };
       }
 
-      // Use the script function for permanent delete
-      await deleteVenture(id);
+      const { error } = await supabase.from('ventures').delete().eq('id', id);
+      if (error) throw new Error(`Failed to delete venture: ${error.message}`);
 
       mcpLogger.info({ ventureId: id }, 'Hard deleted venture');
 
@@ -88,7 +90,9 @@ export async function ventureDelete(args: unknown) {
     }
 
     // Soft delete (archive)
-    const venture = await archiveVenture(id);
+    const { data: venture, error } = await supabase
+      .from('ventures').update({ status: 'archived' }).eq('id', id).select().single();
+    if (error) throw new Error(`Failed to archive venture: ${error.message}`);
 
     mcpLogger.info({ ventureId: id }, 'Archived venture');
 

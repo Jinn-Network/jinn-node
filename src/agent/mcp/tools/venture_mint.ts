@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { mcpLogger } from '../../../logging/index.js';
-import { createVenture, type CreateVentureArgs } from '../../../data/ventures.js';
+import { getSupabase } from './shared/supabase.js';
 
 /**
  * Input schema for minting a venture.
@@ -99,27 +99,48 @@ export async function ventureMint(args: unknown) {
       poolAddress,
     } = parsed.data;
 
-    // Use the script function which handles all Supabase logic
-    const scriptArgs: CreateVentureArgs = {
-      name,
-      slug,
-      description,
-      ownerAddress,
-      blueprint,  // Script handles JSON parsing
-      rootWorkstreamId,
-      rootJobInstanceId,
-      status,
-      tokenAddress,
-      tokenSymbol,
-      tokenName,
-      stakingContractAddress,
-      tokenLaunchPlatform,
-      tokenMetadata: tokenMetadata ? JSON.parse(tokenMetadata) : undefined,
-      governanceAddress,
-      poolAddress,
-    };
+    // Parse blueprint JSON
+    const blueprintObj = typeof blueprint === 'string' ? JSON.parse(blueprint) : blueprint;
+    if (!blueprintObj.invariants || !Array.isArray(blueprintObj.invariants)) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            data: null,
+            meta: { ok: false, code: 'VALIDATION_ERROR', message: 'Blueprint must contain an "invariants" array' }
+          })
+        }]
+      };
+    }
 
-    const venture = await createVenture(scriptArgs);
+    // Generate slug if not provided
+    const ventureSlug = slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+    const supabase = await getSupabase();
+    const { data: venture, error } = await supabase
+      .from('ventures')
+      .insert({
+        name,
+        slug: ventureSlug,
+        description: description || null,
+        owner_address: ownerAddress,
+        blueprint: blueprintObj,
+        root_workstream_id: rootWorkstreamId || null,
+        root_job_instance_id: rootJobInstanceId || null,
+        status: status || 'active',
+        ...(tokenAddress && { token_address: tokenAddress }),
+        ...(tokenSymbol && { token_symbol: tokenSymbol }),
+        ...(tokenName && { token_name: tokenName }),
+        ...(stakingContractAddress && { staking_contract_address: stakingContractAddress }),
+        ...(tokenLaunchPlatform && { token_launch_platform: tokenLaunchPlatform }),
+        ...(tokenMetadata && { token_metadata: JSON.parse(tokenMetadata) }),
+        ...(governanceAddress && { governance_address: governanceAddress }),
+        ...(poolAddress && { pool_address: poolAddress }),
+      })
+      .select()
+      .single();
+
+    if (error) throw new Error(`Failed to create venture: ${error.message}`);
 
     mcpLogger.info({ ventureId: venture.id, name }, 'Created new venture');
 
