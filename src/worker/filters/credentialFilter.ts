@@ -7,13 +7,14 @@
  *
  * If X402_GATEWAY_URL is unset or the probe fails, the worker behaves as a
  * public operator (no filtering, no priority).
- *
- * IMPORTANT: When adding a new MCP tool that calls getCredential(),
- * add an entry to TOOL_CREDENTIAL_MAP below.
  */
 
 import { workerLogger } from '../../logging/index.js';
 import { getServicePrivateKey } from '../../env/operate-profile.js';
+import {
+  TOOL_CREDENTIAL_MAP,
+  getRequiredCredentialProviders,
+} from '../../shared/tool-credential-requirements.js';
 import {
   createPrivateKeyHttpSigner,
   resolveChainId,
@@ -21,61 +22,16 @@ import {
 } from '../../http/erc8128.js';
 
 /**
- * Maps MCP tool names to the credential providers they require.
- * Provider names must match those used in getCredential('providerName')
- * calls and static-providers.ts entries.
+ * Legacy re-export for tests and callers.
  */
-export const TOOL_CREDENTIAL_MAP: Record<string, string[]> = {
-  // GitHub tools are operator-level (GITHUB_TOKEN in .env), not bridge-scoped.
-  // See github_tools.ts — reads from process.env.GITHUB_TOKEN directly.
-
-  // Telegram tools → 'telegram' (telegram-messaging.ts)
-  'telegram_send_message': ['telegram'],
-  'telegram_send_photo': ['telegram'],
-  'telegram_send_document': ['telegram'],
-
-  // Twitter tools → 'twitter' (twitter-social.ts)
-  'verify_trade_ideas': ['twitter'],
-
-  // Blog analytics → 'umami' (blog-analytics.ts)
-  'blog_get_stats': ['umami'],
-  'blog_get_top_pages': ['umami'],
-  'blog_get_referrers': ['umami'],
-  'blog_get_metrics': ['umami'],
-  'blog_get_pageviews': ['umami'],
-  'blog_get_performance_summary': ['umami'],
-
-  // OpenAI → 'openai' (shared/openai.ts)
-  'embed_text': ['openai'],
-
-  // Civitai → 'civitai' (shared/civitai.ts)
-  'civitai_generate_image': ['civitai'],
-
-  // Supabase-dependent tools (shared/supabase.ts)
-  'search_services': ['supabase'],
-  'service_registry': ['supabase'],
-
-  // Meta-tools (blueprint names before expansion via toolPolicy.ts)
-  'telegram_messaging': ['telegram'],
-  'fireflies_meetings': ['fireflies'],
-  'railway_deployment': ['railway'],
-};
+export { TOOL_CREDENTIAL_MAP };
 
 /**
  * Given a job's enabledTools list, return the set of credential providers
  * the job requires. Returns empty array if no credentials needed.
  */
 export function getRequiredCredentials(enabledTools: string[]): string[] {
-  const providers = new Set<string>();
-  for (const tool of enabledTools) {
-    const creds = TOOL_CREDENTIAL_MAP[tool];
-    if (creds) {
-      for (const cred of creds) {
-        providers.add(cred);
-      }
-    }
-  }
-  return [...providers];
+  return getRequiredCredentialProviders(enabledTools);
 }
 
 /**
