@@ -157,8 +157,8 @@ yarn setup
 When setup displays funding requirements:
 
 > **Send to the displayed address:**
-> - ~0.01 ETH (gas)
-> - ~20 OLAS (staking)
+> - the exact ETH amount shown by setup (gas)
+> - the exact OLAS amount shown by setup (staking)
 
 Wait for user to confirm funding, then re-run `yarn setup` if it exited.
 
