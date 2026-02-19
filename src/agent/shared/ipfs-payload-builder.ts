@@ -126,7 +126,7 @@ export async function buildIpfsPayload(
     } = options;
 
     // Ensure universal tools are included
-    const enabledTools = ensureUniversalTools(requestedTools);
+    let enabledTools = ensureUniversalTools(requestedTools);
     const toolPolicy = parseAnnotatedTools(tools);
     const normalizedModel = normalizeGeminiModel(model, DEFAULT_WORKER_MODEL);
 
@@ -256,6 +256,14 @@ export async function buildIpfsPayload(
             console.warn('[buildIpfsPayload] Failed to collect local metadata (non-critical):', metadataError);
             // Continue without code metadata - job will be artifact-only
         }
+    }
+
+    // Routing contract: coding jobs (codeMetadata present) must include process_branch
+    // so workers can apply github capability filtering pre-claim.
+    if (codeMetadata) {
+        enabledTools = Array.from(new Set([...enabledTools, 'process_branch']));
+    } else {
+        enabledTools = Array.from(new Set(enabledTools));
     }
 
     // Build lineage object

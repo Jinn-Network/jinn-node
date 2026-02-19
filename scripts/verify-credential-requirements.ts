@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 import {
   CREDENTIAL_META_TOOLS,
   CREDENTIAL_PROVIDER_ALLOWLIST,
+  OPERATOR_CAPABILITY_ALLOWLIST,
   TOOL_CREDENTIAL_MAP,
+  TOOL_OPERATOR_CAPABILITY_MAP,
 } from '../src/shared/tool-credential-requirements.js';
 import { VALID_JOB_TOOLS } from '../src/agent/toolPolicy.js';
 
@@ -21,6 +23,12 @@ const JINN_NODE_ROOT = resolve(__dirname, '..');
 const SRC_ROOT = resolve(JINN_NODE_ROOT, 'src');
 const SERVER_FILE = resolve(SRC_ROOT, 'agent/mcp/server.ts');
 const TOOLS_INDEX_FILE = resolve(SRC_ROOT, 'agent/mcp/tools/index.ts');
+const REQUIRED_GITHUB_OPERATOR_TOOLS = [
+  'get_file_contents',
+  'search_code',
+  'list_commits',
+  'process_branch',
+] as const;
 
 function parseRegisteredTools(serverSource: string): RegisteredTool[] {
   const tools: RegisteredTool[] = [];
@@ -213,6 +221,27 @@ function verify(): string[] {
       if (!providerSet.has(provider)) {
         errors.push(`Tool "${tool}" references unknown credential provider "${provider}"`);
       }
+    }
+  }
+
+  // Operator capabilities must stay within explicit allowlist.
+  const operatorCapabilitySet = new Set<string>(OPERATOR_CAPABILITY_ALLOWLIST);
+  for (const [tool, capabilities] of Object.entries(TOOL_OPERATOR_CAPABILITY_MAP)) {
+    if (!VALID_JOB_TOOLS.has(tool)) {
+      errors.push(`Operator capability mapped tool is not present in VALID_JOB_TOOLS: ${tool}`);
+    }
+    for (const capability of capabilities) {
+      if (!operatorCapabilitySet.has(capability)) {
+        errors.push(`Tool "${tool}" references unknown operator capability "${capability}"`);
+      }
+    }
+  }
+
+  // Locked github-capability contract for coding/GitHub tools.
+  for (const tool of REQUIRED_GITHUB_OPERATOR_TOOLS) {
+    const capabilities = TOOL_OPERATOR_CAPABILITY_MAP[tool];
+    if (!capabilities || !capabilities.includes('github')) {
+      errors.push(`Required github operator capability mapping missing for tool: ${tool}`);
     }
   }
 

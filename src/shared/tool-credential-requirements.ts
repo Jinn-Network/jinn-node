@@ -19,6 +19,16 @@ export const CREDENTIAL_PROVIDER_ALLOWLIST = [
 export type CredentialProvider = (typeof CREDENTIAL_PROVIDER_ALLOWLIST)[number];
 
 /**
+ * Operator-level capabilities are local worker runtime capabilities
+ * (not bridge-backed venture credentials).
+ */
+export const OPERATOR_CAPABILITY_ALLOWLIST = [
+  'github',
+] as const;
+
+export type OperatorCapability = (typeof OPERATOR_CAPABILITY_ALLOWLIST)[number];
+
+/**
  * Meta-tools in enabledTools that are not MCP server tool registrations but still
  * imply credential requirements for expansion/runtime.
  */
@@ -79,6 +89,21 @@ export const TOOL_CREDENTIAL_REQUIREMENTS = {
 // Legacy alias used by existing tests/imports.
 export const TOOL_CREDENTIAL_MAP = TOOL_CREDENTIAL_REQUIREMENTS;
 
+/**
+ * Maps tool names to operator-local capabilities.
+ * These capabilities are discovered by worker-local probing (e.g. token validation),
+ * not by credential bridge ACL.
+ */
+export const TOOL_OPERATOR_CAPABILITY_REQUIREMENTS = {
+  get_file_contents: ['github'],
+  search_code: ['github'],
+  list_commits: ['github'],
+  process_branch: ['github'],
+} as const satisfies Record<string, readonly OperatorCapability[]>;
+
+// Legacy-style alias for symmetry with bridge credential map usage.
+export const TOOL_OPERATOR_CAPABILITY_MAP = TOOL_OPERATOR_CAPABILITY_REQUIREMENTS;
+
 // High-risk invariants that must never regress.
 const REQUIRED_SUPABASE_TOOL_MAP_KEYS = [
   'venture_mint',
@@ -91,10 +116,24 @@ const REQUIRED_SUPABASE_TOOL_MAP_KEYS = [
   'services_registry',
 ] as const;
 
+const REQUIRED_GITHUB_OPERATOR_TOOL_MAP_KEYS = [
+  'get_file_contents',
+  'search_code',
+  'list_commits',
+  'process_branch',
+] as const;
+
 for (const tool of REQUIRED_SUPABASE_TOOL_MAP_KEYS) {
   const providers = TOOL_CREDENTIAL_REQUIREMENTS[tool];
   if (!providers || !providers.includes('supabase')) {
     throw new Error(`TOOL_CREDENTIAL_REQUIREMENTS is missing required supabase mapping for "${tool}"`);
+  }
+}
+
+for (const tool of REQUIRED_GITHUB_OPERATOR_TOOL_MAP_KEYS) {
+  const capabilities = TOOL_OPERATOR_CAPABILITY_REQUIREMENTS[tool];
+  if (!capabilities || !capabilities.includes('github')) {
+    throw new Error(`TOOL_OPERATOR_CAPABILITY_REQUIREMENTS is missing required github mapping for "${tool}"`);
   }
 }
 
@@ -111,4 +150,19 @@ export function getRequiredCredentialProviders(enabledTools: string[]): Credenti
     }
   }
   return [...providers];
+}
+
+/**
+ * Resolve required operator capabilities for an enabledTools list.
+ */
+export function getRequiredOperatorCapabilities(enabledTools: string[]): OperatorCapability[] {
+  const capabilities = new Set<OperatorCapability>();
+  for (const tool of enabledTools) {
+    const required = TOOL_OPERATOR_CAPABILITY_REQUIREMENTS[tool as keyof typeof TOOL_OPERATOR_CAPABILITY_REQUIREMENTS];
+    if (!required) continue;
+    for (const capability of required) {
+      capabilities.add(capability);
+    }
+  }
+  return [...capabilities];
 }

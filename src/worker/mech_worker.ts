@@ -40,8 +40,11 @@ import { recordIdleCycle, recordExecutionTime } from './healthcheck.js';
 import { getMechAddressesForStakingContract } from './filters/stakingFilter.js';
 import {
   getWorkerCredentialInfo,
+  getWorkerOperatorCapabilityInfo,
   isJobEligibleForWorker,
+  isJobEligibleForOperatorCapabilities,
   jobRequiresCredentials,
+  resolveMissingOperatorCapabilities,
   reprobeWithRequestId,
 } from './filters/credentialFilter.js';
 import { ServiceRotator } from './rotation/ServiceRotator.js';
@@ -1391,6 +1394,22 @@ async function processOnce(): Promise<boolean> {
 
     candidates = [specificRequest];
     workerLogger.info({ target: targetHex }, 'Targeting specific request');
+
+    // Always apply operator capability filtering (e.g. github token capability).
+    const operatorInfo = await getWorkerOperatorCapabilityInfo();
+    const missing = resolveMissingOperatorCapabilities(
+      specificRequest.enabledTools,
+      operatorInfo.capabilities,
+    );
+    if (missing.length > 0) {
+      consecutiveStuckCycles = 0;
+      lastStuckRequestIds = [];
+      workerLogger.info(
+        { target: targetHex, missingOperatorCapabilities: missing },
+        'Target request is not eligible for this worker operator capabilities',
+      );
+      return false;
+    }
   } else {
     const recent = await fetchRecentRequests(50);
     candidates = await filterUnclaimed(recent);
@@ -1407,6 +1426,42 @@ async function processOnce(): Promise<boolean> {
       consecutiveStuckCycles = 0;
       lastStuckRequestIds = [];
       workerLogger.info('No requests with met dependencies found');
+      return false;
+    }
+
+    // Filter by operator-local capability (e.g. validated github token)
+    const operatorInfo = await getWorkerOperatorCapabilityInfo();
+    const ineligibleByOperator = candidates.filter(
+      c => !isJobEligibleForOperatorCapabilities(c.enabledTools, operatorInfo.capabilities),
+    );
+    if (ineligibleByOperator.length > 0) {
+      const missingCapabilities = new Set<string>();
+      for (const candidate of ineligibleByOperator) {
+        const missing = resolveMissingOperatorCapabilities(
+          candidate.enabledTools,
+          operatorInfo.capabilities,
+        );
+        for (const capability of missing) {
+          missingCapabilities.add(capability);
+        }
+      }
+      workerLogger.info(
+        {
+          skippedRequestCount: ineligibleByOperator.length,
+          requestIds: ineligibleByOperator.map(c => c.id),
+          missingOperatorCapabilities: [...missingCapabilities],
+        },
+        'Skipping requests requiring unavailable operator capabilities',
+      );
+    }
+
+    candidates = candidates.filter(c =>
+      isJobEligibleForOperatorCapabilities(c.enabledTools, operatorInfo.capabilities),
+    );
+    if (candidates.length === 0) {
+      consecutiveStuckCycles = 0;
+      lastStuckRequestIds = [];
+      workerLogger.info('No eligible requests after operator capability filter');
       return false;
     }
 
