@@ -68,8 +68,10 @@ COPY scripts/init.sh ./scripts/
 RUN mkdir -p /home/jinn/.operate /home/jinn/.gemini /app/jinn-repos /tmp/.gemini-worker \
     && chown -R jinn:jinn /app /tmp/.gemini-worker /home/jinn
 
-# Persistent volume: home dir contains .operate/ (keystore) and .gemini/ (auth + extensions)
-VOLUME ["/home/jinn"]
+# Persistent volume: home dir contains .operate/ (keystore) and .gemini/ (auth + extensions).
+# No VOLUME directive here — Railway bans it. Docker/Compose users must mount explicitly:
+#   docker run -v jinn-data:/home/jinn ...
+# See docker-compose.yml and docs/docker-deployment.md for details.
 
 # Cap V8 heap to force earlier GC — without this, Node uses up to ~50% of container
 # memory (4GB in 8GB container), inflating baseline RAM. Override at runtime via
