@@ -113,14 +113,6 @@ trap cleanup_toml EXIT
 # =============================================================================
 is_macos() { [[ "$(uname)" == "Darwin" ]]; }
 
-sed_inplace() {
-  if is_macos; then
-    sed -i '' "$@"
-  else
-    sed -i "$@"
-  fi
-}
-
 # Create a Railway service, handling the interactive variable prompt.
 # Railway CLI's TUI crashes when stdin is piped but stdout is a TTY.
 # Wrapping with `script` allocates a pseudo-TTY so the TUI initializes,
@@ -322,7 +314,7 @@ push_env_vars() {
     [[ -z "$value" ]] && continue
 
     args+=("--set" "${key}=${value}")
-    (( count++ ))
+    count=$((count + 1))
   done < "$JINN_NODE_DIR/.env"
 
   if (( count == 0 )); then
@@ -395,7 +387,7 @@ IDLE_TOML
   if [[ -d "$HOME/.gemini" ]]; then
     local gemini_payload_size
     gemini_payload_size=$(tar czf - -C "$HOME" --exclude='antigravity' --exclude='antigravity-browser-profile' --exclude='tmp' .gemini 2>/dev/null | wc -c)
-    if (( gemini_payload_size < 2000000 )); then  # < 2MB is safe for command args
+    if (( gemini_payload_size < 1500000 )); then  # < 1.5MB tar → ~2MB base64 (fits ARG_MAX)
       info "Importing .gemini/ settings to volume..."
       if [[ "$DRY_RUN" == false ]]; then
         local gemini_payload
@@ -413,6 +405,9 @@ IDLE_TOML
   else
     info "No ~/.gemini found locally, skipping"
   fi
+
+  info "Fixing volume ownership..."
+  run railway ssh -- 'chown -R jinn:jinn /home/jinn'
 
   info "Verifying import..."
   run railway ssh -- 'ls -la /home/jinn/.operate /home/jinn/.gemini'
@@ -461,9 +456,10 @@ print_summary() {
   step "Done"
   echo ""
 
-  local current_project current_service
-  current_project=$(railway status 2>&1 | sed -n 's/.*Project: //p')
-  current_service=$(railway status 2>&1 | sed -n 's/.*Service: //p')
+  local status_out current_project current_service
+  status_out=$(railway status 2>&1 || true)
+  current_project=$(echo "$status_out" | sed -n 's/.*Project: //p')
+  current_service=$(echo "$status_out" | sed -n 's/.*Service: //p')
   current_project="${current_project:-$PROJECT_NAME}"
   current_service="${current_service:-$SERVICE_NAME}"
 

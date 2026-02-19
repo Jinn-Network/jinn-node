@@ -111,7 +111,7 @@ If deployment fails:
 
 4. Confirm `/home/jinn/.operate` and `/home/jinn/.gemini` are present:
    ```bash
-   railway ssh -- bash -lc 'ls -la /home/jinn/.operate /home/jinn/.gemini'
+   railway ssh -- 'ls -la /home/jinn/.operate /home/jinn/.gemini'
    ```
 
 5. Verify `OPERATE_PASSWORD` matches local keystore.

@@ -2,34 +2,54 @@
 
 Run from local `jinn-node/` where `.operate/` exists.
 
-**Prerequisite:** `railway ssh` requires a running container. On first-time deployment, the real worker will crash without `.operate/` on the volume. Deploy with an idle start command first — see SKILL.md step 5.
+**Recommended:** Use `bash scripts/deploy-railway.sh` which handles import automatically. This reference is for manual troubleshooting only.
 
-## Verify remote target directories
+**Prerequisites:**
+- `railway ssh` requires a running container. On first-time deployment, deploy with an idle start command first (the deploy script does this automatically).
+- Railway SSH uses WebSocket and does NOT forward stdin pipes. Use base64 encoding instead of `tar | railway ssh` piping.
+
+## Create remote directories
 
 ```bash
-railway ssh -- bash -lc 'mkdir -p /home/jinn/.operate /home/jinn/.gemini && ls -la /home/jinn'
+railway ssh -- 'mkdir -p /home/jinn/.operate /home/jinn/.gemini'
 ```
 
-## Stream `.operate`
+## Import `.operate` (excluding services/)
+
+`.operate/services/` is typically ~373MB and gets recreated at runtime. Exclude it to stay within the ~2MB command argument limit.
 
 ```bash
-tar czf - .operate | railway ssh -- bash -lc 'tar xzf - -C /home/jinn'
+payload=$(tar czf - --exclude='services' .operate | base64)
+railway ssh -- "echo '$payload' | base64 -d | tar xzf - -C /home/jinn"
 ```
 
-## Stream `.gemini` (if using Gemini CLI OAuth)
+## Import `.gemini` (if using Gemini CLI OAuth)
+
+Exclude bulky subdirectories that get recreated at runtime:
 
 ```bash
-[ -d "$HOME/.gemini" ] && tar czf - -C "$HOME" .gemini | railway ssh -- bash -lc 'tar xzf - -C /home/jinn'
+payload=$(tar czf - -C "$HOME" --exclude='antigravity' --exclude='antigravity-browser-profile' --exclude='tmp' .gemini | base64)
+railway ssh -- "echo '$payload' | base64 -d | tar xzf - -C /home/jinn"
+```
+
+## Fix volume ownership
+
+The Railway container runs SSH as root, but the worker runs as `jinn`. Fix permissions after import:
+
+```bash
+railway ssh -- 'chown -R jinn:jinn /home/jinn'
 ```
 
 ## Verify import
 
 ```bash
-railway ssh -- bash -lc 'ls -la /home/jinn/.operate /home/jinn/.gemini'
+railway ssh -- 'ls -la /home/jinn/.operate /home/jinn/.gemini'
 ```
 
 ## Notes
 
 - `railway ssh` requires Railway CLI auth and a running deployment.
-- On first deploy, the container needs an idle start command (e.g., `tail -f /dev/null`) since the real worker crashes without `.operate/`. See SKILL.md step 5.
-- **Fallback:** If `railway ssh` fails or is unavailable, use the Railway dashboard shell (Project > Service > Shell tab) to run the tar commands manually.
+- **Do NOT use `bash -lc` wrappers** — quoting breaks through Railway's SSH WebSocket transport. Pass commands directly.
+- **Do NOT pipe stdin** (e.g., `tar | railway ssh`) — Railway SSH doesn't forward stdin. Use base64 encoding as shown above.
+- **Fallback:** If `railway ssh` fails, use the Railway dashboard shell (Project > Service > Shell tab).
+- **Large directories** (>1.5MB tar): Too large for base64 command args. Use an intermediary (e.g., presigned S3 URL + wget from inside the container).
