@@ -323,7 +323,20 @@ push_env_vars() {
   fi
 
   info "Setting $count variables (batched, --skip-deploys)..."
-  run railway variables "${args[@]}" --skip-deploys
+  if [[ "$DRY_RUN" == true ]]; then
+    # List variable names only — never print secrets
+    while IFS= read -r line; do
+      [[ "$line" =~ ^[[:space:]]*# ]] && continue
+      [[ -z "${line// /}" ]] && continue
+      [[ ! "$line" =~ = ]] && continue
+      local k="${line%%=*}"
+      local v="${line#*=}"
+      [[ -z "$v" ]] && continue
+      info "  [dry-run] --set ${k}=***"
+    done < "$JINN_NODE_DIR/.env"
+  else
+    railway variables "${args[@]}" --skip-deploys
+  fi
   success "$count variables pushed"
 }
 
