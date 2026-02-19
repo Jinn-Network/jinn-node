@@ -67,7 +67,7 @@ Ask once:
 - `canary` mode: set `X402_GATEWAY_URL` to canary gateway URL.
 - `prod` mode: set `X402_GATEWAY_URL` to production gateway URL.
 
-### 2. Link or create Railway project
+### 2. Link or create Railway project and service
 
 First, check if already linked:
 
@@ -75,25 +75,39 @@ First, check if already linked:
 railway status
 ```
 
-If already linked to the correct project and service, skip to step 3.
+If already linked to the correct project **and** service, skip to step 3.
 
-**Option A — Existing project (user provides project ID or name):**
+**Option A — Existing project, existing service:**
+
+Always include `-s` to link the service. Without it, `railway link` leaves the service unlinked and subsequent commands (`volume add`, `variables --set`, `up`) fail with "No service found".
 
 ```bash
-railway link -p <project-id> -s <service-name> -e production
+railway link -p <project-name-or-id> -s <service-name> -e production
 ```
 
-**Option B — New project:**
+**Option B — Existing project, new service:**
+
+Link the project first (without `-s`), then create and link the new service:
+
+```bash
+railway link -p <project-name-or-id> -e production
+railway add --service <new-service-name>
+railway service link <new-service-name>
+```
+
+**Option C — New project:**
 
 ```bash
 railway init
 # When prompted, select workspace and enter project name.
-# After creation, link the service:
-railway add --service jinn-worker
-railway service link jinn-worker
+# After creation, add and link the service:
+railway add --service <service-name>
+railway service link <service-name>
 ```
 
-**Important:** `railway init` creates a new project every time. Always check `railway status` first to avoid creating duplicates.
+**Important:**
+- `railway init` creates a new project every time. Always check `railway status` first to avoid duplicates.
+- `railway link` without `-s` leaves no service linked. Always verify with `railway status` that both project and service are shown before proceeding.
 
 ### 3. Create and attach persistent volume
 
