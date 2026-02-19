@@ -14,6 +14,17 @@ import { createServer } from 'net';
 import { logger } from '../logging/index.js';
 
 const operateLogger = logger.child({ component: "OLAS-OPERATE-WRAPPER" });
+const RPC_ALIAS_CHAIN_NAMES = [
+  'arbitrum_one',
+  'base',
+  'celo',
+  'ethereum',
+  'gnosis',
+  'mode',
+  'optimism',
+  'polygon',
+  'solana',
+] as const;
 
 export interface OperateCommandResult {
   success: boolean;
@@ -371,7 +382,7 @@ export class OlasOperateWrapper {
    * @private
    */
   private _buildDefaultEnv(): Record<string, string> {
-    const env: Record<string, string> = {};
+    const env: Record<string, string> = this._buildRpcAliasEnv();
     
     // JINN-202: Support both attended (interactive) and unattended (programmatic) modes
     // - attended=true: Middleware shows funding prompts (for interactive setup)
@@ -398,16 +409,74 @@ export class OlasOperateWrapper {
     if (this.config.defaultEnv?.stakingProgram) {
       env.STAKING_PROGRAM = this.config.defaultEnv.stakingProgram;
     }
-    
-    // Add chain-specific RPC URLs
+
+    return env;
+  }
+
+  /**
+   * Build a full RPC alias map from the canonical runtime RPC URL.
+   *
+   * Operator contract:
+   * - `RPC_URL` is the only required input.
+   *
+   * Runtime compatibility:
+   * - Populate all known alias env vars consumed by operate/autonomy internals.
+   * - Preserve optional chain-specific overrides when provided via chainLedgerRpc.
+   */
+  private _buildRpcAliasEnv(): Record<string, string> {
+    const chainSpecificRpcs = new Map<string, string>();
+
     if (this.config.defaultEnv?.chainLedgerRpc) {
       for (const [chain, rpcUrl] of Object.entries(this.config.defaultEnv.chainLedgerRpc)) {
-        const envVar = `${chain.toUpperCase()}_LEDGER_RPC`;
-        env[envVar] = rpcUrl;
+        const normalizedChain = this._normalizeChainName(chain);
+        const normalizedRpc = rpcUrl?.trim();
+        if (normalizedChain && normalizedRpc) {
+          chainSpecificRpcs.set(normalizedChain, normalizedRpc);
+        }
       }
     }
-    
+
+    const canonicalRpc =
+      this._resolveCanonicalRpcUrl() ??
+      chainSpecificRpcs.values().next().value ??
+      null;
+
+    if (!canonicalRpc) {
+      return {};
+    }
+
+    const env: Record<string, string> = {
+      RPC_URL: canonicalRpc,
+      CUSTOM_CHAIN_RPC: canonicalRpc,
+    };
+
+    for (const chain of RPC_ALIAS_CHAIN_NAMES) {
+      const chainRpc = chainSpecificRpcs.get(chain) ?? canonicalRpc;
+      const prefix = chain.toUpperCase();
+      env[`${prefix}_RPC`] = chainRpc;
+      env[`${prefix}_LEDGER_RPC`] = chainRpc;
+      env[`${prefix}_CHAIN_RPC`] = chainRpc;
+    }
+
     return env;
+  }
+
+  private _resolveCanonicalRpcUrl(): string | null {
+    const configuredRpc = this.rpcUrl?.trim();
+    if (configuredRpc) {
+      return configuredRpc;
+    }
+
+    const envRpc = process.env.RPC_URL?.trim();
+    if (envRpc) {
+      return envRpc;
+    }
+
+    return null;
+  }
+
+  private _normalizeChainName(chain: string): string {
+    return chain.trim().toLowerCase().replace(/-/g, '_');
   }
 
   /**
@@ -459,7 +528,9 @@ export class OlasOperateWrapper {
         STAKING_PROGRAM: env.STAKING_PROGRAM,
         hasOperatePassword: typeof env.OPERATE_PASSWORD === 'string' && env.OPERATE_PASSWORD.length > 0,
         operatePasswordLength: env.OPERATE_PASSWORD?.length,
-        LEDGER_RPCs: Object.keys(env).filter(k => k.endsWith('_LEDGER_RPC')).reduce((acc, k) => ({ ...acc, [k]: env[k]?.substring(0, 50) + '...' }), {})
+        RPC_ALIASES: Object.keys(env)
+          .filter((k) => k === 'RPC_URL' || k === 'CUSTOM_CHAIN_RPC' || k.endsWith('_CHAIN_RPC') || k.endsWith('_LEDGER_RPC'))
+          .reduce((acc, k) => ({ ...acc, [k]: `${env[k]?.substring(0, 50)}...` }), {})
       }
     }, "Executing operate command with environment");
 
@@ -696,16 +767,10 @@ export class OlasOperateWrapper {
       const usePoetry = this.pythonBinary === 'poetry';
       const actualCommand = usePoetry ? 'poetry' : this.pythonBinary;
       const actualArgs = usePoetry ? ['run', 'python', ...args] : args;
-      const env: Record<string, string> = {};
-      if (this.rpcUrl) {
-        // Set chain-specific RPC environment variables
-        // For now, set both BASE and GNOSIS to support either chain
-        env['BASE_LEDGER_RPC'] = this.rpcUrl;
-        env['BASE_RPC'] = this.rpcUrl;
-        env['GNOSIS_LEDGER_RPC'] = this.rpcUrl;
-        env['GNOSIS_RPC'] = this.rpcUrl;
-      }
-      env['OPERATE_HOME'] = operateHome;
+      const env: Record<string, string> = {
+        ...this._buildRpcAliasEnv(),
+        OPERATE_HOME: operateHome,
+      };
       
       operateLogger.info({
         command: actualCommand,
