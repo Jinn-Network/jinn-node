@@ -374,11 +374,11 @@ IDLE_TOML
   fi
 
   info "Creating target directories..."
-  run railway ssh -- bash -lc 'mkdir -p /home/jinn/.operate /home/jinn/.gemini'
+  run railway ssh -- 'mkdir -p /home/jinn/.operate /home/jinn/.gemini'
 
   info "Streaming .operate/ to volume..."
   if [[ "$DRY_RUN" == false ]]; then
-    (cd "$JINN_NODE_DIR" && tar czf - .operate) | railway ssh -- bash -lc 'tar xzf - -C /home/jinn'
+    (cd "$JINN_NODE_DIR" && tar czf - .operate) | railway ssh -- 'tar xzf - -C /home/jinn'
   else
     info "[dry-run] tar .operate | railway ssh -- tar xzf - -C /home/jinn"
   fi
@@ -388,7 +388,7 @@ IDLE_TOML
   if [[ -d "$HOME/.gemini" ]]; then
     info "Streaming .gemini/ to volume..."
     if [[ "$DRY_RUN" == false ]]; then
-      tar czf - -C "$HOME" .gemini | railway ssh -- bash -lc 'tar xzf - -C /home/jinn'
+      tar czf - -C "$HOME" .gemini | railway ssh -- 'tar xzf - -C /home/jinn'
     else
       info "[dry-run] tar .gemini | railway ssh -- tar xzf - -C /home/jinn"
     fi
@@ -398,7 +398,7 @@ IDLE_TOML
   fi
 
   info "Verifying import..."
-  run railway ssh -- bash -lc 'ls -la /home/jinn/.operate /home/jinn/.gemini'
+  run railway ssh -- 'ls -la /home/jinn/.operate /home/jinn/.gemini'
 
   # Restore railway.toml from backup
   info "Restoring railway.toml..."
