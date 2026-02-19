@@ -113,28 +113,32 @@ The worker requires persistent `/home/jinn/.operate` and `/home/jinn/.gemini`.
 
 Use the variable contract in `references/variables.md`.
 
-Set all variables with `--skip-deploys` to avoid redundant redeployments:
+Batch all variables in a single call with `--skip-deploys`:
 
 ```bash
-railway variables --set "RPC_URL=..." --skip-deploys
-railway variables --set "CHAIN_ID=8453" --skip-deploys
-railway variables --set "OPERATE_PASSWORD=..." --skip-deploys
-railway variables --set "PONDER_GRAPHQL_URL=..." --skip-deploys
-railway variables --set "CONTROL_API_URL=..." --skip-deploys
-railway variables --set "X402_GATEWAY_URL=..." --skip-deploys
+railway variables \
+  --set "RPC_URL=..." \
+  --set "CHAIN_ID=8453" \
+  --set "OPERATE_PASSWORD=..." \
+  --set "PONDER_GRAPHQL_URL=..." \
+  --set "CONTROL_API_URL=..." \
+  --set "X402_GATEWAY_URL=..." \
+  --skip-deploys
 ```
 
-Strongly recommended:
+Strongly recommended (can be batched in the same or a separate call):
 
 ```bash
-railway variables --set "GITHUB_TOKEN=..." --skip-deploys
-railway variables --set "GIT_AUTHOR_NAME=..." --skip-deploys
-railway variables --set "GIT_AUTHOR_EMAIL=..." --skip-deploys
-railway variables --set "WORKSTREAM_FILTER=..." --skip-deploys
-railway variables --set "WORKER_MULTI_SERVICE=true" --skip-deploys
+railway variables \
+  --set "GITHUB_TOKEN=..." \
+  --set "GIT_AUTHOR_NAME=..." \
+  --set "GIT_AUTHOR_EMAIL=..." \
+  --set "WORKSTREAM_FILTER=..." \
+  --set "WORKER_MULTI_SERVICE=true" \
+  --skip-deploys
 ```
 
-**Note:** Use `--skip-deploys` on every call. Deploy explicitly in step 5.
+**Note:** Multiple `--set` flags work in one call. Use `--skip-deploys` to defer deployment until step 5.
 
 ### 5. Deploy idle container for SSH import
 
