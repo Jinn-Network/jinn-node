@@ -228,8 +228,8 @@ ensure_project_linked() {
   status_output=$(railway status 2>&1 || true)
 
   local linked_project linked_service
-  linked_project=$(echo "$status_output" | grep -oP 'Project: \K.*' || true)
-  linked_service=$(echo "$status_output" | grep -oP 'Service: \K.*' || true)
+  linked_project=$(echo "$status_output" | sed -n 's/.*Project: //p' || true)
+  linked_service=$(echo "$status_output" | sed -n 's/.*Service: //p' || true)
 
   # Already linked to the right project and service?
   if [[ -n "$linked_project" && -n "$linked_service" ]]; then
@@ -430,8 +430,10 @@ print_summary() {
   echo ""
 
   local current_project current_service
-  current_project=$(railway status 2>&1 | grep -oP 'Project: \K.*' || echo "$PROJECT_NAME")
-  current_service=$(railway status 2>&1 | grep -oP 'Service: \K.*' || echo "$SERVICE_NAME")
+  current_project=$(railway status 2>&1 | sed -n 's/.*Project: //p')
+  current_service=$(railway status 2>&1 | sed -n 's/.*Service: //p')
+  current_project="${current_project:-$PROJECT_NAME}"
+  current_service="${current_service:-$SERVICE_NAME}"
 
   info "Project:  $current_project"
   info "Service:  $current_service"
