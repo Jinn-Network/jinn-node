@@ -633,11 +633,12 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
     }
 
     // Query our local Ponder GraphQL (custom schema) - FILTER BY MECH AND UNDELIVERED (and optionally WORKSTREAM)
+    // Sort desc so newest requests appear first — prevents old undelivered requests from filling the pagination limit
     const query = `query RecentRequests(${varDefs.join(', ')}) {
   requests(
     where: ${whereClause}
     orderBy: "blockTimestamp"
-    orderDirection: "asc"
+    orderDirection: "desc"
     limit: $limit
   ) {
     items {
@@ -716,7 +717,7 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
   requests(
     where: ${templateWhereClause}
     orderBy: "blockTimestamp"
-    orderDirection: "asc"
+    orderDirection: "desc"
     limit: $tLimit
   ) {
     items {
