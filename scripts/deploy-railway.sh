@@ -382,17 +382,17 @@ IDLE_TOML
   run railway ssh -- 'mkdir -p /home/jinn/.operate /home/jinn/.gemini'
 
   # Railway SSH uses WebSocket and does NOT forward stdin pipes.
-  # Instead, we tar the essential files (excluding services/ which is ~373MB
-  # and gets recreated at runtime), base64-encode the payload (~13KB), and
-  # pass it as a command argument to decode+extract on the remote side.
-  info "Importing .operate/ to volume (excluding services/)..."
+  # We tar .operate/ excluding only deployment/ dirs (Python venvs, ~179MB each,
+  # recreated at runtime). Service configs (config.json, keys.json) are preserved.
+  # The result is base64-encoded and passed as a command argument.
+  info "Importing .operate/ to volume (excluding deployment venvs)..."
   if [[ "$DRY_RUN" == false ]]; then
     local payload
-    payload=$(cd "$JINN_NODE_DIR" && tar czf - --exclude='services' .operate | base64)
+    payload=$(cd "$JINN_NODE_DIR" && tar czf - --exclude='services/*/deployment' .operate | base64)
     railway ssh -- "echo '$payload' | base64 -d | tar xzf - -C /home/jinn"
-    success ".operate imported (keys, wallets, config)"
+    success ".operate imported (keys, wallets, service configs)"
   else
-    info "[dry-run] base64-encode .operate (excl services/) → railway ssh decode+extract"
+    info "[dry-run] base64-encode .operate (excl deployment venvs) → railway ssh decode+extract"
     success ".operate imported"
   fi
 

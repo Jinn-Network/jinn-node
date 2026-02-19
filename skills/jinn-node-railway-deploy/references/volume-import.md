@@ -14,12 +14,12 @@ Run from local `jinn-node/` where `.operate/` exists.
 railway ssh -- 'mkdir -p /home/jinn/.operate /home/jinn/.gemini'
 ```
 
-## Import `.operate` (excluding services/)
+## Import `.operate` (excluding deployment venvs)
 
-`.operate/services/` is typically ~373MB and gets recreated at runtime. Exclude it to stay within the ~2MB command argument limit.
+`.operate/services/*/deployment/` contains Python venvs (~179MB per service) that get recreated at runtime. Exclude only `deployment/` — the service config files (`config.json`, `keys.json`) must be preserved.
 
 ```bash
-payload=$(tar czf - --exclude='services' .operate | base64)
+payload=$(tar czf - --exclude='services/*/deployment' .operate | base64)
 railway ssh -- "echo '$payload' | base64 -d | tar xzf - -C /home/jinn"
 ```
 
@@ -44,6 +44,7 @@ railway ssh -- 'chown -R jinn:jinn /home/jinn'
 
 ```bash
 railway ssh -- 'ls -la /home/jinn/.operate /home/jinn/.gemini'
+railway ssh -- 'ls /home/jinn/.operate/services/sc-*/config.json'
 ```
 
 ## Notes
