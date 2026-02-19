@@ -142,7 +142,7 @@ const EARNING_MAX_JOBS = (() => {
 const WORKSTREAM_FILTERS: string[] = (() => {
   const arg = process.argv.find(arg => arg.startsWith('--workstream='));
   const raw = arg ? arg.split('=')[1] : process.env.WORKSTREAM_FILTER;
-  if (!raw) return [];
+  if (!raw || raw === 'none') return [];
 
   // Try parsing as JSON array first
   if (raw.startsWith('[')) {
