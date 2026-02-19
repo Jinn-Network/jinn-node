@@ -13,6 +13,7 @@ import { buildIpfsPayload, type BuildIpfsPayloadOptions, type BuildIpfsPayloadRe
 import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
 import { getMechAddress, getServicePrivateKey, getMechChainConfig } from '../../env/operate-profile.js';
 import { getRequiredRpcUrl } from '../mcp/tools/shared/env.js';
+import { getRandomStakedMech } from '../../worker/filters/stakingFilter.js';
 
 export interface DispatchCoreParams extends BuildIpfsPayloadOptions {
   /**
@@ -71,10 +72,13 @@ export async function dispatchToMarketplace(params: DispatchCoreParams): Promise
     throw new Error('Service agent private key not found. Check .operate/keys directory.');
   }
 
-  // 4. Post to marketplace
+  // 4. Select a random staked mech for fair distribution
+  const priorityMech = await getRandomStakedMech(mechAddress);
+
+  // 5. Post to marketplace
   const result = await (marketplaceInteract as any)({
     prompts: [buildOpts.blueprint],
-    priorityMech: mechAddress,
+    priorityMech,
     tools: buildOpts.enabledTools || [],
     ipfsJsonContents,
     chainConfig,

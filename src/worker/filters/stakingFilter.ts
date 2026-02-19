@@ -9,6 +9,10 @@
 import { graphQLRequest } from '../../http/client.js';
 import { workerLogger } from '../../logging/index.js';
 import { getPonderGraphqlUrl } from '../../agent/mcp/tools/shared/env.js';
+import { getOptionalWorkerStakingContract } from '../../config/index.js';
+
+/** Default Jinn staking contract on Base */
+const DEFAULT_JINN_STAKING_CONTRACT = '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139';
 
 // Cache configuration
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -180,4 +184,32 @@ export function getStakingFilterCacheStatus(): { size: number; entries: { contra
     ageSeconds: Math.round((now - data.fetchedAt) / 1000),
   }));
   return { size: cache.size, entries };
+}
+
+/**
+ * Pick a random mech address from the set staked in the configured staking contract.
+ *
+ * Uses WORKER_STAKING_CONTRACT env var if set, otherwise defaults to the Jinn
+ * staking contract. Falls back to `fallbackMech` if the query fails or returns
+ * no results.
+ *
+ * The underlying getMechAddressesForStakingContract() has a 5-minute TTL cache,
+ * so this adds negligible overhead per dispatch.
+ */
+export async function getRandomStakedMech(fallbackMech: string): Promise<string> {
+  const stakingContract = getOptionalWorkerStakingContract() || DEFAULT_JINN_STAKING_CONTRACT;
+
+  try {
+    const mechs = await getMechAddressesForStakingContract(stakingContract);
+    if (mechs.length === 0) {
+      workerLogger.debug({ fallbackMech }, 'No staked mechs found, using fallback');
+      return fallbackMech;
+    }
+    const selected = mechs[Math.floor(Math.random() * mechs.length)];
+    workerLogger.debug({ selected, pool: mechs.length }, 'Selected random staked mech');
+    return selected;
+  } catch (e: any) {
+    workerLogger.warn({ error: e?.message, fallbackMech }, 'Failed to query staked mechs, using fallback');
+    return fallbackMech;
+  }
 }

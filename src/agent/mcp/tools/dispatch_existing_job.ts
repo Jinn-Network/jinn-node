@@ -4,6 +4,7 @@ import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketpla
 import { getCurrentJobContext } from './shared/context.js';
 import { getJobContextForDispatch } from './shared/job-context-utils.js';
 import { getMechAddress, getMechChainConfig, getServicePrivateKey } from '../../../env/operate-profile.js';
+import { getRandomStakedMech } from '../../../worker/filters/stakingFilter.js';
 import { getPonderGraphqlUrl } from './shared/env.js';
 import { collectLocalCodeMetadata, ensureJobBranch } from '../../shared/code_metadata.js';
 import { getCodeMetadataDefaultBaseBranch } from '../../../config/index.js';
@@ -442,17 +443,19 @@ export async function dispatchExistingJob(args: unknown) {
   }
 
   try {
-    const priorityMech = getMechAddress();
+    const localMech = getMechAddress();
     const privateKey = getServicePrivateKey();
     const chainConfig = getMechChainConfig();
 
-    if (!priorityMech) {
+    if (!localMech) {
       throw new Error('Service target mech address not configured. Check .operate service config (MECH_TO_CONFIG).');
     }
 
     if (!privateKey) {
       throw new Error('Service agent private key not found. Check .operate/keys directory.');
     }
+
+    const priorityMech = await getRandomStakedMech(localMech);
 
     const result = await marketplaceInteract({
       prompts: [finalBlueprint],
