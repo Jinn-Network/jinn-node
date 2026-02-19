@@ -91,7 +91,7 @@ EXPOSE 8080
 # Run as non-root
 USER jinn
 
-# dumb-init as PID 1 for proper signal forwarding
-# worker_launcher.js handles SIGTERM/SIGINT propagation to child processes
-ENTRYPOINT ["dumb-init", "--"]
-CMD ["node", "dist/worker/worker_launcher.js"]
+# Default command (Railway overrides via startCommand in railway.toml).
+# dumb-init wraps the process for proper signal forwarding in plain Docker.
+# Note: Railway startCommand replaces both ENTRYPOINT and CMD.
+CMD ["dumb-init", "--", "node", "dist/worker/worker_launcher.js"]
