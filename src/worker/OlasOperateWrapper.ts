@@ -450,7 +450,11 @@ export class OlasOperateWrapper {
       CUSTOM_CHAIN_RPC: canonicalRpc,
     };
 
-    for (const chain of RPC_ALIAS_CHAIN_NAMES) {
+    const chainAliasNames = Array.from(
+      new Set<string>([...RPC_ALIAS_CHAIN_NAMES, ...chainSpecificRpcs.keys()])
+    );
+
+    for (const chain of chainAliasNames) {
       const chainRpc = chainSpecificRpcs.get(chain) ?? canonicalRpc;
       const prefix = chain.toUpperCase();
       env[`${prefix}_RPC`] = chainRpc;
@@ -477,6 +481,22 @@ export class OlasOperateWrapper {
 
   private _normalizeChainName(chain: string): string {
     return chain.trim().toLowerCase().replace(/-/g, '_');
+  }
+
+  /**
+   * Return only RPC alias key names for safe logging (no endpoint values).
+   */
+  private _getRpcAliasLogKeys(env: Record<string, string>): string[] {
+    return Object.keys(env)
+      .filter(
+        (k) =>
+          k === 'RPC_URL' ||
+          k === 'CUSTOM_CHAIN_RPC' ||
+          k.endsWith('_RPC') ||
+          k.endsWith('_CHAIN_RPC') ||
+          k.endsWith('_LEDGER_RPC')
+      )
+      .sort();
   }
 
   /**
@@ -528,9 +548,7 @@ export class OlasOperateWrapper {
         STAKING_PROGRAM: env.STAKING_PROGRAM,
         hasOperatePassword: typeof env.OPERATE_PASSWORD === 'string' && env.OPERATE_PASSWORD.length > 0,
         operatePasswordLength: env.OPERATE_PASSWORD?.length,
-        RPC_ALIASES: Object.keys(env)
-          .filter((k) => k === 'RPC_URL' || k === 'CUSTOM_CHAIN_RPC' || k.endsWith('_CHAIN_RPC') || k.endsWith('_LEDGER_RPC'))
-          .reduce((acc, k) => ({ ...acc, [k]: `${env[k]?.substring(0, 50)}...` }), {})
+        RPC_ALIAS_KEYS: this._getRpcAliasLogKeys(env)
       }
     }, "Executing operate command with environment");
 
