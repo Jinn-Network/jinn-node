@@ -23,7 +23,7 @@ PROJECT_NAME=""
 SERVICE_NAME="jinn-worker"
 SKIP_IMPORT=false
 DRY_RUN=false
-ORIGINAL_START_CMD=""
+TOML_BACKED_UP=false
 
 # =============================================================================
 # Formatting
@@ -99,10 +99,11 @@ parse_args() {
 # Cleanup trap — restore railway.toml if modified
 # =============================================================================
 cleanup_toml() {
-  if [[ -n "$ORIGINAL_START_CMD" ]]; then
-    warn "Restoring railway.toml (interrupted)..."
-    sed_inplace "s|startCommand = .*|startCommand = \"$ORIGINAL_START_CMD\"|" "$RAILWAY_TOML"
-    ORIGINAL_START_CMD=""
+  if [[ "$TOML_BACKED_UP" == true && -f "${RAILWAY_TOML}.bak" ]]; then
+    warn "Restoring railway.toml from backup (interrupted)..."
+    cp "${RAILWAY_TOML}.bak" "$RAILWAY_TOML"
+    rm -f "${RAILWAY_TOML}.bak"
+    TOML_BACKED_UP=false
   fi
 }
 trap cleanup_toml EXIT
@@ -345,18 +346,19 @@ import_credentials() {
 
   step "Importing credentials via SSH"
 
-  # Save the real startCommand for restoration
-  ORIGINAL_START_CMD=$(grep 'startCommand' "$RAILWAY_TOML" | sed 's/.*startCommand = "//' | sed 's/"$//')
+  # Back up railway.toml so we can restore it on failure
+  cp "$RAILWAY_TOML" "${RAILWAY_TOML}.bak"
+  TOML_BACKED_UP=true
 
   info "Setting idle start command (tail -f /dev/null)..."
-  sed_inplace "s|startCommand = .*|startCommand = \"tail -f /dev/null\"|" "$RAILWAY_TOML"
+  sed_inplace 's|startCommand = .*|startCommand = "tail -f /dev/null"|' "$RAILWAY_TOML"
 
   info "Deploying idle container..."
   run railway up --detach
 
   info "Waiting for container to start..."
   if [[ "$DRY_RUN" == false ]]; then
-    poll_until_running 180
+    poll_until_running 360
   fi
 
   info "Creating target directories..."
@@ -386,10 +388,11 @@ import_credentials() {
   info "Verifying import..."
   run railway ssh -- bash -lc 'ls -la /home/jinn/.operate /home/jinn/.gemini'
 
-  # Restore railway.toml
-  info "Restoring real start command..."
-  sed_inplace "s|startCommand = .*|startCommand = \"$ORIGINAL_START_CMD\"|" "$RAILWAY_TOML"
-  ORIGINAL_START_CMD=""  # Clear so trap is a no-op
+  # Restore railway.toml from backup
+  info "Restoring railway.toml..."
+  cp "${RAILWAY_TOML}.bak" "$RAILWAY_TOML"
+  rm -f "${RAILWAY_TOML}.bak"
+  TOML_BACKED_UP=false
   success "Credentials imported, railway.toml restored"
 }
 
