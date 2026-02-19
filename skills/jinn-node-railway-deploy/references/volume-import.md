@@ -2,6 +2,8 @@
 
 Run from local `jinn-node/` where `.operate/` exists.
 
+**Prerequisite:** `railway ssh` requires a running container. On first-time deployment, the real worker will crash without `.operate/` on the volume. Deploy with an idle start command first — see SKILL.md step 5.
+
 ## Verify remote target directories
 
 ```bash
@@ -28,5 +30,6 @@ railway ssh -- bash -lc 'ls -la /home/jinn/.operate /home/jinn/.gemini'
 
 ## Notes
 
-- This requires Railway CLI auth and SSH access to the deployed service.
-- If `tar` streaming is blocked by your shell/CI, use Railway dashboard shell and copy manually.
+- `railway ssh` requires Railway CLI auth and a running deployment.
+- On first deploy, the container needs an idle start command (e.g., `tail -f /dev/null`) since the real worker crashes without `.operate/`. See SKILL.md step 5.
+- **Fallback:** If `railway ssh` fails or is unavailable, use the Railway dashboard shell (Project > Service > Shell tab) to run the tar commands manually.

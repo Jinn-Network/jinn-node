@@ -7,6 +7,7 @@ metadata:
   openclaw:
     requires:
       bins: [railway, tar]
+      railway_min_version: "4.16.0"
     primaryEnv: OPERATE_PASSWORD
     source: https://github.com/Jinn-Network/jinn-node
 ---
@@ -32,10 +33,28 @@ Run these checks first:
 
 ```bash
 cd jinn-node
+
+# 1. Local setup must be complete
 [ -d .operate ] || { echo ".operate missing. Run local setup first."; exit 1; }
 [ -f .env ] || { echo ".env missing. Copy from .env.example and fill required vars."; exit 1; }
-railway --version
-railway whoami
+
+# 2. Railway CLI version check (minimum 4.16.0)
+RAILWAY_VERSION=$(railway --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+if [ -z "$RAILWAY_VERSION" ]; then
+  echo "Railway CLI not found. Install: npm install -g @railway/cli"
+  exit 1
+fi
+MAJOR=$(echo "$RAILWAY_VERSION" | cut -d. -f1)
+MINOR=$(echo "$RAILWAY_VERSION" | cut -d. -f2)
+if [ "$MAJOR" -lt 4 ] || { [ "$MAJOR" -eq 4 ] && [ "$MINOR" -lt 16 ]; }; then
+  echo "Railway CLI $RAILWAY_VERSION is too old. Minimum: 4.16.0"
+  echo "Update: npm install -g @railway/cli@latest"
+  exit 1
+fi
+echo "Railway CLI $RAILWAY_VERSION OK"
+
+# 3. Authentication check
+railway whoami || { echo "Not logged in. Run: railway login"; exit 1; }
 ```
 
 If `.operate` is missing, stop and direct user to finish local setup first.
@@ -48,83 +67,162 @@ Ask once:
 - `canary` mode: set `X402_GATEWAY_URL` to canary gateway URL.
 - `prod` mode: set `X402_GATEWAY_URL` to production gateway URL.
 
-### 2. Create/link Railway project and service
+### 2. Link or create Railway project
 
-From `jinn-node/`:
+First, check if already linked:
 
 ```bash
-railway login
-railway init
-railway link
-railway up
+railway status
 ```
 
-This picks up `railway.toml` automatically.
+If already linked to the correct project and service, skip to step 3.
+
+**Option A — Existing project (user provides project ID or name):**
+
+```bash
+railway link -p <project-id> -s <service-name> -e production
+```
+
+**Option B — New project:**
+
+```bash
+railway init
+# When prompted, select workspace and enter project name.
+# After creation, link the service:
+railway add --service jinn-worker
+railway service link jinn-worker
+```
+
+**Important:** `railway init` creates a new project every time. Always check `railway status` first to avoid creating duplicates.
 
 ### 3. Create and attach persistent volume
 
-Create and attach a volume mounted at `/home/jinn`:
-
 ```bash
 railway volume add --mount-path /home/jinn
-railway volume list
-# attach if needed:
-railway volume attach --volume <volume-id-or-name>
 ```
 
-The worker requires persisted `/home/jinn/.operate` and `/home/jinn/.gemini`.
+Verify:
+
+```bash
+railway volume list
+```
+
+The worker requires persistent `/home/jinn/.operate` and `/home/jinn/.gemini`.
 
 ### 4. Configure Railway variables
 
 Use the variable contract in `references/variables.md`.
 
-Minimum required values are:
-- `RPC_URL`
-- `CHAIN_ID=8453`
-- `OPERATE_PASSWORD`
-- `PONDER_GRAPHQL_URL`
-- `CONTROL_API_URL`
-- `X402_GATEWAY_URL`
-
-Recommended:
-- `GITHUB_TOKEN`
-- `GIT_AUTHOR_NAME`
-- `GIT_AUTHOR_EMAIL`
-- `WORKSTREAM_FILTER` (canary workstream)
-- `WORKER_MULTI_SERVICE=true` when `.operate/services` contains 2+ services.
-
-Set values one-by-one to avoid quoting mistakes:
+Set all variables with `--skip-deploys` to avoid redundant redeployments:
 
 ```bash
-railway variables set RPC_URL="..."
-railway variables set CHAIN_ID="8453"
-railway variables set OPERATE_PASSWORD="..."
-railway variables set PONDER_GRAPHQL_URL="..."
-railway variables set CONTROL_API_URL="..."
-railway variables set X402_GATEWAY_URL="..."
+railway variables --set "RPC_URL=..." --skip-deploys
+railway variables --set "CHAIN_ID=8453" --skip-deploys
+railway variables --set "OPERATE_PASSWORD=..." --skip-deploys
+railway variables --set "PONDER_GRAPHQL_URL=..." --skip-deploys
+railway variables --set "CONTROL_API_URL=..." --skip-deploys
+railway variables --set "X402_GATEWAY_URL=..." --skip-deploys
 ```
 
-### 5. Import `.operate` and `.gemini`
-
-Use the `tar` streaming method in `references/volume-import.md`.
-
-This is mandatory before first successful worker run.
-
-### 6. Deploy and verify
+Strongly recommended:
 
 ```bash
-railway up
-railway logs -f
+railway variables --set "GITHUB_TOKEN=..." --skip-deploys
+railway variables --set "GIT_AUTHOR_NAME=..." --skip-deploys
+railway variables --set "GIT_AUTHOR_EMAIL=..." --skip-deploys
+railway variables --set "WORKSTREAM_FILTER=..." --skip-deploys
+railway variables --set "WORKER_MULTI_SERVICE=true" --skip-deploys
+```
+
+**Note:** Use `--skip-deploys` on every call. Deploy explicitly in step 5.
+
+### 5. Deploy idle container for SSH import
+
+The volume import (step 6) requires `railway ssh`, which needs a running container. But the real worker will crash without `.operate/` on the volume. Deploy with an idle start command first.
+
+Temporarily edit `railway.toml`:
+
+```toml
+[deploy]
+startCommand = "tail -f /dev/null"
+```
+
+Then deploy:
+
+```bash
+railway up --detach
+```
+
+Wait for it to reach Running state:
+
+```bash
+railway service status
+```
+
+### 6. Import .operate and .gemini via SSH
+
+With the idle container running, stream credentials into the volume:
+
+```bash
+# Create target directories
+railway ssh -- bash -lc 'mkdir -p /home/jinn/.operate /home/jinn/.gemini'
+
+# Stream .operate
+tar czf - .operate | railway ssh -- bash -lc 'tar xzf - -C /home/jinn'
+
+# Stream .gemini (if using Gemini CLI OAuth)
+[ -d "$HOME/.gemini" ] && tar czf - -C "$HOME" .gemini | railway ssh -- bash -lc 'tar xzf - -C /home/jinn'
+
+# Verify
+railway ssh -- bash -lc 'ls -la /home/jinn/.operate /home/jinn/.gemini'
+```
+
+**Fallback:** If `railway ssh` fails, use the Railway dashboard shell (Project > Service > Shell tab) to run the tar commands manually.
+
+See `references/volume-import.md` for details.
+
+### 7. Restore real start command and redeploy
+
+Restore `railway.toml` to the real start command:
+
+```toml
+[deploy]
+startCommand = "bash scripts/init.sh && node dist/worker/worker_launcher.js"
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+```
+
+Redeploy:
+
+```bash
+railway up --detach
+```
+
+### 8. Verify deployment
+
+Check deployment status and retrieve logs:
+
+```bash
+# List recent deployments to identify the deployment ID
+railway deployment list
+
+# Get deployment-specific logs (replace <deployment-id> with the ID from above)
+railway logs --lines 200 <deployment-id>
 ```
 
 Expected signals in logs:
-- init script completed,
-- worker started,
-- no keystore decryption failure,
-- worker polling requests,
-- health endpoint available.
+- `[init] Worker initialization complete`
+- Worker started and polling for requests
+- No keystore decryption failure
+- Health endpoint responding
 
-### 7. Canary validation (if canary mode)
+**Healthcheck port:** Railway auto-sets the `PORT` environment variable. The worker reads `HEALTHCHECK_PORT` > `PORT` > `8080` (default). Do not set `PORT` manually.
+
+**Do NOT use `railway logs -f`** — in CLI 4.16+, `-f` is the `--filter` flag, not "follow". Default `railway logs` (without `--lines`) streams live. Use `railway logs --lines N` for historical logs.
+
+### 9. Canary validation (if canary mode)
 
 - Keep `WORKSTREAM_FILTER` restricted to canary workstream.
 - Keep `X402_GATEWAY_URL` pointed at canary gateway.
@@ -140,8 +238,27 @@ Expected signals in logs:
 ## Failure handling
 
 If deployment fails:
-1. capture `railway logs --lines 300`,
-2. confirm volume exists and is attached,
-3. confirm `/home/jinn/.operate` and `/home/jinn/.gemini` are present,
-4. verify `OPERATE_PASSWORD` matches local keystore,
-5. verify endpoint URLs and gateway mode (canary vs prod).
+
+1. List deployments and identify the failed one:
+   ```bash
+   railway deployment list
+   ```
+
+2. Capture deployment-specific logs:
+   ```bash
+   railway logs --lines 300 <failed-deployment-id>
+   ```
+
+3. Confirm volume exists and is attached:
+   ```bash
+   railway volume list
+   ```
+
+4. Confirm `/home/jinn/.operate` and `/home/jinn/.gemini` are present:
+   ```bash
+   railway ssh -- bash -lc 'ls -la /home/jinn/.operate /home/jinn/.gemini'
+   ```
+
+5. Verify `OPERATE_PASSWORD` matches local keystore.
+
+6. Verify endpoint URLs and gateway mode (canary vs prod).

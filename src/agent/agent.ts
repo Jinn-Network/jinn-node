@@ -660,9 +660,14 @@ export class Agent {
       `--remote-debugging-port=${port}`,
       `--user-data-dir=${userDataDir}`,
     ];
-    // In containers (GEMINI_SANDBOX=false), Chrome needs --no-sandbox
+    // In containers (GEMINI_SANDBOX=false), Chrome needs extra flags:
+    // --no-sandbox: required for running as non-root in containers
+    // --disable-dev-shm-usage: Railway doesn't expose shm_size config;
+    //   without this Chrome crashes when /dev/shm is the default 64MB.
+    //   Docker Compose handles this via shm_size: 2gb, but Railway has no equivalent.
     if (process.env.GEMINI_SANDBOX === 'false') {
       chromeArgs.push('--no-sandbox');
+      chromeArgs.push('--disable-dev-shm-usage');
     }
     chromeArgs.push('about:blank');
 

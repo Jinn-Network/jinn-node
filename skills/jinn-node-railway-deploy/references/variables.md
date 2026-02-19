@@ -2,6 +2,12 @@
 
 Use this file when setting Railway environment variables for `jinn-node`.
 
+**Important:** When setting multiple variables, use `--skip-deploys` on each call to avoid triggering a redundant redeployment per variable. Deploy explicitly after all variables are configured.
+
+```bash
+railway variables --set "KEY=value" --skip-deploys
+```
+
 ## Required
 
 | Variable | Notes |
@@ -32,12 +38,15 @@ Use this file when setting Railway environment variables for `jinn-node`.
 | `WORKER_COUNT` | Parallel worker processes in one container |
 | `WORKER_STUCK_EXIT_CYCLES` | Auto-exit safety watchdog |
 | `WORKER_JOB_DELAY_MS` | Delay between job cycles |
+| `HEALTHCHECK_PORT` | Override healthcheck port (takes priority over Railway's `PORT`) |
+
+**Note:** Railway auto-sets the `PORT` environment variable. The worker reads `HEALTHCHECK_PORT` > `PORT` > `8080` (default). Do not set `PORT` manually.
 
 ## Canary -> Prod gateway switch
 
 Only change:
 
 ```bash
-railway variables set X402_GATEWAY_URL="https://<prod-gateway-domain>"
-railway up
+railway variables --set "X402_GATEWAY_URL=https://<prod-gateway-domain>"
+railway up --detach
 ```
