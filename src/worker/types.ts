@@ -218,13 +218,14 @@ export interface AdditionalContext {
  */
 export interface UnclaimedRequest {
   id: string;           // on-chain requestId (decimal string or 0x)
-  mech: string;         // mech address (0x...)
+  mech: string;         // mech address (0x...) — the priority mech assigned to this request
   requester: string;    // requester address (0x...)
   workstreamId?: string; // workstream context for dependency resolution
   blockTimestamp?: number;
   ipfsHash?: string;
   delivered?: boolean;
   dependencies?: string[];  // request IDs that must be delivered first
+  responseTimeout?: number; // absolute unix timestamp (seconds) after which any mech can deliver
 }
 
 /**

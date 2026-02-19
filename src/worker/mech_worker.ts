@@ -50,13 +50,14 @@ export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
 
 type UnclaimedRequest = {
   id: string;           // on-chain requestId (decimal string or 0x)
-  mech: string;         // mech address (0x...)
+  mech: string;         // mech address (0x...) — the priority mech assigned to this request
   requester: string;    // requester address (0x...)
   workstreamId?: string; // workstream context for dependency resolution
   blockTimestamp?: number;
   dependencies?: string[];  // job definition IDs or names that must be delivered first
   ipfsHash?: string;
   delivered?: boolean;
+  responseTimeout?: number; // absolute unix timestamp (seconds) after which any mech can deliver
 };
 
 type JobDefinitionStatus = {
@@ -846,6 +847,10 @@ async function filterUnclaimed(requests: UnclaimedRequest[]): Promise<UnclaimedR
         const isDelivered = requestInfo.deliveryMech !== '0x0000000000000000000000000000000000000000';
 
         if (!isDelivered) {
+          // Store responseTimeout from on-chain data for priority window checks
+          if (requestInfo.responseTimeout) {
+            request.responseTimeout = Number(requestInfo.responseTimeout);
+          }
           filtered.push(request);
         } else {
           workerLogger.debug({
@@ -1517,6 +1522,30 @@ async function processOnce(): Promise<boolean> {
     } catch {
       // If metadata fetch fails, treat as normal job
     }
+  }
+
+  // Pre-execution guard: skip non-own-mech requests still within priority window.
+  // After responseTimeout, any mech can deliver — but during the window, only the
+  // priority mech can, so executing would waste LLM credits.
+  const ownMech = getMechAddress();
+  if (ownMech && target.mech.toLowerCase() !== ownMech.toLowerCase()) {
+    const now = Math.floor(Date.now() / 1000);
+    if (target.responseTimeout && now <= target.responseTimeout) {
+      workerLogger.info({
+        requestId: target.id,
+        targetMech: target.mech,
+        ownMech,
+        responseTimeout: target.responseTimeout,
+        secondsRemaining: target.responseTimeout - now,
+      }, 'Skipping non-own-mech request still within priority window — would waste LLM credits');
+      return false;
+    }
+    workerLogger.info({
+      requestId: target.id,
+      targetMech: target.mech,
+      ownMech,
+      responseTimeout: target.responseTimeout,
+    }, 'Non-own-mech request past priority window — will execute and deliver via own mech');
   }
 
   // Wait for quota only after successful claim (lazy quota check)

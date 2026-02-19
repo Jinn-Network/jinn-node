@@ -477,7 +477,7 @@ export async function deliverViaSafeTransaction(
   workerLogger.info({ requestId: context.requestId }, '[DELIVERY_START] Function entered');
   const chainConfig = getOptionalMechChainConfig() || 'base';
   const safeAddress = getServiceSafeAddress();
-  const targetMechAddress = context.request.mech;
+  let targetMechAddress = context.request.mech;
   const privateKey = getServicePrivateKey();
   const rpcHttpUrl = getRequiredRpcUrl();
   workerLogger.info({ requestId: context.requestId, hasRpc: !!rpcHttpUrl }, '[DELIVERY_START] Config loaded');
@@ -487,17 +487,38 @@ export async function deliverViaSafeTransaction(
     throw new Error('Missing Safe delivery configuration');
   }
 
-  // Guard: ensure request's mech matches our own mech address.
-  // In staking filter mode, the worker may fetch requests from other operators' mechs.
-  // Delivering to a mech we don't control will always revert (onlyOperator check).
+  // Cross-mech delivery: if request's priority mech differs from ours, we can still
+  // deliver after the responseTimeout expires. The on-chain MechMarketplace allows any
+  // registered mech to deliver once the priority window has passed. We route the delivery
+  // through OUR mech's deliverToMarketplace (which has onlyOperator for our Safe).
   const ownMechAddress = getMechAddress();
   if (ownMechAddress && targetMechAddress.toLowerCase() !== ownMechAddress.toLowerCase()) {
-    workerLogger.error({
-      requestId: context.requestId,
-      targetMech: targetMechAddress,
-      ownMech: ownMechAddress,
-    }, 'Mech address mismatch: request belongs to a different mech than this worker controls. Skipping delivery.');
-    throw new Error(`Mech mismatch: request mech ${targetMechAddress} != worker mech ${ownMechAddress}`);
+    // Check if the priority window has expired via the request's responseTimeout
+    const responseTimeout = context.request.responseTimeout;
+    const now = Math.floor(Date.now() / 1000);
+
+    if (responseTimeout && now > responseTimeout) {
+      workerLogger.info({
+        requestId: context.requestId,
+        priorityMech: targetMechAddress,
+        ownMech: ownMechAddress,
+        responseTimeout,
+        secondsPastTimeout: now - responseTimeout,
+      }, 'Cross-mech delivery: priority window expired — routing through own mech');
+      // Override targetMechAddress to our own mech so deliverViaSafe calls
+      // OUR mech's deliverToMarketplace (onlyOperator passes for our Safe).
+      // The marketplace will accept this since the timeout has expired.
+      targetMechAddress = ownMechAddress;
+    } else {
+      workerLogger.error({
+        requestId: context.requestId,
+        targetMech: targetMechAddress,
+        ownMech: ownMechAddress,
+        responseTimeout,
+        now,
+      }, 'Mech mismatch: request still within priority window or missing timeout data. Skipping delivery.');
+      throw new Error(`Mech mismatch: request mech ${targetMechAddress} != worker mech ${ownMechAddress} (priority window not expired)`);
+    }
   }
 
   // Check Safe deployment
@@ -561,9 +582,12 @@ export async function deliverViaSafeTransaction(
     }
   }
   
+  // For undelivered verification, always check the PRIORITY mech's undelivered list
+  // (not our own mech, which wouldn't have the request in its list for cross-mech cases)
+  const verifyMechAddress = context.request.mech;
   workerLogger.info({ requestId: context.requestId }, '[DELIVERY_VERIFY] Starting verification');
   const isUndelivered = await verifyUndeliveredStatus({
-    mechAddress: targetMechAddress,
+    mechAddress: verifyMechAddress,
     requestIdHex,
     requestId: context.requestId,
     rpcHttpUrl,
