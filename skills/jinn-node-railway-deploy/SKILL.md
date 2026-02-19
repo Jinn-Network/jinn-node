@@ -91,7 +91,7 @@ Link the project first (without `-s`), then create and link the new service:
 
 ```bash
 railway link -p <project-name-or-id> -e production
-railway add --service <new-service-name>
+railway add --service <new-service-name> < /dev/null
 railway service link <new-service-name>
 ```
 
@@ -101,7 +101,7 @@ railway service link <new-service-name>
 railway init
 # When prompted, select workspace and enter project name.
 # After creation, add and link the service:
-railway add --service <service-name>
+railway add --service <service-name> < /dev/null
 railway service link <service-name>
 ```
 
