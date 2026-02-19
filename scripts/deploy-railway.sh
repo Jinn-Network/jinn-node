@@ -350,8 +350,20 @@ import_credentials() {
   cp "$RAILWAY_TOML" "${RAILWAY_TOML}.bak"
   TOML_BACKED_UP=true
 
-  info "Setting idle start command (tail -f /dev/null)..."
-  sed_inplace 's|startCommand = .*|startCommand = "tail -f /dev/null"|' "$RAILWAY_TOML"
+  # Write a minimal railway.toml for the idle container.
+  # CRITICAL: No healthcheckPath — tail -f /dev/null doesn't serve HTTP,
+  # so any healthcheck would fail and prevent the container from reaching Running.
+  info "Writing idle railway.toml (no healthcheck)..."
+  cat > "$RAILWAY_TOML" <<'IDLE_TOML'
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "tail -f /dev/null"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
+IDLE_TOML
 
   info "Deploying idle container..."
   run railway up --detach
