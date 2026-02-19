@@ -396,24 +396,27 @@ IDLE_TOML
     success ".operate imported"
   fi
 
-  # Import .gemini settings if present (OAuth tokens, settings.json)
+  # Import .gemini settings if present (OAuth tokens, settings.json).
+  # Exclude bulky dirs that get recreated at runtime:
+  #   antigravity (~1.1G), antigravity-browser-profile (~344M), tmp, extensions (~60M)
+  local gemini_excludes=(--exclude='antigravity' --exclude='antigravity-browser-profile' --exclude='tmp' --exclude='extensions')
   if [[ -d "$HOME/.gemini" ]]; then
     local gemini_payload_size
-    gemini_payload_size=$(tar czf - -C "$HOME" --exclude='antigravity' --exclude='antigravity-browser-profile' --exclude='tmp' .gemini 2>/dev/null | wc -c)
+    gemini_payload_size=$(tar czf - -C "$HOME" "${gemini_excludes[@]}" .gemini 2>/dev/null | wc -c)
     if (( gemini_payload_size < 1500000 )); then  # < 1.5MB tar → ~2MB base64 (fits ARG_MAX)
       info "Importing .gemini/ settings to volume..."
       if [[ "$DRY_RUN" == false ]]; then
         local gemini_payload
-        gemini_payload=$(tar czf - -C "$HOME" --exclude='antigravity' --exclude='antigravity-browser-profile' --exclude='tmp' .gemini | base64)
+        gemini_payload=$(tar czf - -C "$HOME" "${gemini_excludes[@]}" .gemini | base64)
         railway ssh -- "echo '$gemini_payload' | base64 -d | tar xzf - -C /home/jinn"
-        success ".gemini imported (settings, extensions)"
+        success ".gemini imported (OAuth tokens, settings)"
       else
         info "[dry-run] base64-encode .gemini (excl bulky dirs) → railway ssh decode+extract"
         success ".gemini imported"
       fi
     else
       warn ".gemini/ too large for SSH import ($(( gemini_payload_size / 1024 / 1024 ))MB). Skipping."
-      info "Extensions will be installed by init.sh at runtime."
+      info "Set GEMINI_API_KEY env var instead, or reduce ~/.gemini/ size."
     fi
   else
     info "No ~/.gemini found locally, skipping"

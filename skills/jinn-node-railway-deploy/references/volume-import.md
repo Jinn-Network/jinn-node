@@ -25,10 +25,10 @@ railway ssh -- "echo '$payload' | base64 -d | tar xzf - -C /home/jinn"
 
 ## Import `.gemini` (if using Gemini CLI OAuth)
 
-Exclude bulky subdirectories that get recreated at runtime:
+Exclude bulky subdirectories that get recreated at runtime (`antigravity` ~1.1G, `antigravity-browser-profile` ~344M, `extensions` ~60M, `tmp`). Only the OAuth tokens and settings JSON files (~8KB) are needed:
 
 ```bash
-payload=$(tar czf - -C "$HOME" --exclude='antigravity' --exclude='antigravity-browser-profile' --exclude='tmp' .gemini | base64)
+payload=$(tar czf - -C "$HOME" --exclude='antigravity' --exclude='antigravity-browser-profile' --exclude='tmp' --exclude='extensions' .gemini | base64)
 railway ssh -- "echo '$payload' | base64 -d | tar xzf - -C /home/jinn"
 ```
 
