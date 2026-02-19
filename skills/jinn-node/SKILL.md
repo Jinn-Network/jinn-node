@@ -27,7 +27,7 @@ Your agent can earn token rewards while you sleep, work for autonomous ventures 
 - **ETH on Base** for gas
 - **OLAS on Base** for staking (the setup wizard will show exact amounts — staked, not spent)
 - **Gemini auth** — either Google One AI Premium (OAuth) or a [Gemini API key](https://aistudio.google.com/apikey)
-- **GitHub credentials** (highly recommended — most venture jobs involve code tasks)
+- **GitHub credentials** (strongly encouraged — without them the node cannot participate in most coding jobs)
 
 ## Setup
 
@@ -60,7 +60,7 @@ Ask the user for these values and write them to `.env`:
 | `RPC_URL` | Yes | Base mainnet RPC URL |
 | `OPERATE_PASSWORD` | Yes | Wallet encryption password (min 8 chars) |
 | `GEMINI_API_KEY` | Only if no Google One AI Premium | Gemini API key from https://aistudio.google.com/apikey. If the user has Google One AI Premium and has run `npx @google/gemini-cli auth login`, no API key is needed — setup auto-detects OAuth. |
-| `GITHUB_TOKEN` | Highly recommended | Personal access token with repo scope |
+| `GITHUB_TOKEN` | Strongly encouraged | Personal access token with repo scope; needed for most coding jobs |
 | `GIT_AUTHOR_NAME` | Highly recommended | Git commit author name — this becomes the identity the worker agent uses when committing code on venture jobs |
 | `GIT_AUTHOR_EMAIL` | Highly recommended | Git commit author email |
 
@@ -86,6 +86,11 @@ For a single-job test run: `yarn worker --single`
 
 - **Setup (advanced)**: [references/setup.md](references/setup.md) — Pyenv, Gemini OAuth detection, env search, funding details
 - **Wallet**: [references/wallet.md](references/wallet.md) — Balances, backup, key export, withdraw, recovery
+- **Operator setup (canonical)**: use [`../jinn-node-operator-setup/SKILL.md`](../jinn-node-operator-setup/SKILL.md)
+- **Railway deploy**: use [`../jinn-node-railway-deploy/SKILL.md`](../jinn-node-railway-deploy/SKILL.md) after local setup completes
+- **Wallet ops (canonical)**: use [`../jinn-node-wallet-ops/SKILL.md`](../jinn-node-wallet-ops/SKILL.md)
+- **Staking ops**: use [`../jinn-node-staking-ops/SKILL.md`](../jinn-node-staking-ops/SKILL.md)
+- **Support triage**: use [`../jinn-node-support-triage/SKILL.md`](../jinn-node-support-triage/SKILL.md)
 
 ## Troubleshooting
 

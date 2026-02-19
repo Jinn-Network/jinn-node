@@ -114,6 +114,75 @@ const FORBIDDEN_AGENT_ENV_KEYS = [
   'NANGO_SECRET_KEY',
 ];
 
+// Bridge-managed secrets must never be injected via MCP settings placeholders.
+// They must be fetched at runtime by credential bridge launchers/wrappers.
+const BRIDGE_MANAGED_SECRET_PLACEHOLDERS = new Set([
+  'TELEGRAM_BOT_TOKEN',
+  'OPENAI_API_KEY',
+  'CIVITAI_API_TOKEN',
+  'CIVITAI_API_KEY',
+  'FIREFLIES_API_KEY',
+  'RAILWAY_API_TOKEN',
+  'SUPABASE_SERVICE_ROLE_KEY',
+  'UMAMI_USERNAME',
+  'UMAMI_PASSWORD',
+  'NANGO_SECRET_KEY',
+]);
+
+function assertNoBridgeManagedSecretPlaceholder(value: string, serverName: string, field: string): void {
+  const placeholderRegex = /\$\{([A-Z_][A-Z0-9_]*)\}/g;
+  const blocked = new Set<string>();
+  for (const match of value.matchAll(placeholderRegex)) {
+    const envVar = match[1];
+    if (BRIDGE_MANAGED_SECRET_PLACEHOLDERS.has(envVar)) {
+      blocked.add(envVar);
+    }
+  }
+  if (blocked.size > 0) {
+    throw new Error(
+      `Forbidden bridge-managed secret placeholder(s) in MCP server "${serverName}" ${field}: ${[...blocked].join(', ')}. ` +
+      'Use credential bridge-backed MCP launchers instead of template env substitution.'
+    );
+  }
+}
+
+function isRelativeFileSpecifier(value: string): boolean {
+  return value.startsWith('./') || value.startsWith('../');
+}
+
+function resolveMcpServerCommandAndArgs(settings: GeminiSettings, agentRoot: string): void {
+  if (!settings.mcpServers) return;
+
+  let tsxExecutable: string | undefined;
+  try {
+    const tsxBinaryName = process.platform === 'win32' ? 'tsx.cmd' : 'tsx';
+    const tsxCandidates = [
+      resolve(agentRoot, '..', 'node_modules', '.bin', tsxBinaryName),
+      resolve(agentRoot, 'node_modules', '.bin', tsxBinaryName),
+    ];
+    tsxExecutable = tsxCandidates.find(candidate => existsSync(candidate));
+  } catch (error) {
+    agentLogger.warn({ error: error instanceof Error ? error.message : String(error) }, 'Failed to resolve tsx binary for MCP servers');
+  }
+
+  for (const [, serverConfig] of Object.entries(settings.mcpServers)) {
+    if (serverConfig.command === 'tsx' && tsxExecutable) {
+      serverConfig.command = tsxExecutable;
+    } else if (isRelativeFileSpecifier(serverConfig.command) && !isAbsolute(serverConfig.command)) {
+      serverConfig.command = resolve(agentRoot, serverConfig.command);
+    }
+
+    if (Array.isArray(serverConfig.args)) {
+      serverConfig.args = serverConfig.args.map(arg => {
+        if (typeof arg === 'string' && isRelativeFileSpecifier(arg) && !isAbsolute(arg)) {
+          return resolve(agentRoot, arg);
+        }
+        return arg;
+      });
+    }
+  }
+}
+
 function assertNoForbiddenAgentEnv(env: NodeJS.ProcessEnv): void {
   const leaked = FORBIDDEN_AGENT_ENV_KEYS.filter((key) => Boolean(env[key]));
   if (leaked.length > 0) {
@@ -203,6 +272,7 @@ export function substituteEnvVariables(settings: GeminiSettings): GeminiSettings
     if (serverConfig.env) {
       const substitutedEnv: Record<string, string> = {};
       for (const [key, value] of Object.entries(serverConfig.env)) {
+        assertNoBridgeManagedSecretPlaceholder(value, serverName, `env.${key}`);
         // Match ${VAR_NAME} pattern
         const match = value.match(/^\$\{([A-Z_][A-Z0-9_]*)\}$/);
         if (match) {
@@ -222,9 +292,9 @@ export function substituteEnvVariables(settings: GeminiSettings): GeminiSettings
     }
 
     // Also substitute ${VAR_NAME} placeholders in args arrays
-    // (e.g., Fireflies uses "Authorization: Bearer ${FIREFLIES_API_KEY}" in args)
     if (serverConfig.args) {
       serverConfig.args = serverConfig.args.map(arg => {
+        assertNoBridgeManagedSecretPlaceholder(arg, serverName, 'args');
         return arg.replace(/\$\{([A-Z_][A-Z0-9_]*)\}/g, (_, envVar) => {
           const envValue = process.env[envVar];
           if (!envValue) {
@@ -1248,35 +1318,15 @@ export class Agent {
       // Done AFTER removing unused servers so we don't fail on missing env vars for disabled servers
       substituteEnvVariables(templateSettings);
 
+      // Resolve server command + argument paths for every MCP server entry.
+      // This keeps wrapper paths stable regardless of process cwd.
+      resolveMcpServerCommandAndArgs(templateSettings, this.agentRoot);
+
       const serverName = templateSettings.mcpServers.metacog ? 'metacog' : Object.keys(templateSettings.mcpServers)[0];
       if (!serverName) throw new Error('No MCP servers found in template configuration');
 
       const mcpServer = templateSettings.mcpServers[serverName];
       if (!mcpServer) throw new Error(`MCP server '${serverName}' not found in template configuration`);
-
-      // Resolve MCP command to absolute path so it works even when running outside repo root
-      try {
-        const tsxBinaryName = process.platform === 'win32' ? 'tsx.cmd' : 'tsx';
-        const tsxCandidates = [
-          resolve(this.agentRoot, '..', 'node_modules', '.bin', tsxBinaryName),
-          resolve(this.agentRoot, 'node_modules', '.bin', tsxBinaryName)
-        ];
-        const tsxExecutable = tsxCandidates.find(candidate => existsSync(candidate));
-        if (tsxExecutable) {
-          mcpServer.command = tsxExecutable;
-        }
-      } catch (error) {
-        agentLogger.warn({ error: error instanceof Error ? error.message : String(error) }, 'Failed to resolve tsx binary for MCP server');
-      }
-
-      if (Array.isArray(mcpServer.args)) {
-        mcpServer.args = mcpServer.args.map(arg => {
-          if (typeof arg === 'string' && !arg.startsWith('-') && !isAbsolute(arg)) {
-            return resolve(this.agentRoot, arg);
-          }
-          return arg;
-        });
-      }
 
       // Compute tool policy using centralized logic
       // This ensures MCP include/exclude and CLI whitelist are consistent

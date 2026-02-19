@@ -13,14 +13,18 @@
       ],
       "trust": true
     },
-    "fireflies": {
-      "command": "npx",
+    "railway": {
+      "command": "node",
       "args": [
-        "-y",
-        "mcp-remote",
-        "https://api.fireflies.ai/mcp",
-        "--header",
-        "Authorization: Bearer ${FIREFLIES_API_KEY}"
+        "./mcp/launchers/railway-mcp.js"
+      ],
+      "trust": true,
+      "includeTools": []
+    },
+    "fireflies": {
+      "command": "node",
+      "args": [
+        "./mcp/launchers/fireflies-mcp.js"
       ],
       "trust": true,
       "includeTools": []

@@ -214,19 +214,31 @@ async function umamiApiCall<T>(
     });
   }
 
-  const response = await fetch(url.toString(), {
-    headers: {
-      'Authorization': `Bearer ${config.token}`,
-      'Content-Type': 'application/json',
-    },
-  });
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await fetch(url.toString(), {
+        headers: {
+          'Authorization': `Bearer ${config.token}`,
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(15_000),
+      });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Umami API error: ${response.status} ${response.statusText} - ${errorText}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Umami API error: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+
+      return response.json();
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < 2) {
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      }
+    }
   }
-
-  return response.json();
+  throw lastError!;
 }
 
 function getTimeRange(days: number): { startAt: Date; endAt: Date } {
