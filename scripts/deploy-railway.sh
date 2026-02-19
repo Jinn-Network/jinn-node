@@ -376,23 +376,40 @@ IDLE_TOML
   info "Creating target directories..."
   run railway ssh -- 'mkdir -p /home/jinn/.operate /home/jinn/.gemini'
 
-  info "Streaming .operate/ to volume..."
+  # Railway SSH uses WebSocket and does NOT forward stdin pipes.
+  # Instead, we tar the essential files (excluding services/ which is ~373MB
+  # and gets recreated at runtime), base64-encode the payload (~13KB), and
+  # pass it as a command argument to decode+extract on the remote side.
+  info "Importing .operate/ to volume (excluding services/)..."
   if [[ "$DRY_RUN" == false ]]; then
-    (cd "$JINN_NODE_DIR" && tar czf - .operate) | railway ssh -- 'tar xzf - -C /home/jinn'
+    local payload
+    payload=$(cd "$JINN_NODE_DIR" && tar czf - --exclude='services' .operate | base64)
+    railway ssh -- "echo '$payload' | base64 -d | tar xzf - -C /home/jinn"
+    success ".operate imported (keys, wallets, config)"
   else
-    info "[dry-run] tar .operate | railway ssh -- tar xzf - -C /home/jinn"
+    info "[dry-run] base64-encode .operate (excl services/) → railway ssh decode+extract"
+    success ".operate imported"
   fi
-  success ".operate imported"
 
-  # Import .gemini if it exists locally
+  # Import .gemini settings if present (OAuth tokens, settings.json)
   if [[ -d "$HOME/.gemini" ]]; then
-    info "Streaming .gemini/ to volume..."
-    if [[ "$DRY_RUN" == false ]]; then
-      tar czf - -C "$HOME" .gemini | railway ssh -- 'tar xzf - -C /home/jinn'
+    local gemini_payload_size
+    gemini_payload_size=$(tar czf - -C "$HOME" --exclude='antigravity' --exclude='antigravity-browser-profile' --exclude='tmp' .gemini 2>/dev/null | wc -c)
+    if (( gemini_payload_size < 2000000 )); then  # < 2MB is safe for command args
+      info "Importing .gemini/ settings to volume..."
+      if [[ "$DRY_RUN" == false ]]; then
+        local gemini_payload
+        gemini_payload=$(tar czf - -C "$HOME" --exclude='antigravity' --exclude='antigravity-browser-profile' --exclude='tmp' .gemini | base64)
+        railway ssh -- "echo '$gemini_payload' | base64 -d | tar xzf - -C /home/jinn"
+        success ".gemini imported (settings, extensions)"
+      else
+        info "[dry-run] base64-encode .gemini (excl bulky dirs) → railway ssh decode+extract"
+        success ".gemini imported"
+      fi
     else
-      info "[dry-run] tar .gemini | railway ssh -- tar xzf - -C /home/jinn"
+      warn ".gemini/ too large for SSH import ($(( gemini_payload_size / 1024 / 1024 ))MB). Skipping."
+      info "Extensions will be installed by init.sh at runtime."
     fi
-    success ".gemini imported"
   else
     info "No ~/.gemini found locally, skipping"
   fi
