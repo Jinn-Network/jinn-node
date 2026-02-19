@@ -279,8 +279,11 @@ ensure_volume() {
   local volume_output
   volume_output=$(railway volume list 2>&1 || true)
 
-  if echo "$volume_output" | grep -q "/home/jinn"; then
-    success "Volume already mounted at /home/jinn"
+  # Check if a volume is attached to THIS service at /home/jinn
+  # Volume list output format: "Attached to: <service-name>" followed by "Mount path: /home/jinn"
+  # We need to match the current SERVICE_NAME, not just any volume in the project.
+  if echo "$volume_output" | grep -A2 "Attached to: $SERVICE_NAME" | grep -q "/home/jinn"; then
+    success "Volume already mounted at /home/jinn on $SERVICE_NAME"
     return 0
   fi
 
