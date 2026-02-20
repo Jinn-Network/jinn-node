@@ -32,6 +32,7 @@ import { runPreflight } from './preflight.js';
 import { printHeader, printStep, printSuccess, printError } from './display.js';
 import { syncCredentials } from '../auth/index.js';
 import { hasAuthManagerCredentials, syncAndWriteGeminiCredentials } from '../worker/llm/authIntegration.js';
+import { DEFAULT_MECH_DELIVERY_RATE } from '../worker/config/MechConfig.js';
 
 const setupLogger = logger.child({ component: "SETUP-CLI" });
 
@@ -358,8 +359,8 @@ async function main() {
     : undefined;
   const attendedMode = args.unattended ? false : envAttended ?? false;
 
-  // Set mech request price to 0.000005 ETH (5000000000000 wei) for cost-effective marketplace requests
-  const mechRequestPrice = '5000000000000'; // 0.000005 ETH in wei
+  // Keep setup defaults aligned with service:add and ecosystem mech delivery expectations.
+  const mechRequestPrice = DEFAULT_MECH_DELIVERY_RATE;
 
   // Create isolated environment if requested
   let isolatedEnv: IsolatedEnvironment | undefined;
@@ -415,7 +416,7 @@ async function main() {
     }
     console.log(`Mech deployment: ${config.deployMech ? 'ENABLED' : 'DISABLED'}`);
     if (config.deployMech) {
-      console.log(`   Request Price: ${mechRequestPrice} wei (0.000005 ETH)`);
+      console.log(`   Request Price: ${mechRequestPrice} wei`);
       console.log(`   Marketplace: ${config.mechMarketplaceAddress}`);
     }
     console.log('');
