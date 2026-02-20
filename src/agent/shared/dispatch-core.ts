@@ -2,15 +2,16 @@
  * Dispatch Core — shared "post to marketplace" logic.
  *
  * Used by:
- *  - dispatch_new_job  (MCP tool, agent-initiated)
- *  - ventureDispatch   (worker, schedule-initiated)
+ *  - dispatch_new_job  (MCP tool, agent-initiated → routes through signing proxy)
+ *  - ventureDispatch   (worker, schedule-initiated → calls marketplaceInteract directly)
  *
- * This module owns the credential-loading + marketplaceInteract call so that
- * callers only need to worry about building the IPFS payload.
+ * When AGENT_SIGNING_PROXY_URL is set (agent context), dispatch routes through
+ * the signing proxy so the agent process never touches private keys.
+ * When not set (worker context), falls back to direct marketplaceInteract.
  */
 
 import { buildIpfsPayload, type BuildIpfsPayloadOptions, type BuildIpfsPayloadResult } from './ipfs-payload-builder.js';
-import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
+import { proxyDispatch, type DispatchResult } from './signing-proxy-client.js';
 import { getMechAddress, getServicePrivateKey, getMechChainConfig } from '../../env/operate-profile.js';
 import { getRequiredRpcUrl } from '../mcp/tools/shared/env.js';
 import { getRandomStakedMech } from '../../worker/filters/stakingFilter.js';
@@ -43,8 +44,8 @@ export interface DispatchCoreResult {
 /**
  * Build an IPFS payload and post it to the on-chain marketplace.
  *
- * Loads mech credentials from the operate profile and calls marketplaceInteract
- * with postOnly: true.
+ * Routes through the signing proxy when AGENT_SIGNING_PROXY_URL is set (agent context),
+ * otherwise falls back to direct marketplaceInteract (worker context).
  */
 export async function dispatchToMarketplace(params: DispatchCoreParams): Promise<DispatchCoreResult> {
   const { responseTimeout = 300, transformPayload, ...buildOpts } = params;
@@ -58,37 +59,52 @@ export async function dispatchToMarketplace(params: DispatchCoreParams): Promise
     ipfsJsonContents[0] = transformPayload(ipfsJsonContents[0]);
   }
 
-  // 3. Load credentials
-  const mechAddress = getMechAddress();
-  const privateKey = getServicePrivateKey();
-  const chainConfig = getMechChainConfig();
-  const rpcHttpUrl = getRequiredRpcUrl();
+  // 3. Determine dispatch path
+  const useProxy = !!process.env.AGENT_SIGNING_PROXY_URL;
+  let result: any;
 
-  if (!mechAddress) {
-    throw new Error('Service target mech address not configured. Check .operate service config (MECH_TO_CONFIG).');
+  if (useProxy) {
+    // Agent context: route through signing proxy — private key never leaves worker process
+    result = await proxyDispatch({
+      prompts: [buildOpts.blueprint],
+      tools: buildOpts.enabledTools || [],
+      ipfsJsonContents,
+      postOnly: true,
+      responseTimeout,
+    });
+  } else {
+    // Worker context: direct marketplaceInteract with local credentials
+    const { marketplaceInteract } = await import('@jinn-network/mech-client-ts/dist/marketplace_interact.js');
+
+    const mechAddress = getMechAddress();
+    const privateKey = getServicePrivateKey();
+    const chainConfig = getMechChainConfig();
+    const rpcHttpUrl = getRequiredRpcUrl();
+
+    if (!mechAddress) {
+      throw new Error('Service target mech address not configured. Check .operate service config (MECH_TO_CONFIG).');
+    }
+
+    if (!privateKey) {
+      throw new Error('Service agent private key not found. Check .operate/keys directory.');
+    }
+
+    const priorityMech = await getRandomStakedMech(mechAddress);
+
+    result = await (marketplaceInteract as any)({
+      prompts: [buildOpts.blueprint],
+      priorityMech,
+      tools: buildOpts.enabledTools || [],
+      ipfsJsonContents,
+      chainConfig,
+      keyConfig: { source: 'value', value: privateKey },
+      postOnly: true,
+      responseTimeout,
+      rpcHttpUrl,
+    });
   }
 
-  if (!privateKey) {
-    throw new Error('Service agent private key not found. Check .operate/keys directory.');
-  }
-
-  // 4. Select a random staked mech for fair distribution
-  const priorityMech = await getRandomStakedMech(mechAddress);
-
-  // 5. Post to marketplace
-  const result = await (marketplaceInteract as any)({
-    prompts: [buildOpts.blueprint],
-    priorityMech,
-    tools: buildOpts.enabledTools || [],
-    ipfsJsonContents,
-    chainConfig,
-    keyConfig: { source: 'value', value: privateKey },
-    postOnly: true,
-    responseTimeout,
-    rpcHttpUrl,
-  });
-
-  // 5. Normalize request IDs
+  // 4. Normalize request IDs
   const rawIds = result?.request_ids ?? result?.requestIds ?? [];
   const requestIds = Array.isArray(rawIds)
     ? rawIds.map((id: any) => String(id))
