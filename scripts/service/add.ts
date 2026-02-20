@@ -19,7 +19,7 @@ import { promises as fsPromises } from 'fs';
 import { join } from 'path';
 import { OlasOperateWrapper } from '../../src/worker/OlasOperateWrapper.js';
 import { createDefaultServiceConfig, SERVICE_CONSTANTS } from '../../src/worker/config/ServiceConfig.js';
-import { enableMechMarketplaceInConfig } from '../../src/worker/config/MechConfig.js';
+import { enableMechMarketplaceInConfig, DEFAULT_MECH_DELIVERY_RATE } from '../../src/worker/config/MechConfig.js';
 import { listServiceConfigs, cleanupUndeployedConfigs } from '../../src/worker/ServiceConfigReader.js';
 import { printHeader, printStep, printFundingRequirements, printSuccess, printError } from '../../src/setup/display.js';
 import { ethers } from 'ethers';
@@ -121,7 +121,6 @@ async function main() {
 
   // Keep add-service defaults aligned with setup CLI.
   // DEFAULT_MECH_DELIVERY_RATE = 99 — must match ecosystem standard or marketplace rejects delivery.
-  const { DEFAULT_MECH_DELIVERY_RATE } = await import('../src/worker/config/MechConfig.js');
   const mechRequestPrice = mechPrice || DEFAULT_MECH_DELIVERY_RATE;
   const defaultStakingContract = SERVICE_CONSTANTS.DEFAULT_STAKING_PROGRAM_ID;
   const stakingContract = stakingContractArg || process.env.STAKING_CONTRACT || defaultStakingContract;

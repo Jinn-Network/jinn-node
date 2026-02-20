@@ -6,7 +6,7 @@ import { deliverViaSafe } from '@jinn-network/mech-client-ts/dist/post_deliver.j
 import { Web3 } from 'web3';
 import { workerLogger } from '../../logging/index.js';
 import { getOptionalMechChainConfig, getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
-import { getServiceSafeAddress, getServicePrivateKey } from '../../env/operate-profile.js';
+import { getMechAddress, getServiceSafeAddress, getServicePrivateKey } from '../../env/operate-profile.js';
 import { getActiveMechAddress } from '../rotation/ActiveServiceContext.js';
 import type { UnclaimedRequest, AgentExecutionResult, FinalStatus, IpfsMetadata, RecognitionPhaseResult, ReflectionResult } from '../types.js';
 import { buildDeliveryPayload } from './payload.js';
@@ -295,11 +295,16 @@ export async function deliverViaSafeTransaction(
   // Always deliver through our own mech. The marketplace allows any mech to
   // deliver after cooldown, so we use the active service's mech + Safe regardless
   // of which mech the request was originally dispatched to.
-  const targetMechAddress = getActiveMechAddress()!;
+  const targetMechAddress = getActiveMechAddress() ?? getMechAddress();
   const safeAddress = getServiceSafeAddress();
   const privateKey = getServicePrivateKey();
 
-  const isCrossMech = context.request.mech.toLowerCase() !== targetMechAddress?.toLowerCase();
+  if (!targetMechAddress) {
+    workerLogger.warn('Missing mech delivery configuration; skipping on-chain delivery');
+    throw new Error('Missing mech delivery configuration');
+  }
+
+  const isCrossMech = context.request.mech.toLowerCase() !== targetMechAddress.toLowerCase();
   if (isCrossMech) {
     workerLogger.info({
       requestId: context.requestId,
