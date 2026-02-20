@@ -13,7 +13,7 @@ import {
 // Import ABI from mech-client-ts package
 import marketplaceAbi from '@jinn-network/mech-client-ts/dist/abis/MechMarketplace.json' with { type: 'json' };
 import { workerLogger } from '../logging/index.js';
-import { claimRequest as apiClaimRequest } from './control_api_client.js';
+import { claimRequest as apiClaimRequest, resetControlApiSigner } from './control_api_client.js';
 import { deliverViaSafe } from '@jinn-network/mech-client-ts/dist/post_deliver.js';
 import { getMechAddress, getServicePrivateKey, getMechChainConfig, getServiceSafeAddress, getMiddlewarePath } from '../env/operate-profile.js';
 import { dispatchExistingJob } from '../agent/mcp/tools/dispatch_existing_job.js';
@@ -51,6 +51,7 @@ import {
 } from './filters/credentialFilter.js';
 import { ServiceRotator } from './rotation/ServiceRotator.js';
 import { setActiveService } from './rotation/ActiveServiceContext.js';
+import { resetCachedAddress as resetSigningProxyAddress } from '../agent/signing-proxy.js';
 import { maybeCallCheckpoint } from './staking/checkpoint.js';
 import { checkEpochGate } from './staking/epochGate.js';
 import { maybeSubmitHeartbeat } from './staking/heartbeat.js';
@@ -1929,6 +1930,9 @@ async function main() {
           const decision = await rotator.reevaluate();
           if (decision.switched) {
             setActiveService(rotator.buildIdentity(decision.service));
+            // Flush signer caches so next job uses the new service's key/address
+            resetControlApiSigner();
+            resetSigningProxyAddress();
             workerLogger.info({
               activeService: decision.service.serviceConfigId,
               serviceId: decision.service.serviceId,

@@ -38,6 +38,14 @@ const CONTROL_API_URL = getOptionalControlApiUrl();
 
 let cachedControlApiSigner: Erc8128Signer | null = null;
 
+/**
+ * Reset the cached signer so the next call re-derives from the current
+ * active service key. Must be called after service rotation.
+ */
+export function resetControlApiSigner(): void {
+  cachedControlApiSigner = null;
+}
+
 function getControlApiSigner(): Erc8128Signer {
   if (cachedControlApiSigner) return cachedControlApiSigner;
 
