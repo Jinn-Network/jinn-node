@@ -44,6 +44,7 @@ import {
   isJobEligibleForWorker,
   isJobEligibleForOperatorCapabilities,
   jobRequiresCredentials,
+  getRequiredCredentials,
   resolveMissingOperatorCapabilities,
   reprobeWithRequestId,
 } from './filters/credentialFilter.js';
@@ -1465,24 +1466,38 @@ async function processOnce(): Promise<boolean> {
       return false;
     }
 
-    // Filter by credential capability (discovered via bridge probe at startup)
+    // Filter by credential capability (discovered via bridge probe at startup).
+    // Always filter — even when bridge is down (providers empty), so credential-requiring
+    // jobs are never claimed by workers that can't execute them.
     const credInfo = await getWorkerCredentialInfo();
-    if (credInfo.providers.size > 0) {
-      candidates = candidates.filter(c => isJobEligibleForWorker(c.enabledTools, credInfo.providers));
-      if (candidates.length === 0) {
-        consecutiveStuckCycles = 0;
-        lastStuckRequestIds = [];
-        workerLogger.info('No eligible requests after credential filter');
-        return false;
-      }
-      // Trusted operators: process credential jobs first, leaving non-credential jobs for public pool
-      if (credInfo.isTrusted) {
-        candidates.sort((a, b) => {
-          const aPriority = jobRequiresCredentials(a.enabledTools) ? 0 : 1;
-          const bPriority = jobRequiresCredentials(b.enabledTools) ? 0 : 1;
-          return aPriority - bPriority;
-        });
-      }
+    const ineligibleByCred = candidates.filter(
+      c => !isJobEligibleForWorker(c.enabledTools, credInfo.providers),
+    );
+    if (ineligibleByCred.length > 0) {
+      workerLogger.info(
+        {
+          skippedRequestCount: ineligibleByCred.length,
+          requestIds: ineligibleByCred.map(c => c.id),
+          workerProviders: [...credInfo.providers],
+        },
+        'Skipping requests requiring unavailable credentials',
+      );
+    }
+
+    candidates = candidates.filter(c => isJobEligibleForWorker(c.enabledTools, credInfo.providers));
+    if (candidates.length === 0) {
+      consecutiveStuckCycles = 0;
+      lastStuckRequestIds = [];
+      workerLogger.info('No eligible requests after credential filter');
+      return false;
+    }
+    // Trusted operators: process credential jobs first, leaving non-credential jobs for public pool
+    if (credInfo.isTrusted) {
+      candidates.sort((a, b) => {
+        const aPriority = jobRequiresCredentials(a.enabledTools) ? 0 : 1;
+        const bPriority = jobRequiresCredentials(b.enabledTools) ? 0 : 1;
+        return aPriority - bPriority;
+      });
     }
   }
 
@@ -1509,9 +1524,35 @@ async function processOnce(): Promise<boolean> {
   consecutiveStuckCycles = 0;
   lastStuckRequestIds = [];
 
-  // Try to claim a request
+  // Try to claim a request — verify venture credentials BEFORE claiming.
+  // There's no unclaim API, so we must confirm eligibility before taking ownership.
   let target: UnclaimedRequest | null = null;
   for (const c of candidates) {
+    if (executedJobsThisSession.has(c.id)) continue;
+
+    // For credential-requiring jobs, verify venture-scoped credentials before claiming.
+    // The startup probe discovers global credentials; the per-job reprobe resolves
+    // venture-scoped credentials (requestId → workstream → venture → credentials).
+    if (jobRequiresCredentials(c.enabledTools)) {
+      try {
+        const jobCredInfo = await reprobeWithRequestId(c.id);
+        if (!isJobEligibleForWorker(c.enabledTools, jobCredInfo.providers)) {
+          const required = getRequiredCredentials(c.enabledTools ?? []);
+          workerLogger.info(
+            { requestId: c.id, required, available: [...jobCredInfo.providers] },
+            'Skipping — venture lacks required credentials',
+          );
+          continue;
+        }
+      } catch (err) {
+        workerLogger.warn(
+          { requestId: c.id, error: err instanceof Error ? err.message : String(err) },
+          'Cannot verify venture credentials — skipping credential-requiring job',
+        );
+        continue;
+      }
+    }
+
     const ok = await tryClaim(c);
     if (ok) {
       target = c;
@@ -1520,25 +1561,6 @@ async function processOnce(): Promise<boolean> {
   }
 
   if (!target) return false;
-
-  // Re-probe credential bridge with requestId to discover venture-scoped credentials.
-  // The bridge resolves: requestId → workstream sender → venture → venture credentials.
-  // This doesn't affect the cached startup info — just logs what's available for this job.
-  try {
-    const jobCredInfo = await reprobeWithRequestId(target.id);
-    if (jobCredInfo.providers.size > 0) {
-      workerLogger.info(
-        { requestId: target.id, providers: [...jobCredInfo.providers] },
-        'Venture-scoped credential discovery complete',
-      );
-    }
-  } catch (err) {
-    // Non-fatal: bridge may be unavailable, agent can still try getCredential() at runtime
-    workerLogger.debug(
-      { requestId: target.id, error: err instanceof Error ? err.message : String(err) },
-      'Venture credential re-probe failed (non-fatal)',
-    );
-  }
 
   // Check if this is a heartbeat request — deliver immediately without agent execution
   if (target.ipfsHash) {
