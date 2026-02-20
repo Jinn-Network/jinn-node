@@ -6,8 +6,9 @@
  *
  * Environment variables:
  * - UMAMI_HOST: Umami API host (e.g., https://analytics.example.com)
- * - UMAMI_WEBSITE_ID: Umami website ID
- * - UMAMI_API_KEY: Umami API key for authentication
+ * - UMAMI_WEBSITE_ID: Default Umami website ID (can be overridden per-call via websiteId param)
+ * - UMAMI_USERNAME: Umami username for authentication
+ * - UMAMI_PASSWORD: Umami password for authentication
  */
 
 import { z } from 'zod';
@@ -50,7 +51,10 @@ type MetricType = 'url' | 'referrer' | 'browser' | 'os' | 'device' | 'country' |
 // Schema Definitions
 // ============================================
 
+const websiteIdParam = z.string().optional().describe('Umami website ID. If omitted, uses UMAMI_WEBSITE_ID env var.');
+
 export const blogGetStatsParams = z.object({
+  websiteId: websiteIdParam,
   days: z.number().optional().default(30).describe('Number of days to look back (default: 30)'),
 });
 
@@ -60,7 +64,9 @@ export const blogGetStatsSchema = {
 Returns pageviews, visitors, visits, bounces, and total time with
 current and previous period values for trend comparison.
 
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_WEBSITE_ID, UMAMI_USERNAME, UMAMI_PASSWORD
+Pass websiteId to query a specific site, or omit to use UMAMI_WEBSITE_ID env var.
+
+REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_USERNAME, UMAMI_PASSWORD
 
 Returns: {
   stats: { pageviews, visitors, visits, bounces, totaltime },
@@ -70,6 +76,7 @@ Returns: {
 };
 
 export const blogGetTopPagesParams = z.object({
+  websiteId: websiteIdParam,
   days: z.number().optional().default(30).describe('Number of days to look back (default: 30)'),
   limit: z.number().optional().default(10).describe('Maximum number of pages to return (default: 10)'),
 });
@@ -80,13 +87,16 @@ export const blogGetTopPagesSchema = {
 Use this to identify popular content and understand what resonates with readers.
 Pages are sorted by view count in descending order.
 
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_WEBSITE_ID, UMAMI_USERNAME, UMAMI_PASSWORD
+Pass websiteId to query a specific site, or omit to use UMAMI_WEBSITE_ID env var.
+
+REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_USERNAME, UMAMI_PASSWORD
 
 Returns: { pages: [{ url, views }], count, period }`,
   inputSchema: blogGetTopPagesParams.shape,
 };
 
 export const blogGetReferrersParams = z.object({
+  websiteId: websiteIdParam,
   days: z.number().optional().default(30).describe('Number of days to look back (default: 30)'),
   limit: z.number().optional().default(10).describe('Maximum referrers to return (default: 10)'),
 });
@@ -97,13 +107,16 @@ export const blogGetReferrersSchema = {
 Shows where readers are coming from (search engines, social media, direct links, etc.).
 Use this to understand traffic sources and optimize distribution strategy.
 
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_WEBSITE_ID, UMAMI_USERNAME, UMAMI_PASSWORD
+Pass websiteId to query a specific site, or omit to use UMAMI_WEBSITE_ID env var.
+
+REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_USERNAME, UMAMI_PASSWORD
 
 Returns: { referrers: [{ source, visits }], count, period }`,
   inputSchema: blogGetReferrersParams.shape,
 };
 
 export const blogGetMetricsParams = z.object({
+  websiteId: websiteIdParam,
   type: z.enum(['path', 'referrer', 'browser', 'os', 'device', 'country', 'event'])
     .describe('Type of metric to retrieve'),
   days: z.number().optional().default(30).describe('Number of days to look back (default: 30)'),
@@ -122,13 +135,16 @@ Types available:
 - country: Geographic distribution
 - event: Custom events
 
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_WEBSITE_ID, UMAMI_USERNAME, UMAMI_PASSWORD
+Pass websiteId to query a specific site, or omit to use UMAMI_WEBSITE_ID env var.
+
+REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_USERNAME, UMAMI_PASSWORD
 
 Returns: { metrics: [{ name, count }], type, count, period }`,
   inputSchema: blogGetMetricsParams.shape,
 };
 
 export const blogGetPageviewsParams = z.object({
+  websiteId: websiteIdParam,
   days: z.number().optional().default(30).describe('Number of days to look back (default: 30)'),
   unit: z.enum(['day', 'hour']).optional().default('day').describe('Time unit for data points'),
 });
@@ -139,13 +155,16 @@ export const blogGetPageviewsSchema = {
 Returns daily or hourly pageviews and sessions over the specified period.
 Useful for visualizing traffic trends and identifying patterns.
 
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_WEBSITE_ID, UMAMI_USERNAME, UMAMI_PASSWORD
+Pass websiteId to query a specific site, or omit to use UMAMI_WEBSITE_ID env var.
+
+REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_USERNAME, UMAMI_PASSWORD
 
 Returns: { pageviews: [{ date, count }], sessions: [{ date, count }], period }`,
   inputSchema: blogGetPageviewsParams.shape,
 };
 
 export const blogGetPerformanceSummaryParams = z.object({
+  websiteId: websiteIdParam,
   days: z.number().optional().default(30).describe('Number of days to look back (default: 30)'),
 });
 
@@ -162,7 +181,9 @@ ANALYSIS TIPS:
 - Cross-reference top pages with referrers to understand traffic sources
 - Use this data to inform future content topics and distribution
 
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_WEBSITE_ID, UMAMI_USERNAME, UMAMI_PASSWORD
+Pass websiteId to query a specific site, or omit to use UMAMI_WEBSITE_ID env var.
+
+REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_USERNAME, UMAMI_PASSWORD
 
 Returns: { stats, topPages, referrers, period, insights }`,
   inputSchema: blogGetPerformanceSummaryParams.shape,
@@ -175,15 +196,15 @@ Returns: { stats, topPages, referrers, period, insights }`,
 // Cache for JWT token (valid for session)
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
-function getUmamiConfig() {
+function getUmamiConfig(websiteIdOverride?: string) {
   const host = process.env.UMAMI_HOST;
-  const websiteId = process.env.UMAMI_WEBSITE_ID;
+  const websiteId = websiteIdOverride || process.env.UMAMI_WEBSITE_ID;
   const username = process.env.UMAMI_USERNAME;
   const password = process.env.UMAMI_PASSWORD;
 
   const missing: string[] = [];
   if (!host) missing.push('UMAMI_HOST');
-  if (!websiteId) missing.push('UMAMI_WEBSITE_ID');
+  if (!websiteId) missing.push('UMAMI_WEBSITE_ID (or pass websiteId param)');
   if (!username) missing.push('UMAMI_USERNAME');
   if (!password) missing.push('UMAMI_PASSWORD');
 
@@ -350,7 +371,7 @@ export async function blogGetStats(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig();
+    const config = getUmamiConfig(parsed.data.websiteId);
     const { days } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -397,7 +418,7 @@ export async function blogGetTopPages(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig();
+    const config = getUmamiConfig(parsed.data.websiteId);
     const { days, limit } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -453,7 +474,7 @@ export async function blogGetReferrers(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig();
+    const config = getUmamiConfig(parsed.data.websiteId);
     const { days, limit } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -509,7 +530,7 @@ export async function blogGetMetrics(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig();
+    const config = getUmamiConfig(parsed.data.websiteId);
     const { type, days, limit } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -566,7 +587,7 @@ export async function blogGetPageviews(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig();
+    const config = getUmamiConfig(parsed.data.websiteId);
     const { days, unit } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -617,7 +638,7 @@ export async function blogGetPerformanceSummary(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig();
+    const config = getUmamiConfig(parsed.data.websiteId);
     const { days } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
     const timeParams = getTimeParams(startAt, endAt);

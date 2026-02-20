@@ -235,6 +235,25 @@ After the human confirms funding, rerun `yarn setup`. It will detect the existin
 
 **`.operate directory not found` warnings** — Ignore these. They are first-run noise from the config resolver checking multiple possible locations. They do not indicate a problem.
 
+### Post-Setup: Set Max Delivery Rate
+
+After setup completes (mech is deployed and staked), you **MUST** set `maxDeliveryRate` to 99 on the mech contract. Without this, a baseMech (service 112) will deliver garbage responses to your requests after the priority window expires.
+
+```bash
+# From the monorepo root (not jinn-node/)
+OPERATE_PROFILE_DIR=$(pwd)/.operate \
+OPERATE_PASSWORD=<password> \
+RPC_URL=<your-rpc-url> \
+yarn tsx scripts/mech/set-max-delivery-rate.ts 99
+```
+
+Verify with:
+```bash
+yarn mech:check-rate
+```
+
+**Why 99?** The baseMech's threshold is 100. Requests with `deliveryRate < 100` are ignored by it. The mech factory defaults to `5000000000000` which is well above the threshold, causing the baseMech to scoop expired requests and deliver empty responses.
+
 ### Funding Requirements (Typical)
 
 The full setup on Base mainnet typically requires:
