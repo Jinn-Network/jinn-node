@@ -34,4 +34,3 @@ restartPolicyMaxRetries = 10
 # Optional:
 # - WORKSTREAM_FILTER: Filter to specific workstream(s)
 # - WORKER_ID: Identifier for this worker instance
-# Railway deploy config
