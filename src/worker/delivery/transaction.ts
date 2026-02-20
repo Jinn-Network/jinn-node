@@ -7,7 +7,7 @@ import { Web3 } from 'web3';
 import { workerLogger } from '../../logging/index.js';
 import { getOptionalMechChainConfig, getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
 import { getServiceSafeAddress, getServicePrivateKey } from '../../env/operate-profile.js';
-import { getActiveMechAddress, getServiceByMech } from '../rotation/ActiveServiceContext.js';
+import { getActiveMechAddress } from '../rotation/ActiveServiceContext.js';
 import type { UnclaimedRequest, AgentExecutionResult, FinalStatus, IpfsMetadata, RecognitionPhaseResult, ReflectionResult } from '../types.js';
 import { buildDeliveryPayload } from './payload.js';
 import { checkDeliveryStatusViaPonder } from './ponderVerification.js';
@@ -290,41 +290,22 @@ export async function deliverViaSafeTransaction(
 ): Promise<{ tx_hash?: string; status?: string }> {
   workerLogger.info({ requestId: context.requestId }, '[DELIVERY_START] Function entered');
   const chainConfig = getOptionalMechChainConfig() || 'base';
-  const targetMechAddress = context.request.mech;
   const rpcHttpUrl = getRequiredRpcUrl();
 
-  // Cross-mech credential resolution: when WORKER_MECH_FILTER_MODE=any, the
-  // request's mech may belong to a different service than the active one.
-  // Look up the service that owns the target mech and use its Safe/key.
-  let safeAddress: string | null;
-  let privateKey: string | null;
+  // Always deliver through our own mech. The marketplace allows any mech to
+  // deliver after cooldown, so we use the active service's mech + Safe regardless
+  // of which mech the request was originally dispatched to.
+  const targetMechAddress = getActiveMechAddress()!;
+  const safeAddress = getServiceSafeAddress();
+  const privateKey = getServicePrivateKey();
 
-  const activeMech = getActiveMechAddress();
-  const isCrossMech = !!(activeMech && targetMechAddress &&
-    activeMech.toLowerCase() !== targetMechAddress.toLowerCase());
-
+  const isCrossMech = context.request.mech.toLowerCase() !== targetMechAddress?.toLowerCase();
   if (isCrossMech) {
-    const owningService = getServiceByMech(targetMechAddress);
-    if (owningService?.serviceSafeAddress && owningService?.agentPrivateKey) {
-      workerLogger.info({
-        requestId: context.requestId,
-        activeMech,
-        targetMech: targetMechAddress,
-        resolveTo: owningService.serviceConfigId,
-      }, 'Cross-mech delivery: using owning service credentials');
-      safeAddress = owningService.serviceSafeAddress;
-      privateKey = owningService.agentPrivateKey;
-    } else {
-      workerLogger.warn({
-        requestId: context.requestId,
-        targetMech: targetMechAddress,
-      }, 'Cross-mech delivery: no matching service found, falling back to active');
-      safeAddress = getServiceSafeAddress();
-      privateKey = getServicePrivateKey();
-    }
-  } else {
-    safeAddress = getServiceSafeAddress();
-    privateKey = getServicePrivateKey();
+    workerLogger.info({
+      requestId: context.requestId,
+      requestMech: context.request.mech,
+      deliveryMech: targetMechAddress,
+    }, 'Cross-mech delivery: delivering via own mech');
   }
 
   workerLogger.info({ requestId: context.requestId, hasRpc: !!rpcHttpUrl, isCrossMech }, '[DELIVERY_START] Config loaded');
