@@ -120,7 +120,9 @@ async function main() {
   const attendedMode = unattended ? false : (envAttended ?? false);
 
   // Keep add-service defaults aligned with setup CLI.
-  const mechRequestPrice = mechPrice || '5000000000000';
+  // DEFAULT_MECH_DELIVERY_RATE = 99 — must match ecosystem standard or marketplace rejects delivery.
+  const { DEFAULT_MECH_DELIVERY_RATE } = await import('../src/worker/config/MechConfig.js');
+  const mechRequestPrice = mechPrice || DEFAULT_MECH_DELIVERY_RATE;
   const defaultStakingContract = SERVICE_CONSTANTS.DEFAULT_STAKING_PROGRAM_ID;
   const stakingContract = stakingContractArg || process.env.STAKING_CONTRACT || defaultStakingContract;
 

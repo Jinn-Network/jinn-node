@@ -7,6 +7,14 @@
 import { SERVICE_CONSTANTS } from "./ServiceConfig.js";
 
 /**
+ * Default maxDeliveryRate for mech contracts (in wei).
+ * Must match ecosystem standard — the marketplace rejects deliveries where
+ * the mech's rate exceeds the requester's agreed rate.
+ * Reference: priority mechs on Base use maxDeliveryRate = 99.
+ */
+export const DEFAULT_MECH_DELIVERY_RATE = '99';
+
+/**
  * Mech deployment result interface
  */
 export interface MechDeploymentResult {
@@ -58,9 +66,8 @@ export function enableMechMarketplaceInConfig(
     provision_type: "fixed"
   };
   
-  // Set mech request price (defaults to 0.01 ETH if not provided)
   config.env_variables.MECH_REQUEST_PRICE = {
-    value: mechRequestPrice || "10000000000000000",  // Default: 0.01 ETH in wei
+    value: mechRequestPrice || DEFAULT_MECH_DELIVERY_RATE,
     provision_type: "fixed"
   };
   

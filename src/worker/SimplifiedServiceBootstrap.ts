@@ -28,7 +28,7 @@ import { writeFileSync, readFileSync, readdirSync, existsSync, statSync } from '
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { createDefaultServiceConfig, SERVICE_CONSTANTS } from './config/ServiceConfig.js';
-import { enableMechMarketplaceInConfig } from './config/MechConfig.js';
+import { enableMechMarketplaceInConfig, DEFAULT_MECH_DELIVERY_RATE } from './config/MechConfig.js';
 import { printFundingRequirements } from '../setup/display.js';
 
 const bootstrapLogger = logger.child({ component: "SIMPLIFIED-BOOTSTRAP" });
@@ -341,7 +341,7 @@ export class SimplifiedServiceBootstrap {
     
     // Add mech configuration if requested
     if (this.config.deployMech) {
-      const mechPrice = this.config.mechRequestPrice || '5000000000000'; // Default: 0.000005 ETH
+      const mechPrice = this.config.mechRequestPrice || DEFAULT_MECH_DELIVERY_RATE;
       bootstrapLogger.info({ mechRequestPrice: mechPrice }, "Enabling mech marketplace deployment");
       enableMechMarketplaceInConfig(
         serviceConfig,
