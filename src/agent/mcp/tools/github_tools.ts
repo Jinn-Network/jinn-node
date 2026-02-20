@@ -3,6 +3,10 @@ import { z } from 'zod';
 /**
  * GitHub Tools for Metacog MCP Server
  * Direct integration with GitHub API for repository access
+ *
+ * GitHub is an operator-level credential: operators provide GITHUB_TOKEN in their .env.
+ * Unlike venture credentials (telegram, openai, etc.), GitHub tokens are NOT fetched
+ * from the credential bridge.
  */
 
 // Schemas
@@ -47,7 +51,7 @@ export const listCommitsSchema = {
 async function githubApiCall(endpoint: string, token?: string): Promise<any> {
   const authToken = token || process.env.GITHUB_TOKEN;
   if (!authToken) {
-    throw new Error('GITHUB_TOKEN environment variable not set');
+    throw new Error('GITHUB_TOKEN not set — add it to your .env');
   }
 
   const response = await fetch(`https://api.github.com${endpoint}`, {

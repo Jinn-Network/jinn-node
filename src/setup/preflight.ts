@@ -104,6 +104,20 @@ export async function runPreflight(options: PreflightOptions = {}): Promise<Pref
     return { success: false, errors, warnings };
   }
 
+  // 6. Verify middleware deploy path enforces strict agent EOA funding behavior
+  const fundingBehaviorCheck = await checkStrictDeployFundingBehavior(cwd);
+  if (!fundingBehaviorCheck.success) {
+    errors.push(
+      'Installed olas-operate-middleware does not enforce strict deploy-time agent EOA autofunding.\n' +
+      `    Details: ${fundingBehaviorCheck.error}\n` +
+      '    Fix:\n' +
+      '      1. poetry update olas-operate-middleware\n' +
+      '      2. poetry install --sync\n' +
+      '      3. retry yarn setup'
+    );
+    return { success: false, errors, warnings };
+  }
+
   return { success: true, errors, warnings };
 }
 
@@ -214,6 +228,49 @@ async function checkOperateImportable(cwd: string): Promise<{ success: boolean; 
         res({ success: true });
       } else {
         res({ success: false, error: stderr.trim() || 'Unknown error' });
+      }
+    });
+
+    proc.on('error', (err) => {
+      res({ success: false, error: err.message });
+    });
+  });
+}
+
+/**
+ * Verify installed middleware includes strict deploy-time agent funding behavior:
+ * - deploy endpoint calls fund_service_single_chain()
+ * - no non-fatal "Agent funding failed (non-fatal)" swallow path remains
+ */
+async function checkStrictDeployFundingBehavior(cwd: string): Promise<{ success: boolean; error?: string }> {
+  return new Promise((res) => {
+    const script = [
+      'import inspect',
+      'import operate.cli',
+      'import sys',
+      'src = inspect.getsource(operate.cli)',
+      "has_fund = 'manager.fund_service_single_chain(' in src",
+      "has_nonfatal = 'Agent funding failed (non-fatal)' in src",
+      'if (not has_fund) or has_nonfatal:',
+      "    sys.stderr.write(f'has_fund={has_fund} has_nonfatal={has_nonfatal}\\n')",
+      '    sys.exit(1)',
+    ].join('\n');
+
+    const proc = spawn('poetry', ['run', 'python', '-c', script], {
+      cwd,
+    });
+
+    let stderr = '';
+
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
+
+    proc.on('close', (code) => {
+      if (code === 0) {
+        res({ success: true });
+      } else {
+        res({ success: false, error: stderr.trim() || 'strict funding behavior check failed' });
       }
     });
 

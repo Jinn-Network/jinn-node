@@ -191,7 +191,7 @@ async function validateDependencies(params: { gqlUrl: string; dependencies: stri
 }
 
 function getCompletedChildRequestIdsFromEnv(): string[] {
-  const raw = process.env.JINN_COMPLETED_CHILDREN;
+  const raw = process.env.JINN_CTX_COMPLETED_CHILDREN;
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
@@ -206,7 +206,7 @@ function requireChildReviewIfNeeded(): string | null {
   if (completedChildIds.length === 0) {
     return null;
   }
-  if (process.env.JINN_CHILD_WORK_REVIEWED === 'true') {
+  if (process.env.JINN_CTX_CHILD_WORK_REVIEWED === 'true') {
     return null;
   }
   const previewIds = completedChildIds.slice(0, 3).join(', ');

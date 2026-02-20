@@ -46,7 +46,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf /usr/bin/chromium /usr/bin/chromium-browser
 
 # Pre-install Gemini CLI globally (avoids ~30s npx download per job)
-ARG GEMINI_CLI_VERSION=0.25.0
+ARG GEMINI_CLI_VERSION=0.28.2
 RUN npm install -g @google/gemini-cli@${GEMINI_CLI_VERSION}
 
 # Create non-root user
@@ -62,12 +62,16 @@ COPY --from=builder /app/dist/ ./dist/
 # Copy init script (used by Railway startCommand and standalone docker run)
 COPY scripts/init.sh ./scripts/
 
-# Create directories the worker writes to at runtime
+# Create directories the worker writes to at runtime.
+# IMPORTANT: /tmp/.gemini-worker is used as GEMINI_CLI_HOME (extensions + runtime config).
+# Do NOT mount volumes over /tmp — use subdirectory mounts (e.g., /tmp/jinn-telemetry).
 RUN mkdir -p /home/jinn/.operate /home/jinn/.gemini /app/jinn-repos /tmp/.gemini-worker \
     && chown -R jinn:jinn /app /tmp/.gemini-worker /home/jinn
 
-# Persistent volume: home dir contains .operate/ (keystore) and .gemini/ (auth + extensions)
-VOLUME ["/home/jinn"]
+# Persistent volume: home dir contains .operate/ (keystore) and .gemini/ (auth + extensions).
+# No VOLUME directive here — Railway bans it. Docker/Compose users must mount explicitly:
+#   docker run -v jinn-data:/home/jinn ...
+# See docker-compose.yml and docs/docker-deployment.md for details.
 
 # Cap V8 heap to force earlier GC — without this, Node uses up to ~50% of container
 # memory (4GB in 8GB container), inflating baseline RAM. Override at runtime via
@@ -87,7 +91,7 @@ EXPOSE 8080
 # Run as non-root
 USER jinn
 
-# dumb-init as PID 1 for proper signal forwarding
-# worker_launcher.js handles SIGTERM/SIGINT propagation to child processes
-ENTRYPOINT ["dumb-init", "--"]
-CMD ["node", "dist/worker/worker_launcher.js"]
+# Default command (Railway overrides via startCommand in railway.toml).
+# dumb-init wraps the process for proper signal forwarding in plain Docker.
+# Note: Railway startCommand replaces both ENTRYPOINT and CMD.
+CMD ["dumb-init", "--", "node", "dist/worker/worker_launcher.js"]

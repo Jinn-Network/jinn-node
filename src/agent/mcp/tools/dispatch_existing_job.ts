@@ -1,11 +1,9 @@
 import { z } from 'zod';
 import { graphQLRequest } from '../../../http/client.js';
-import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
 import { getCurrentJobContext } from './shared/context.js';
 import { getJobContextForDispatch } from './shared/job-context-utils.js';
-import { getMechAddress, getMechChainConfig, getServicePrivateKey } from '../../../env/operate-profile.js';
-import { getRandomStakedMech } from '../../../worker/filters/stakingFilter.js';
 import { getPonderGraphqlUrl } from './shared/env.js';
+import { proxyDispatch } from '../../shared/signing-proxy-client.js';
 import { collectLocalCodeMetadata, ensureJobBranch } from '../../shared/code_metadata.js';
 import { getCodeMetadataDefaultBaseBranch } from '../../../config/index.js';
 import { ensureUniversalTools, BASE_UNIVERSAL_TOOLS } from '../../toolPolicy.js';
@@ -13,6 +11,7 @@ import { buildAnnotatedTools, normalizeToolArray, extractModelPolicyFromBlueprin
 import { blueprintStructureSchema } from '../../shared/blueprint-schema.js';
 import { validateInvariantsStrict } from '../../../worker/prompt/invariant-validator.js';
 import { validateModelAllowed, normalizeGeminiModel, DEFAULT_WORKER_MODEL } from '../../../shared/gemini-models.js';
+import { assertValidJinnJobEnvMap } from '../../../shared/job-env.js';
 
 const dispatchExistingJobParamsBase = z.object({
   jobId: z.string().uuid().optional(),
@@ -260,15 +259,73 @@ export async function dispatchExistingJob(args: unknown) {
     }
   }
 
-  // Inherit parent's additionalContext.env for workstream-level config propagation
-  // This ensures env vars like TELEGRAM_CHAT_ID flow from root job to all children
-  // See: ipfs-payload-builder.ts lines 172-181 for the equivalent in dispatch_new_job
-  const inheritedEnvJson = process.env.JINN_INHERITED_ENV;
-  if (inheritedEnvJson && !additionalContext.env) {
+  if (additionalContext.env !== undefined) {
     try {
-      additionalContext.env = JSON.parse(inheritedEnvJson);
-    } catch {
-      console.warn('[dispatch_existing_job] Failed to parse JINN_INHERITED_ENV');
+      additionalContext.env = assertValidJinnJobEnvMap(
+        additionalContext.env,
+        'dispatch_existing_job additionalContext.env',
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            data: null,
+            meta: {
+              ok: false,
+              code: 'INVALID_ENV_CONTEXT',
+              message,
+            },
+          }),
+        }],
+      };
+    }
+  }
+
+  // Inherit parent job payload env for workstream-level config propagation.
+  // See: ipfs-payload-builder.ts lines 172-181 for the equivalent in dispatch_new_job
+  const inheritedEnvJson = process.env.JINN_CTX_INHERITED_ENV;
+  if (inheritedEnvJson && !additionalContext.env) {
+    let parsedInheritedEnv: unknown;
+    try {
+      parsedInheritedEnv = JSON.parse(inheritedEnvJson);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            data: null,
+            meta: {
+              ok: false,
+              code: 'INVALID_ENV_CONTEXT',
+              message: `Invalid JINN_CTX_INHERITED_ENV JSON: ${message}`,
+            },
+          }),
+        }],
+      };
+    }
+    try {
+      additionalContext.env = assertValidJinnJobEnvMap(
+        parsedInheritedEnv,
+        'JINN_CTX_INHERITED_ENV',
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({
+            data: null,
+            meta: {
+              ok: false,
+              code: 'INVALID_ENV_CONTEXT',
+              message,
+            },
+          }),
+        }],
+      };
     }
   }
 
@@ -443,27 +500,11 @@ export async function dispatchExistingJob(args: unknown) {
   }
 
   try {
-    const localMech = getMechAddress();
-    const privateKey = getServicePrivateKey();
-    const chainConfig = getMechChainConfig();
-
-    if (!localMech) {
-      throw new Error('Service target mech address not configured. Check .operate service config (MECH_TO_CONFIG).');
-    }
-
-    if (!privateKey) {
-      throw new Error('Service agent private key not found. Check .operate/keys directory.');
-    }
-
-    const priorityMech = await getRandomStakedMech(localMech);
-
-    const result = await marketplaceInteract({
+    // Dispatch via signing proxy — private key never leaves the worker process
+    const result = await proxyDispatch({
       prompts: [finalBlueprint],
-      priorityMech,
       tools: finalTools,
       ipfsJsonContents,
-      chainConfig,
-      keyConfig: { source: 'value', value: privateKey },
       postOnly: true,
       responseTimeout,
     });

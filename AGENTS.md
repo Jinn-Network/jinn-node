@@ -1,42 +1,52 @@
-# JINN Node Setup (Agent Runbook)
+# JINN Node Agent Entry Point
 
-This doc is written for a **coding agent** (Claude Code, Cursor, Windsurf, etc.) setting up a JINN node on behalf of a human operator. The human may not be a developer — guide them clearly, handle what you can autonomously, and only ask them for things that require their input.
+This file is the routing index for coding agents operating `jinn-node`.
 
-You are onboarding the operator into the **Amplify 360 2^2 Growth Agency** venture:
-```
-https://explorer.jinn.network/ventures/0x9470f6f2bec6940c93fedebc0ea74bccaf270916f4693e96e8ccc586f26a89ac
-```
+Use dedicated skills for operational workflows. Keep this file minimal.
 
----
+## Default Venture Context
 
-## Security Disclosure — Tell the Human BEFORE Starting
+Primary onboarding venture:
 
-Before collecting any credentials or running setup, inform the human:
+`https://explorer.jinn.network/ventures/0x9470f6f2bec6940c93fedebc0ea74bccaf270916f4693e96e8ccc586f26a89ac`
 
-> **Important: LLM provider visibility.** Because you're using a coding agent to set up your node, your LLM provider (Google for Gemini CLI, Anthropic for Claude Code, etc.) will process your wallet password and seed phrase as part of this session. This is inherent to how coding agents work — everything in your terminal session passes through the LLM's API.
->
-> **Mitigants:**
-> - Major LLM providers (Google, Anthropic, OpenAI) **do not train on API inputs**. Your data is processed for the session and not retained for model training.
-> - The agent needs your password to write it to `.env` — there is no way around this. And the seed phrase is printed to the terminal by the setup script, which the agent captures.
-> - This wallet is purpose-built for node operations (gas fees + staking). **Do not use it as a personal wallet or store significant funds in it.** Keep only the operational amounts needed.
-> - You can export your keys at any time using `yarn wallet:export-keys`. See [Wallet Management](#wallet-management).
->
-> **If you're not comfortable with this**, you can run `yarn setup` manually without a coding agent — the setup script works standalone. You'll need to fill in `.env` yourself (see the `.env.example` template) and watch the terminal output for your seed phrase when it appears.
+## Global Non-Negotiables
 
-Wait for the human to acknowledge before proceeding.
+1. **Security disclosure first** for first-time setup sessions:
+   - LLM provider can process terminal session data (including wallet password and mnemonic output).
+   - Do not proceed until operator acknowledges.
+2. **Railway deploy happens after local setup**:
+   - `.operate/` must exist and be valid before Railway migration.
+3. **Sensitive operations require explicit confirmation**:
+   - mnemonic/key export,
+   - destructive recovery operations,
+   - non-dry-run fund movements.
+4. **GitHub token is strongly encouraged at setup**:
+   - without `GITHUB_TOKEN`, participation in most coding jobs is limited or fails.
 
----
+## Skill Router
 
-## Guiding Principles
+Use these skills based on task intent:
 
-1. **You are the UX layer.** The setup script is non-interactive. Your job is to check prerequisites, prepare the environment, run the script, capture critical output, and explain what's happening.
-2. **Only ask the human for things they must provide.** Credentials, passwords, and funding confirmations require human input. Everything else you should handle.
-3. **The mnemonic is sacred.** When a wallet is created, the seed phrase is printed ONCE to stdout. You MUST capture it and present it clearly. It cannot be recovered if lost.
-4. **Rerunning is normal.** Setup exits when funding is needed. This is not a failure — it's the expected flow. The human funds the address, you rerun `yarn setup`, and it resumes.
+- Local first-time onboarding and setup loop:
+  - [`skills/jinn-node-operator-setup/SKILL.md`](skills/jinn-node-operator-setup/SKILL.md)
+- Railway deployment and canary/prod gateway switching:
+  - [`skills/jinn-node-railway-deploy/SKILL.md`](skills/jinn-node-railway-deploy/SKILL.md)
+- Wallet operations (backup/export/withdraw/unstake/recover):
+  - [`skills/jinn-node-wallet-ops/SKILL.md`](skills/jinn-node-wallet-ops/SKILL.md)
+- Staking reward operations:
+  - [`skills/jinn-node-staking-ops/SKILL.md`](skills/jinn-node-staking-ops/SKILL.md)
+- Support triage and diagnostics:
+  - [`skills/jinn-node-support-triage/SKILL.md`](skills/jinn-node-support-triage/SKILL.md)
+- High-level baseline onboarding:
+  - [`skills/jinn-node/SKILL.md`](skills/jinn-node/SKILL.md)
 
----
+## Default Execution Order (new operator)
 
-## Phase 0: Prerequisites
+1. Local setup: `jinn-node-operator-setup`
+2. Optional local validation run (`yarn worker --single`)
+3. Railway migration: `jinn-node-railway-deploy`
+4. Ongoing operations via wallet/staking/support skills
 
 Before running anything, check every prerequisite. Install what you can; ask the human to install what you can't.
 
@@ -342,64 +352,6 @@ railway logs -f # Watch logs
 
 ---
 
-## Phase 5: Deploy to Railway (Optional)
-
-If the operator wants to run their worker 24/7 without keeping a local machine on, [Railway](https://railway.com?referralCode=vEDcil) is the easiest cloud option. New accounts get **$5 free credit**, and using [this link](https://railway.com?referralCode=vEDcil) gives an **additional $5 credit**.
-
-### Prerequisites
-
-- Phases 1-3 completed locally (`.operate/` directory exists with encrypted keystore)
-- A GitHub account with a fork of [jinn-node](https://github.com/Jinn-Network/jinn-node)
-
-### Steps
-
-1. **Create a Railway account** at [railway.com](https://railway.com?referralCode=vEDcil)
-2. **Create a new project** → "Deploy from GitHub Repo" → select the jinn-node fork
-3. Railway auto-detects `railway.toml` and the Dockerfile — no build config needed
-4. **Add a persistent volume** in the service settings:
-   - Mount path: `/home/jinn`
-   - This stores the encrypted keystore (`.operate/`) and Gemini credentials (`.gemini/`)
-   - **Loss of this volume means loss of signing keys** — enable Railway backups
-5. **Set environment variables** in the Railway dashboard (Variables tab):
-
-   Copy the values from your local `.env` file. The required variables are:
-
-   | Variable | Description |
-   |----------|-------------|
-   | `RPC_URL` | Base chain RPC endpoint |
-   | `CHAIN_ID` | `8453` |
-   | `OPERATE_PASSWORD` | Decrypts `.operate/` keystore |
-   | `GEMINI_API_KEY` | Gemini API key |
-   | `GITHUB_TOKEN` | For code task repo cloning |
-   | `GIT_AUTHOR_NAME` | Git commit identity |
-   | `GIT_AUTHOR_EMAIL` | Git commit identity |
-
-   Service endpoints (`PONDER_GRAPHQL_URL`, `CONTROL_API_URL`, `X402_GATEWAY_URL`) are pre-filled in `.env.example` and can be copied as-is.
-
-6. **Import `.operate/` into the volume.** Use `railway shell` to access the running container, then copy your local `.operate/` directory contents into `/home/jinn/.operate/`. Alternatively, use `railway volume` commands or the Railway CLI.
-
-7. **Deploy.** Railway builds and deploys automatically on push. The healthcheck at `/health` confirms the worker is running.
-
-### CLI Deploy (Alternative)
-
-If the operator prefers the Railway CLI over the dashboard:
-
-```bash
-cd jinn-node
-railway login
-railway link    # Link to your Railway project
-railway up      # Deploy
-railway logs -f # Watch logs
-```
-
-### Monitoring
-
-- **Logs**: Railway dashboard → Deployments → Logs, or `railway logs -f`
-- **Health**: The worker exposes `GET /health` — Railway monitors this automatically
-- **Restarts**: `railway.toml` configures automatic restart on failure (up to 10 retries)
-
----
-
 ## Staking Reward Claims
 
 OLAS staking rewards require two separate claim steps. Both require `OPERATE_PASSWORD` in `.env`.
@@ -530,3 +482,5 @@ When reporting an issue, also describe:
 | Worker can't connect to Ponder | Network issue or wrong URL | Verify `PONDER_GRAPHQL_URL` matches the pre-filled value in `.env.example` |
 | Agent execution fails | LLM auth expired or invalid | Re-authenticate Gemini or check `GEMINI_API_KEY` |
 | Git clone fails during job | Missing `GITHUB_TOKEN` or SSH keys | Set `GITHUB_TOKEN` in `.env` for HTTPS clone access |
+
+If this file and a skill diverge, follow the skill.

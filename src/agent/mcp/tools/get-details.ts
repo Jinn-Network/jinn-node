@@ -6,7 +6,7 @@ import { resolveRequestIpfsContent } from './shared/ipfs.js';
 import { getPonderGraphqlUrl } from './shared/env.js';
 
 function markChildWorkReviewed(requestIds: string[], artifactIds: string[]) {
-    const completedRaw = process.env.JINN_COMPLETED_CHILDREN;
+    const completedRaw = process.env.JINN_CTX_COMPLETED_CHILDREN;
     if (!completedRaw) {
         return;
     }
@@ -33,7 +33,7 @@ function markChildWorkReviewed(requestIds: string[], artifactIds: string[]) {
     ]);
     const intersects = Array.from(referencedIds).some((id) => normalizedCompleted.has(id));
     if (intersects) {
-        process.env.JINN_CHILD_WORK_REVIEWED = 'true';
+        process.env.JINN_CTX_CHILD_WORK_REVIEWED = 'true';
     }
 }
 

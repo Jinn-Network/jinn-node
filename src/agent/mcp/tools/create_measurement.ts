@@ -183,7 +183,7 @@ export async function createMeasurement(args: unknown) {
 
     // Validate invariant_id against known blueprint IDs
     const warnings: string[] = [];
-    const knownIdsRaw = process.env.JINN_BLUEPRINT_INVARIANT_IDS;
+    const knownIdsRaw = process.env.JINN_CTX_BLUEPRINT_INVARIANT_IDS;
     if (knownIdsRaw) {
       try {
         const knownIds: string[] = JSON.parse(knownIdsRaw);

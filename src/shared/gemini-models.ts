@@ -53,8 +53,8 @@ const DEPRECATED_MODELS = new Set([
  * Check if a model matches any deprecated pattern (e.g., gemini-2.0-flash-thinking-exp-*)
  */
 function matchesDeprecatedPattern(model: string): boolean {
-  // All gemini-2.0-flash-thinking experimental models are deprecated
-  if (model.startsWith('gemini-2.0-flash-thinking')) {
+  // All gemini-2.0-flash variants are removed from Google API as of Feb 2026
+  if (model.startsWith('gemini-2.0-flash')) {
     return true;
   }
   // All gemini-2.0-pro-exp experimental models are deprecated
@@ -127,13 +127,13 @@ export function normalizeGeminiModel(
     };
   }
 
-  // Pattern-match deprecated models not in the explicit alias map
-  if (matchesDeprecatedPattern(stripped)) {
+  // Catch-all: any gemini-2.0-flash variant not in the explicit map
+  if (stripped.startsWith('gemini-2.0-flash')) {
     return {
       requested,
-      normalized: defaultModel,
+      normalized: 'gemini-3-flash',
       changed: true,
-      reason: `deprecated_pattern:${stripped}`,
+      reason: `legacy_pattern:${stripped}`,
     };
   }
 

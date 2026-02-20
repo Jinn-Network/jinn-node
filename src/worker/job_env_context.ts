@@ -79,14 +79,14 @@ export function restoreJobEnvironment(snapshot: JobEnvironmentSnapshot): void {
 
 export function applyRequestEnvironment(requestId: string, mechAddress: string): RequestEnvironmentSnapshot {
   const snapshot: RequestEnvironmentSnapshot = {
-    hadRequestId: Object.prototype.hasOwnProperty.call(process.env, 'JINN_REQUEST_ID'),
-    requestId: process.env.JINN_REQUEST_ID,
-    hadMechAddress: Object.prototype.hasOwnProperty.call(process.env, 'JINN_MECH_ADDRESS'),
-    mechAddress: process.env.JINN_MECH_ADDRESS,
+    hadRequestId: Object.prototype.hasOwnProperty.call(process.env, 'JINN_CTX_REQUEST_ID'),
+    requestId: process.env.JINN_CTX_REQUEST_ID,
+    hadMechAddress: Object.prototype.hasOwnProperty.call(process.env, 'JINN_CTX_MECH_ADDRESS'),
+    mechAddress: process.env.JINN_CTX_MECH_ADDRESS,
   };
 
-  process.env.JINN_REQUEST_ID = requestId;
-  process.env.JINN_MECH_ADDRESS = mechAddress;
+  process.env.JINN_CTX_REQUEST_ID = requestId;
+  process.env.JINN_CTX_MECH_ADDRESS = mechAddress;
 
   return snapshot;
 }
@@ -94,21 +94,21 @@ export function applyRequestEnvironment(requestId: string, mechAddress: string):
 export function restoreRequestEnvironment(snapshot: RequestEnvironmentSnapshot): void {
   if (snapshot.hadRequestId) {
     if (snapshot.requestId !== undefined) {
-      process.env.JINN_REQUEST_ID = snapshot.requestId;
+      process.env.JINN_CTX_REQUEST_ID = snapshot.requestId;
     } else {
-      delete process.env.JINN_REQUEST_ID;
+      delete process.env.JINN_CTX_REQUEST_ID;
     }
   } else {
-    delete process.env.JINN_REQUEST_ID;
+    delete process.env.JINN_CTX_REQUEST_ID;
   }
 
   if (snapshot.hadMechAddress) {
     if (snapshot.mechAddress !== undefined) {
-      process.env.JINN_MECH_ADDRESS = snapshot.mechAddress;
+      process.env.JINN_CTX_MECH_ADDRESS = snapshot.mechAddress;
     } else {
-      delete process.env.JINN_MECH_ADDRESS;
+      delete process.env.JINN_CTX_MECH_ADDRESS;
     }
   } else {
-    delete process.env.JINN_MECH_ADDRESS;
+    delete process.env.JINN_CTX_MECH_ADDRESS;
   }
 }

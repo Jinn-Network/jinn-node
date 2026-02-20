@@ -2,16 +2,16 @@
 /**
  * Add Service - Provision an additional OLAS service for multi-service rotation
  *
- * Usage: yarn service:add [--staking-contract <address>] [--no-mech] [--dry-run]
+ * Usage: yarn service:add [--chain=<network>] [--staking-contract <address>|--staking-contract=<address>] [--unattended] [--no-mech] [--dry-run]
  *
  * Prerequisites:
  * - OPERATE_PASSWORD env var set
  * - RPC_URL env var set
  * - Existing Master EOA + Master Safe (from initial setup)
  *
- * This creates a new service under the existing Master EOA/Safe, using the
- * same staking contract as existing services (or a custom one). The new service
- * gets its own agent key, service NFT, and service Safe.
+ * This creates a new service under the existing Master EOA/Safe using the
+ * same chain/staking/mech defaults as setup (or explicit CLI overrides). The
+ * new service gets its own agent key, service NFT, and service Safe.
  */
 
 import 'dotenv/config';
@@ -19,30 +19,59 @@ import { promises as fsPromises } from 'fs';
 import { join } from 'path';
 import { OlasOperateWrapper } from '../../src/worker/OlasOperateWrapper.js';
 import { createDefaultServiceConfig, SERVICE_CONSTANTS } from '../../src/worker/config/ServiceConfig.js';
-import { enableMechMarketplaceInConfig } from '../../src/worker/config/MechConfig.js';
+import { enableMechMarketplaceInConfig, DEFAULT_MECH_DELIVERY_RATE } from '../../src/worker/config/MechConfig.js';
 import { listServiceConfigs, cleanupUndeployedConfigs } from '../../src/worker/ServiceConfigReader.js';
 import { printHeader, printStep, printFundingRequirements, printSuccess, printError } from '../../src/setup/display.js';
 import { ethers } from 'ethers';
+import { getOptionalMechChainConfig } from '../../src/config/index.js';
 
 const OLAS_TOKEN_BASE = '0x54330d28ca3357F294334BDC454a032e7f353416';
 const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
 const STAKING_ABI = ['function getServiceIds() view returns (uint256[])'];
 
-function parseArgs(): { stakingContract?: string; dryRun: boolean; noMech: boolean; mechMarketplace?: string; mechPrice?: string } {
+type SupportedChain = 'base' | 'gnosis' | 'mode' | 'optimism';
+
+function isSupportedChain(value: string): value is SupportedChain {
+  return value === 'base' || value === 'gnosis' || value === 'mode' || value === 'optimism';
+}
+
+function parseArgs(): {
+  chain?: SupportedChain;
+  stakingContract?: string;
+  dryRun: boolean;
+  noMech: boolean;
+  unattended: boolean;
+  mechMarketplace?: string;
+  mechPrice?: string;
+} {
   const args = process.argv.slice(2);
+  let chain: SupportedChain | undefined;
   let stakingContract: string | undefined;
   let dryRun = false;
   let noMech = false;
+  let unattended = false;
   let mechMarketplace: string | undefined;
   let mechPrice: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--staking-contract' && args[i + 1]) {
+    if (args[i].startsWith('--chain=')) {
+      const candidate = args[i].slice('--chain='.length);
+      if (isSupportedChain(candidate)) {
+        chain = candidate;
+      } else {
+        printError(`Invalid --chain value: ${candidate}. Supported: base, gnosis, mode, optimism`);
+        process.exit(1);
+      }
+    } else if (args[i].startsWith('--staking-contract=')) {
+      stakingContract = args[i].slice('--staking-contract='.length);
+    } else if (args[i] === '--staking-contract' && args[i + 1]) {
       stakingContract = args[++i];
     } else if (args[i] === '--mech-marketplace' && args[i + 1]) {
       mechMarketplace = args[++i];
     } else if (args[i] === '--mech-price' && args[i + 1]) {
       mechPrice = args[++i];
+    } else if (args[i] === '--unattended') {
+      unattended = true;
     } else if (args[i] === '--no-mech') {
       noMech = true;
     } else if (args[i] === '--dry-run') {
@@ -50,11 +79,19 @@ function parseArgs(): { stakingContract?: string; dryRun: boolean; noMech: boole
     }
   }
 
-  return { stakingContract, dryRun, noMech, mechMarketplace, mechPrice };
+  return { chain, stakingContract, dryRun, noMech, unattended, mechMarketplace, mechPrice };
 }
 
 async function main() {
-  const { stakingContract: stakingContractArg, dryRun, noMech, mechMarketplace, mechPrice } = parseArgs();
+  const {
+    chain: chainArg,
+    stakingContract: stakingContractArg,
+    dryRun,
+    noMech,
+    unattended,
+    mechMarketplace,
+    mechPrice,
+  } = parseArgs();
 
   printHeader('Add OLAS Service');
 
@@ -71,6 +108,31 @@ async function main() {
     process.exit(1);
   }
 
+  const resolvedChain = chainArg || getOptionalMechChainConfig() || 'base';
+  if (!isSupportedChain(resolvedChain)) {
+    printError(`Invalid chain from configuration: ${resolvedChain}. Supported: base, gnosis, mode, optimism`);
+    process.exit(1);
+  }
+  const chain = resolvedChain;
+  const envAttended = typeof process.env.ATTENDED === 'string'
+    ? process.env.ATTENDED.toLowerCase() === 'true'
+    : undefined;
+  const attendedMode = unattended ? false : (envAttended ?? false);
+
+  // Keep add-service defaults aligned with setup CLI.
+  // DEFAULT_MECH_DELIVERY_RATE = 99 — must match ecosystem standard or marketplace rejects delivery.
+  const mechRequestPrice = mechPrice || DEFAULT_MECH_DELIVERY_RATE;
+  const defaultStakingContract = SERVICE_CONSTANTS.DEFAULT_STAKING_PROGRAM_ID;
+  const stakingContract = stakingContractArg || process.env.STAKING_CONTRACT || defaultStakingContract;
+
+  const mechMarketplaceAddresses: Record<SupportedChain, string> = {
+    base: '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020',
+    gnosis: '0x0000000000000000000000000000000000000000',
+    mode: '0x0000000000000000000000000000000000000000',
+    optimism: '0x0000000000000000000000000000000000000000',
+  };
+  const resolvedMechMarketplace = mechMarketplace || mechMarketplaceAddresses[chain];
+
   printStep('active', 'Starting middleware daemon...');
 
   const wrapper = await OlasOperateWrapper.create({
@@ -78,8 +140,8 @@ async function main() {
     defaultEnv: {
       operatePassword: password,
       stakingProgram: 'custom_staking',
-      chainLedgerRpc: { base: rpcUrl },
-      attended: true,
+      chainLedgerRpc: { [chain]: rpcUrl },
+      attended: attendedMode,
     },
   });
 
@@ -110,9 +172,9 @@ async function main() {
 
     // Verify Master Safe exists
     printStep('active', 'Checking Master Safe...');
-    const masterSafe = await wrapper.getExistingSafeForChain('base');
+    const masterSafe = await wrapper.getExistingSafeForChain(chain);
     if (!masterSafe) {
-      printError('No Master Safe found on Base. Run initial setup first (yarn setup).');
+      printError(`No Master Safe found on ${chain}. Run initial setup first (yarn setup).`);
       process.exit(1);
     }
     printStep('done', 'Master Safe found', `Address: ${masterSafe}`);
@@ -136,18 +198,12 @@ async function main() {
       console.log(`      - ${svc.serviceConfigId} (service #${svc.serviceId ?? 'N/A'}, mech: ${svc.mechContractAddress ?? 'none'})`);
     }
 
-    // Determine staking contract
-    let stakingContract = stakingContractArg;
-    if (!stakingContract) {
-      // Use same staking contract as first existing service
-      const firstStaked = existingServices.find(s => s.stakingContractAddress);
-      if (firstStaked?.stakingContractAddress) {
-        stakingContract = firstStaked.stakingContractAddress;
-        console.log(`\n  Using staking contract from existing service: ${stakingContract}`);
-      } else {
-        stakingContract = SERVICE_CONSTANTS.DEFAULT_STAKING_PROGRAM_ID;
-        console.log(`\n  Using default staking contract: ${stakingContract}`);
-      }
+    console.log(`\n  Chain: ${chain}`);
+    console.log(`  Attended mode: ${attendedMode ? 'ENABLED' : 'DISABLED'}`);
+    console.log(`  Staking contract: ${stakingContract}`);
+    if (!noMech) {
+      console.log(`  Mech marketplace: ${resolvedMechMarketplace}`);
+      console.log(`  Mech request price: ${mechRequestPrice} wei`);
     }
 
     // Preflight: check staking slots
@@ -183,21 +239,23 @@ async function main() {
 
     // --- Create service config ---
     printStep('active', 'Creating service configuration...');
+    const serviceName = `jinn-service-${Date.now()}`;
     const serviceConfig = createDefaultServiceConfig({
-      home_chain: 'base',
+      name: serviceName,
+      home_chain: chain,
     });
 
-    // Set staking
-    serviceConfig.configurations.base.staking_program_id = stakingContract;
-    serviceConfig.configurations.base.use_staking = true;
-    serviceConfig.configurations.base.rpc = rpcUrl;
+    // Match setup defaults for chain-specific service configuration.
+    serviceConfig.configurations[chain].staking_program_id = stakingContract;
+    serviceConfig.configurations[chain].use_staking = true;
+    serviceConfig.configurations[chain].rpc = rpcUrl;
 
     // Enable mech marketplace (skip with --no-mech to save VNet write quota)
     if (!noMech) {
       enableMechMarketplaceInConfig(
         serviceConfig,
-        mechMarketplace || '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020',
-        mechPrice || '10000000000000000',
+        resolvedMechMarketplace,
+        mechRequestPrice,
       );
     }
 
@@ -247,7 +305,7 @@ async function main() {
     }
 
     const requirements = fundingResult.requirements || {};
-    const refill = requirements.refill_requirements?.base || {};
+    const refill = requirements.refill_requirements?.[chain] || {};
 
     // Format funding requirements for display
     const displayReqs: Array<{ purpose: string; address: string; amount: string; token: string }> = [];
@@ -307,7 +365,7 @@ async function main() {
       const dep = await wrapper.getDeployment(serviceConfigId);
       if (dep.success && dep.deployment?.status === 3) {
         // Extract service safe from deployment
-        const chainData = startResult.service?.chain_configs?.base?.chain_data;
+        const chainData = startResult.service?.chain_configs?.[chain]?.chain_data;
         serviceSafe = chainData?.multisig;
         break;
       }

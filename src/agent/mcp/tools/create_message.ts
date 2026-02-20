@@ -9,7 +9,7 @@ export const createMessageParams = z.object({
 });
 
 export const createMessageSchema = {
-  description: 'Creates a message record for the current on-chain job via the Control API. Requires an active on-chain job context (JINN_REQUEST_ID).',
+  description: 'Creates a message record for the current on-chain job via the Control API. Requires an active on-chain job context (JINN_CTX_REQUEST_ID).',
   inputSchema: createMessageParams.shape,
 };
 
@@ -32,7 +32,7 @@ export async function createMessageTool(params: z.infer<typeof createMessagePara
       return {
         content: [{
           type: 'text' as const,
-          text: JSON.stringify({ data: null, meta: { ok: false, code: 'MISSING_REQUEST_ID', message: 'create_message requires an active on-chain job context (JINN_REQUEST_ID).' } })
+          text: JSON.stringify({ data: null, meta: { ok: false, code: 'MISSING_REQUEST_ID', message: 'create_message requires an active on-chain job context (JINN_CTX_REQUEST_ID).' } })
         }]
       };
     }

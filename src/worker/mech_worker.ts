@@ -39,6 +39,16 @@ import {
 } from '../config/index.js';
 import { recordIdleCycle, recordExecutionTime } from './healthcheck.js';
 import { getMechAddressesForStakingContract } from './filters/stakingFilter.js';
+import {
+  getWorkerCredentialInfo,
+  getWorkerOperatorCapabilityInfo,
+  isJobEligibleForWorker,
+  isJobEligibleForOperatorCapabilities,
+  jobRequiresCredentials,
+  getRequiredCredentials,
+  resolveMissingOperatorCapabilities,
+  reprobeWithRequestId,
+} from './filters/credentialFilter.js';
 import { ServiceRotator } from './rotation/ServiceRotator.js';
 import { setActiveService } from './rotation/ActiveServiceContext.js';
 import { maybeCallCheckpoint } from './staking/checkpoint.js';
@@ -58,6 +68,7 @@ type UnclaimedRequest = {
   ipfsHash?: string;
   delivered?: boolean;
   responseTimeout?: number; // absolute unix timestamp (seconds) after which any mech can deliver
+  enabledTools?: string[];  // MCP tools required by this job (from Ponder)
 };
 
 type JobDefinitionStatus = {
@@ -651,6 +662,7 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       blockTimestamp
       delivered
       dependencies
+      enabledTools
     }
   }
 }`;
@@ -794,7 +806,8 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       ipfsHash: r?.ipfsHash ? String(r.ipfsHash) : undefined,
       blockTimestamp: Number(r.blockTimestamp),
       delivered: Boolean(r?.delivered === true),
-      dependencies: Array.isArray(r?.dependencies) ? r.dependencies.map((dep: any) => String(dep)) : undefined
+      dependencies: Array.isArray(r?.dependencies) ? r.dependencies.map((dep: any) => String(dep)) : undefined,
+      enabledTools: Array.isArray(r?.enabledTools) ? r.enabledTools : undefined
     })) as UnclaimedRequest[];
   } catch (e) {
     workerLogger.warn({ error: serializeError(e) }, 'Ponder GraphQL not reachable; returning empty set');
@@ -1059,7 +1072,7 @@ async function filterByDependencies(requests: UnclaimedRequest[]): Promise<Uncla
   return results.filter(r => r.canProceed).map(r => r.request);
 }
 
-async function tryClaim(request: UnclaimedRequest, workerAddress: string): Promise<boolean> {
+async function tryClaim(request: UnclaimedRequest): Promise<boolean> {
   const resolvedWorkstreamId = request.workstreamId || request.id;
 
   // Skip jobs already executed this session (prevents re-execution loop on delivery failure)
@@ -1346,6 +1359,7 @@ async function fetchSpecificRequest(requestId: string): Promise<UnclaimedRequest
       blockTimestamp
       delivered
       dependencies
+      enabledTools
     }
   }
 }`;
@@ -1365,7 +1379,8 @@ async function fetchSpecificRequest(requestId: string): Promise<UnclaimedRequest
       ipfsHash: r?.ipfsHash ? String(r.ipfsHash) : undefined,
       blockTimestamp: Number(r.blockTimestamp),
       delivered: Boolean(r?.delivered === true),
-      dependencies: Array.isArray(r?.dependencies) ? r.dependencies.map((dep: any) => String(dep)) : undefined
+      dependencies: Array.isArray(r?.dependencies) ? r.dependencies.map((dep: any) => String(dep)) : undefined,
+      enabledTools: Array.isArray(r?.enabledTools) ? r.enabledTools : undefined
     };
   } catch (e: any) {
     workerLogger.warn({ error: serializeError(e) }, 'Error fetching specific request');
@@ -1379,6 +1394,8 @@ async function fetchSpecificRequest(requestId: string): Promise<UnclaimedRequest
  * @returns true if a job was processed, false if idle (no work found or claimed)
  */
 async function processOnce(): Promise<boolean> {
+  // This mech address is for request targeting/routing.
+  // Claim ownership in Control API is derived from the signed service EOA.
   const workerAddress = getMechAddress();
   if (!workerAddress) {
     workerLogger.error('Missing service mech address in .operate config or environment');
@@ -1432,6 +1449,22 @@ async function processOnce(): Promise<boolean> {
 
     candidates = [specificRequest];
     workerLogger.info({ target: targetHex }, 'Targeting specific request');
+
+    // Always apply operator capability filtering (e.g. github token capability).
+    const operatorInfo = await getWorkerOperatorCapabilityInfo();
+    const missing = resolveMissingOperatorCapabilities(
+      specificRequest.enabledTools,
+      operatorInfo.capabilities,
+    );
+    if (missing.length > 0) {
+      consecutiveStuckCycles = 0;
+      lastStuckRequestIds = [];
+      workerLogger.info(
+        { target: targetHex, missingOperatorCapabilities: missing },
+        'Target request is not eligible for this worker operator capabilities',
+      );
+      return false;
+    }
   } else {
     const recent = await fetchRecentRequests(50);
     candidates = await filterUnclaimed(recent);
@@ -1449,6 +1482,76 @@ async function processOnce(): Promise<boolean> {
       lastStuckRequestIds = [];
       workerLogger.info('No requests with met dependencies found');
       return false;
+    }
+
+    // Filter by operator-local capability (e.g. validated github token)
+    const operatorInfo = await getWorkerOperatorCapabilityInfo();
+    const ineligibleByOperator = candidates.filter(
+      c => !isJobEligibleForOperatorCapabilities(c.enabledTools, operatorInfo.capabilities),
+    );
+    if (ineligibleByOperator.length > 0) {
+      const missingCapabilities = new Set<string>();
+      for (const candidate of ineligibleByOperator) {
+        const missing = resolveMissingOperatorCapabilities(
+          candidate.enabledTools,
+          operatorInfo.capabilities,
+        );
+        for (const capability of missing) {
+          missingCapabilities.add(capability);
+        }
+      }
+      workerLogger.info(
+        {
+          skippedRequestCount: ineligibleByOperator.length,
+          requestIds: ineligibleByOperator.map(c => c.id),
+          missingOperatorCapabilities: [...missingCapabilities],
+        },
+        'Skipping requests requiring unavailable operator capabilities',
+      );
+    }
+
+    candidates = candidates.filter(c =>
+      isJobEligibleForOperatorCapabilities(c.enabledTools, operatorInfo.capabilities),
+    );
+    if (candidates.length === 0) {
+      consecutiveStuckCycles = 0;
+      lastStuckRequestIds = [];
+      workerLogger.info('No eligible requests after operator capability filter');
+      return false;
+    }
+
+    // Filter by credential capability (discovered via bridge probe at startup).
+    // Always filter — even when bridge is down (providers empty), so credential-requiring
+    // jobs are never claimed by workers that can't execute them.
+    const credInfo = await getWorkerCredentialInfo();
+    const ineligibleByCred = candidates.filter(
+      c => !isJobEligibleForWorker(c.enabledTools, credInfo.providers),
+    );
+    if (ineligibleByCred.length > 0) {
+      workerLogger.info(
+        {
+          skippedRequestCount: ineligibleByCred.length,
+          requestIds: ineligibleByCred.map(c => c.id),
+          workerProviders: [...credInfo.providers],
+        },
+        'Skipping requests requiring unavailable credentials',
+      );
+    }
+
+    candidates = candidates.filter(c => isJobEligibleForWorker(c.enabledTools, credInfo.providers));
+    if (candidates.length === 0) {
+      consecutiveStuckCycles = 0;
+      lastStuckRequestIds = [];
+      workerLogger.info('No eligible requests after credential filter');
+      return false;
+    }
+    // Trusted operators: process credential jobs first, leaving non-credential jobs for public pool
+    if (credInfo.isTrusted) {
+      candidates.sort((a, b) => {
+        const aPriority = jobRequiresCredentials(a.enabledTools) ? 0 : 1;
+        const bPriority = jobRequiresCredentials(b.enabledTools) ? 0 : 1;
+        return aPriority - bPriority;
+      });
     }
   }
 
@@ -1475,10 +1578,36 @@ async function processOnce(): Promise<boolean> {
   consecutiveStuckCycles = 0;
   lastStuckRequestIds = [];
 
-  // Try to claim a request
+  // Try to claim a request — verify venture credentials BEFORE claiming.
+  // There's no unclaim API, so we must confirm eligibility before taking ownership.
   let target: UnclaimedRequest | null = null;
   for (const c of candidates) {
-    const ok = await tryClaim(c, workerAddress);
+    if (executedJobsThisSession.has(c.id)) continue;
+
+    // For credential-requiring jobs, verify venture-scoped credentials before claiming.
+    // The startup probe discovers global credentials; the per-job reprobe resolves
+    // venture-scoped credentials (requestId → workstream → venture → credentials).
+    if (jobRequiresCredentials(c.enabledTools)) {
+      try {
+        const jobCredInfo = await reprobeWithRequestId(c.id);
+        if (!isJobEligibleForWorker(c.enabledTools, jobCredInfo.providers)) {
+          const required = getRequiredCredentials(c.enabledTools ?? []);
+          workerLogger.info(
+            { requestId: c.id, required, available: [...jobCredInfo.providers] },
+            'Skipping — venture lacks required credentials',
+          );
+          continue;
+        }
+      } catch (err) {
+        workerLogger.warn(
+          { requestId: c.id, error: err instanceof Error ? err.message : String(err) },
+          'Cannot verify venture credentials — skipping credential-requiring job',
+        );
+        continue;
+      }
+    }
+
+    const ok = await tryClaim(c);
     if (ok) {
       target = c;
       break;

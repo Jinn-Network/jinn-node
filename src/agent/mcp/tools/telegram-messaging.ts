@@ -6,12 +6,12 @@
  * Per-message topic_id can override the default for forum thread targeting.
  *
  * Environment variables:
- * - TELEGRAM_BOT_TOKEN: Bot API token from @BotFather
- * - TELEGRAM_CHAT_ID: Target chat ID (group, channel, or user)
- * - TELEGRAM_TOPIC_ID: (Optional) Default forum topic/thread ID for supergroups
+ * - JINN_JOB_TELEGRAM_CHAT_ID: Target chat ID (group, channel, or user)
+ * - JINN_JOB_TELEGRAM_TOPIC_ID: (Optional) Forum topic/thread ID for supergroups
  */
 
 import { z } from 'zod';
+import { getCredential } from '../../shared/credential-client.js';
 
 // ============================================
 // Schema Definitions
@@ -89,23 +89,19 @@ Returns: { message_id, chat_id, date } on success`,
 // Helper Functions
 // ============================================
 
-function getTelegramConfig() {
-    const botToken = process.env.TELEGRAM_BOT_TOKEN;
-    const chatId = process.env.TELEGRAM_CHAT_ID;
-    const topicIdRaw = process.env.TELEGRAM_TOPIC_ID;
+async function getTelegramConfig() {
+    const botToken = await getCredential('telegram');
+    const chatId = process.env.JINN_JOB_TELEGRAM_CHAT_ID;
+    const topicIdRaw = process.env.JINN_JOB_TELEGRAM_TOPIC_ID;
 
-    const missing: string[] = [];
-    if (!botToken) missing.push('TELEGRAM_BOT_TOKEN');
-    if (!chatId) missing.push('TELEGRAM_CHAT_ID');
-
-    if (missing.length > 0) {
-        throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+    if (!chatId) {
+        throw new Error('Missing required environment variable: JINN_JOB_TELEGRAM_CHAT_ID');
     }
 
     // Parse topic ID as number if provided
     const topicId = topicIdRaw ? parseInt(topicIdRaw, 10) : undefined;
 
-    return { botToken: botToken!, chatId: chatId!, topicId };
+    return { botToken, chatId, topicId };
 }
 
 async function telegramApiCall<T>(
@@ -156,7 +152,7 @@ export async function telegramSendMessage(args: unknown) {
             };
         }
 
-        const config = getTelegramConfig();
+        const config = await getTelegramConfig();
         const { text, parse_mode, disable_notification, topic_id } = parsed.data;
         const effectiveTopicId = topic_id ?? config.topicId;
 
@@ -210,7 +206,7 @@ export async function telegramSendPhoto(args: unknown) {
             };
         }
 
-        const config = getTelegramConfig();
+        const config = await getTelegramConfig();
         const { photo, caption, parse_mode, topic_id } = parsed.data;
         const effectiveTopicId = topic_id ?? config.topicId;
 
@@ -264,7 +260,7 @@ export async function telegramSendDocument(args: unknown) {
             };
         }
 
-        const config = getTelegramConfig();
+        const config = await getTelegramConfig();
         const { document, caption, parse_mode, topic_id } = parsed.data;
         const effectiveTopicId = topic_id ?? config.topicId;
 
@@ -360,7 +356,7 @@ export async function telegramGetUpdates(args: unknown) {
             };
         }
 
-        const config = getTelegramConfig();
+        const config = await getTelegramConfig();
         const { limit, offset, allowed_updates } = parsed.data;
 
         const result = await telegramApiCall<TelegramUpdate[]>('getUpdates', config.botToken, {

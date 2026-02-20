@@ -37,7 +37,7 @@ export async function embedText(args: unknown) {
     const { text, model: modelOverride, dim } = parsed.data;
     const model = modelOverride || 'text-embedding-3-small';
 
-    const client = getOpenAIClient();
+    const client = await getOpenAIClient();
 
     const response = await client.embeddings.create({
       model,

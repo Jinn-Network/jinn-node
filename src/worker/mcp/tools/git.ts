@@ -1,14 +1,18 @@
 /**
  * Git-native MCP tools for branch processing
+ *
+ * SECURITY: All git commands use execFileSync (array form) to prevent shell injection.
+ * Branch names are validated against a strict regex before use.
  */
 
 import { z } from 'zod';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { workerLogger } from '../../../logging/index.js';
 import { serializeError } from '../../logging/errors.js';
 import { getCurrentJobContext } from '../../../agent/mcp/tools/shared/context.js';
 import { composeSinglePageResponse, decodeCursor, type ComposeSinglePageResult } from '../../../agent/mcp/tools/shared/context-management.js';
 import { getBlueprintEnableBeads } from '../../../config/index.js';
+import { assertValidBranchName } from '../../../shared/git-validation.js';
 
 interface ProcessBranchArgs {
     branch_name: string;
@@ -30,7 +34,7 @@ interface ProcessBranchResult {
  * Get the current git branch
  */
 function getCurrentBranch(repoPath: string): string {
-    return execSync('git rev-parse --abbrev-ref HEAD', {
+    return execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
         cwd: repoPath,
         encoding: 'utf-8',
     }).trim();
@@ -40,7 +44,7 @@ function getCurrentBranch(repoPath: string): string {
  * Check if there are uncommitted changes
  */
 function hasUncommittedChanges(repoPath: string): boolean {
-    const status = execSync('git status --porcelain', {
+    const status = execFileSync('git', ['status', '--porcelain'], {
         cwd: repoPath,
         encoding: 'utf-8',
     });
@@ -52,9 +56,9 @@ function hasUncommittedChanges(repoPath: string): boolean {
  */
 function branchExistsLocally(repoPath: string, branchName: string): boolean {
     try {
-        execSync(`git rev-parse --verify ${branchName}`, {
+        execFileSync('git', ['rev-parse', '--verify', '--', branchName], {
             cwd: repoPath,
-            stdio: 'ignore',
+            stdio: 'pipe',
         });
         return true;
     } catch {
@@ -67,7 +71,7 @@ function branchExistsLocally(repoPath: string, branchName: string): boolean {
  */
 function branchExistsOnRemote(repoPath: string, branchName: string): boolean {
     try {
-        execSync(`git ls-remote --heads origin ${branchName}`, {
+        execFileSync('git', ['ls-remote', '--heads', 'origin', branchName], {
             cwd: repoPath,
             encoding: 'utf-8',
         });
@@ -79,7 +83,10 @@ function branchExistsOnRemote(repoPath: string, branchName: string): boolean {
 
 // Zod schema for process_branch parameters (defined before function to ensure availability)
 export const process_branch_params = z.object({
-    branch_name: z.string().min(1).describe('The full name of the child branch to process (e.g., \'job/abc-123-feature-name\')'),
+    branch_name: z.string().min(1).regex(
+        /^[a-zA-Z0-9][a-zA-Z0-9._\/-]*$/,
+        'Branch name contains invalid characters. Only alphanumeric, dots, hyphens, underscores, and forward slashes are allowed.'
+    ).describe('The full name of the child branch to process (e.g., \'job/abc-123-feature-name\')'),
     action: z.enum(['merge', 'reject', 'checkout', 'compare']).describe('The action to take: merge (integrate), reject (delete), checkout (switch to branch for edits), or compare (view diff without changing state)'),
     rationale: z.string().min(1).describe('A brief explanation of why you are taking this action (required for audit trail)'),
     cursor: z.string().optional().describe('Pagination cursor for compare action. If the diff is large, use the next_cursor from the response to fetch more.'),
@@ -130,8 +137,14 @@ export async function process_branch(args: unknown) {
     );
 
     try {
+        // Validate branch name beyond Zod regex (git ref rules)
+        assertValidBranchName(branch_name);
+
         let result: string;
         const baseBr = context.baseBranch || process.env.CODE_METADATA_BASE_BRANCH || 'main';
+        // Validate base branch too — it comes from job context or env
+        assertValidBranchName(baseBr);
+
         switch (action) {
             case 'merge':
                 result = await handleMerge(branch_name, repoPath, baseBr);
@@ -195,7 +208,7 @@ async function handleMerge(
     if (hasUncommittedChanges(repoPath)) {
         // Only attempt beads auto-commit if beads is enabled
         if (getBlueprintEnableBeads()) {
-            const statusOutput = execSync('git status --porcelain', {
+            const statusOutput = execFileSync('git', ['status', '--porcelain'], {
                 cwd: repoPath,
                 encoding: 'utf-8',
             });
@@ -209,13 +222,13 @@ async function handleMerge(
             if (onlyBeadsChanges && changedFiles.length > 0) {
                 // Auto-commit beads runtime files to unblock the merge
                 try {
-                    execSync('git add .beads/', {
+                    execFileSync('git', ['add', '.beads/'], {
                         cwd: repoPath,
-                        stdio: 'ignore',
+                        stdio: 'pipe',
                     });
-                    execSync('git commit -m "chore: sync beads state before merge"', {
+                    execFileSync('git', ['commit', '-m', 'chore: sync beads state before merge'], {
                         cwd: repoPath,
-                        stdio: 'ignore',
+                        stdio: 'pipe',
                     });
                     workerLogger.info({ repoPath, filesCommitted: changedFiles.length }, 'Auto-committed beads files before merge');
                 } catch (commitError) {
@@ -241,13 +254,13 @@ async function handleMerge(
 
     // Fetch latest state
     try {
-        execSync(`git fetch origin ${branchName}`, {
+        execFileSync('git', ['fetch', 'origin', branchName], {
             cwd: repoPath,
-            stdio: 'ignore',
+            stdio: 'pipe',
         });
-        execSync(`git fetch origin ${baseBranch}`, {
+        execFileSync('git', ['fetch', 'origin', baseBranch], {
             cwd: repoPath,
-            stdio: 'ignore',
+            stdio: 'pipe',
         });
     } catch (fetchError) {
         return JSON.stringify({
@@ -260,9 +273,9 @@ async function handleMerge(
 
     // Checkout base branch
     try {
-        execSync(`git checkout ${baseBranch}`, {
+        execFileSync('git', ['checkout', baseBranch], {
             cwd: repoPath,
-            stdio: 'ignore',
+            stdio: 'pipe',
         });
     } catch (checkoutError) {
         return JSON.stringify({
@@ -275,9 +288,9 @@ async function handleMerge(
 
     // Pull latest base
     try {
-        execSync(`git pull origin ${baseBranch}`, {
+        execFileSync('git', ['pull', 'origin', baseBranch], {
             cwd: repoPath,
-            stdio: 'ignore',
+            stdio: 'pipe',
         });
     } catch (pullError) {
         // Non-fatal, continue with merge
@@ -285,22 +298,25 @@ async function handleMerge(
 
     // Attempt merge
     try {
-        execSync(`git merge --no-ff origin/${branchName} -m "Merge branch '${branchName}' into '${baseBranch}'"`, {
+        execFileSync('git', [
+            'merge', '--no-ff', `origin/${branchName}`,
+            '-m', `Merge branch '${branchName}' into '${baseBranch}'`
+        ], {
             cwd: repoPath,
             stdio: 'pipe',
         });
     } catch (mergeError: any) {
         // Check if it's a conflict
-        const statusOutput = execSync('git status', {
+        const statusOutput = execFileSync('git', ['status'], {
             cwd: repoPath,
             encoding: 'utf-8',
         });
 
         if (statusOutput.includes('Unmerged paths') || statusOutput.includes('merge conflict')) {
             // Abort the merge
-            execSync('git merge --abort', {
+            execFileSync('git', ['merge', '--abort'], {
                 cwd: repoPath,
-                stdio: 'ignore',
+                stdio: 'pipe',
             });
 
             // Extract conflicting files
@@ -332,9 +348,9 @@ async function handleMerge(
 
     // Push the merge
     try {
-        execSync(`git push origin ${baseBranch}`, {
+        execFileSync('git', ['push', 'origin', baseBranch], {
             cwd: repoPath,
-            stdio: 'ignore',
+            stdio: 'pipe',
         });
     } catch (pushError) {
         return JSON.stringify({
@@ -350,9 +366,9 @@ async function handleMerge(
 
     // Delete remote branch
     try {
-        execSync(`git push origin --delete ${branchName}`, {
+        execFileSync('git', ['push', 'origin', '--delete', branchName], {
             cwd: repoPath,
-            stdio: 'ignore',
+            stdio: 'pipe',
         });
     } catch {
         // Ignore if branch doesn't exist on remote
@@ -362,9 +378,9 @@ async function handleMerge(
     const deletedLocal = branchExistsLocally(repoPath, branchName);
     if (deletedLocal) {
         try {
-            execSync(`git branch -d ${branchName}`, {
+            execFileSync('git', ['branch', '-d', branchName], {
                 cwd: repoPath,
-                stdio: 'ignore',
+                stdio: 'pipe',
             });
         } catch {
             // Ignore deletion errors
@@ -399,9 +415,9 @@ async function handleReject(
 
     // Delete from remote
     try {
-        execSync(`git push origin --delete ${branchName}`, {
+        execFileSync('git', ['push', 'origin', '--delete', branchName], {
             cwd: repoPath,
-            stdio: 'ignore',
+            stdio: 'pipe',
         });
         deletedFromRemote = true;
     } catch {
@@ -411,9 +427,9 @@ async function handleReject(
     // Delete from local
     if (branchExistsLocally(repoPath, branchName)) {
         try {
-            execSync(`git branch -D ${branchName}`, {
+            execFileSync('git', ['branch', '-D', branchName], {
                 cwd: repoPath,
-                stdio: 'ignore',
+                stdio: 'pipe',
             });
             deletedFromLocal = true;
         } catch {
@@ -449,7 +465,7 @@ async function handleCheckout(
     if (hasUncommittedChanges(repoPath)) {
         // Only attempt beads auto-commit if beads is enabled
         if (getBlueprintEnableBeads()) {
-            const statusOutput = execSync('git status --porcelain', {
+            const statusOutput = execFileSync('git', ['status', '--porcelain'], {
                 cwd: repoPath,
                 encoding: 'utf-8',
             });
@@ -461,13 +477,13 @@ async function handleCheckout(
 
             if (onlyBeadsChanges && changedFiles.length > 0) {
                 try {
-                    execSync('git add .beads/', {
+                    execFileSync('git', ['add', '.beads/'], {
                         cwd: repoPath,
-                        stdio: 'ignore',
+                        stdio: 'pipe',
                     });
-                    execSync('git commit -m "chore: sync beads state before checkout"', {
+                    execFileSync('git', ['commit', '-m', 'chore: sync beads state before checkout'], {
                         cwd: repoPath,
-                        stdio: 'ignore',
+                        stdio: 'pipe',
                     });
                     workerLogger.info({ repoPath, filesCommitted: changedFiles.length }, 'Auto-committed beads files before checkout');
                 } catch (commitError) {
@@ -491,9 +507,9 @@ async function handleCheckout(
 
     // Fetch the branch
     try {
-        execSync(`git fetch origin ${branchName}`, {
+        execFileSync('git', ['fetch', 'origin', branchName], {
             cwd: repoPath,
-            stdio: 'ignore',
+            stdio: 'pipe',
         });
     } catch (fetchError) {
         return JSON.stringify({
@@ -507,14 +523,14 @@ async function handleCheckout(
     // Checkout the branch
     try {
         if (branchExistsLocally(repoPath, branchName)) {
-            execSync(`git checkout ${branchName}`, {
+            execFileSync('git', ['checkout', branchName], {
                 cwd: repoPath,
-                stdio: 'ignore',
+                stdio: 'pipe',
             });
         } else {
-            execSync(`git checkout -b ${branchName} origin/${branchName}`, {
+            execFileSync('git', ['checkout', '-b', branchName, `origin/${branchName}`], {
                 cwd: repoPath,
-                stdio: 'ignore',
+                stdio: 'pipe',
             });
         }
     } catch (checkoutError) {
@@ -557,13 +573,13 @@ async function handleCompare(
 
     // Fetch latest state of both branches
     try {
-        execSync(`git fetch origin ${branchName}`, {
+        execFileSync('git', ['fetch', 'origin', branchName], {
             cwd: repoPath,
-            stdio: 'ignore',
+            stdio: 'pipe',
         });
-        execSync(`git fetch origin ${baseBranch}`, {
+        execFileSync('git', ['fetch', 'origin', baseBranch], {
             cwd: repoPath,
-            stdio: 'ignore',
+            stdio: 'pipe',
         });
     } catch (fetchError) {
         return JSON.stringify({
@@ -578,14 +594,13 @@ async function handleCompare(
     const GIT_SHA1_LENGTH = 40;
     let mergeStatus: 'mergeable' | 'conflict' | 'unknown' = 'unknown';
     try {
-        const mergeTreeOutput = execSync(
-            `git merge-tree --write-tree origin/${baseBranch} origin/${branchName}`,
-            {
-                cwd: repoPath,
-                encoding: 'utf-8',
-                stdio: ['pipe', 'pipe', 'pipe'],
-            }
-        );
+        const mergeTreeOutput = execFileSync('git', [
+            'merge-tree', '--write-tree', `origin/${baseBranch}`, `origin/${branchName}`
+        ], {
+            cwd: repoPath,
+            encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe'],
+        });
         const mergeTreeHash = mergeTreeOutput.trim();
         mergeStatus = mergeTreeHash.length === GIT_SHA1_LENGTH && /^[0-9a-f]+$/.test(mergeTreeHash)
             ? 'mergeable'
@@ -599,14 +614,13 @@ async function handleCompare(
     // Generate full diff
     let diffSummary = '';
     try {
-        diffSummary = execSync(
-            `git diff origin/${baseBranch}...origin/${branchName}`,
-            {
-                cwd: repoPath,
-                encoding: 'utf-8',
-                maxBuffer: 50 * 1024 * 1024, // 50MB max buffer
-            }
-        );
+        diffSummary = execFileSync('git', [
+            'diff', `origin/${baseBranch}...origin/${branchName}`
+        ], {
+            cwd: repoPath,
+            encoding: 'utf-8',
+            maxBuffer: 50 * 1024 * 1024, // 50MB max buffer
+        });
     } catch (diffError) {
         workerLogger.warn(
             { error: serializeError(diffError), branchName, baseBranch },
@@ -627,17 +641,15 @@ async function handleCompare(
 
     try {
         // Get commit count
-        const commitCountOutput = execSync(
-            `git rev-list --count origin/${baseBranch}..origin/${branchName}`,
-            { cwd: repoPath, encoding: 'utf-8' }
-        );
+        const commitCountOutput = execFileSync('git', [
+            'rev-list', '--count', `origin/${baseBranch}..origin/${branchName}`
+        ], { cwd: repoPath, encoding: 'utf-8' });
         commitCount = parseInt(commitCountOutput.trim(), 10) || 0;
 
         // Get file stats using name-status
-        const nameStatusOutput = execSync(
-            `git diff --name-status origin/${baseBranch}...origin/${branchName}`,
-            { cwd: repoPath, encoding: 'utf-8' }
-        );
+        const nameStatusOutput = execFileSync('git', [
+            'diff', '--name-status', `origin/${baseBranch}...origin/${branchName}`
+        ], { cwd: repoPath, encoding: 'utf-8' });
         const statusLines = nameStatusOutput.trim().split('\n').filter(Boolean);
         for (const line of statusLines) {
             const status = line.charAt(0);
@@ -647,10 +659,9 @@ async function handleCompare(
         }
 
         // Get head SHA
-        headSha = execSync(
-            `git rev-parse origin/${branchName}`,
-            { cwd: repoPath, encoding: 'utf-8' }
-        ).trim();
+        headSha = execFileSync('git', [
+            'rev-parse', `origin/${branchName}`
+        ], { cwd: repoPath, encoding: 'utf-8' }).trim();
     } catch (statsError) {
         // Non-fatal: continue with basic details
         workerLogger.warn(

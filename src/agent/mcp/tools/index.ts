@@ -67,6 +67,13 @@ export {
   telegramGetUpdates, telegramGetUpdatesParams, telegramGetUpdatesSchema,
 } from './telegram-messaging.js';
 
+// Twitter tools
+export {
+  twitterPostTweet, twitterPostTweetParams, twitterPostTweetSchema,
+  twitterGetMentions, twitterGetMentionsParams, twitterGetMentionsSchema,
+  twitterGetTimeline, twitterGetTimelineParams, twitterGetTimelineSchema,
+} from './twitter-social.js';
+
 // Export database functions
 export { readRecords, createRecord, type ReadRecordsParams, type CreateRecordParams } from './shared/database.js';
 

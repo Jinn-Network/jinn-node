@@ -2305,8 +2305,8 @@ uvicorn = "==0.27.0"
 [package.source]
 type = "git"
 url = "https://github.com/Jinn-Network/olas-operate-middleware.git"
-reference = "v0.1.4"
-resolved_reference = "a15aa3b2da4791b269c84e27a03bce72e6b21162"
+reference = "3e8d8f38549d20e18226dfa511b684781703b4f2"
+resolved_reference = "3e8d8f38549d20e18226dfa511b684781703b4f2"
 
 [[package]]
 name = "open-aea"
@@ -3160,7 +3160,7 @@ description = "Python for Window Extensions"
 optional = false
 python-versions = "*"
 groups = ["main"]
-markers = "platform_system == \"Windows\" or sys_platform == \"win32\""
+markers = "sys_platform == \"win32\" or platform_system == \"Windows\""
 files = [
     {file = "pywin32-311-cp310-cp310-win32.whl", hash = "sha256:d03ff496d2a0cd4a5893504789d4a15399133fe82517455e78bad62efbb7f0a3"},
     {file = "pywin32-311-cp310-cp310-win_amd64.whl", hash = "sha256:797c2772017851984b97180b0bebe4b620bb86328e8a884bb626156295a63b3b"},
@@ -4079,4 +4079,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.10,<3.12"
-content-hash = "778ba53fe97e18702e557387858bcef5b7a998be366175a582116c6ef73be23d"
+content-hash = "287ec22c25255543e163a60119b5f5b4b9b3e4061be339030a18eb9b3863d930"

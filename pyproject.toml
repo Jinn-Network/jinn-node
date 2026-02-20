@@ -7,7 +7,7 @@ package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.10,<3.12"
-olas-operate-middleware = {git = "https://github.com/Jinn-Network/olas-operate-middleware.git", tag = "v0.1.4"}
+olas-operate-middleware = {git = "https://github.com/Jinn-Network/olas-operate-middleware.git", rev = "3e8d8f38549d20e18226dfa511b684781703b4f2"}
 setuptools = ">=42,<82"
 
 [build-system]

@@ -263,7 +263,7 @@ export function hasMoltbook(enabledTools: string[]): boolean {
 
 /**
  * Telegram messaging tools (custom MCP tools)
- * Reads chat_id from TELEGRAM_CHAT_ID env var
+ * Reads chat_id from JINN_JOB_TELEGRAM_CHAT_ID payload env var
  */
 export const TELEGRAM_TOOLS = [
   'telegram_send_message',
@@ -380,8 +380,57 @@ export const REFLECTION_EXCLUDED_TOOLS = [
 ] as const;
 
 /**
+ * Complete set of valid tool names that can appear in enabledTools from IPFS metadata.
+ * Unknown tools are dropped with a warning to prevent arbitrary tool injection.
+ */
+export const VALID_JOB_TOOLS: ReadonlySet<string> = new Set([
+  // Universal tools (always available)
+  ...BASE_UNIVERSAL_TOOLS,
+  ...CODING_UNIVERSAL_TOOLS,
+  // Native CLI tools
+  ...NATIVE_TOOLS,
+  // Meta-tools (expand to individual tools)
+  ...Object.keys(EXTENSION_META_TOOLS),
+  'telegram_messaging',
+  'railway_deployment',
+  'fireflies_meetings',
+  'nano_banana', // Deprecated but accepted (silently stripped later)
+  // Individual tools from meta-tool expansions
+  ...BROWSER_AUTOMATION_TOOLS,
+  ...VENTURES_REGISTRY_TOOLS,
+  ...TEMPLATES_REGISTRY_TOOLS,
+  ...SERVICES_REGISTRY_TOOLS,
+  ...TELEGRAM_TOOLS,
+  ...FIREFLIES_TOOLS,
+  ...RAILWAY_TOOLS,
+  // Extension tools
+  'inspect_workstream',
+  'inspect_job_run',
+  'inspect_job',
+  // GitHub (operator-level: reads GITHUB_TOKEN from env)
+  'get_file_contents',
+  'search_code',
+  'list_commits',
+  // Blog analytics (blog-analytics.ts → getCredential('umami'))
+  'blog_get_stats',
+  'blog_get_top_pages',
+  'blog_get_referrers',
+  'blog_get_metrics',
+  'blog_get_pageviews',
+  'blog_get_performance_summary',
+  // OpenAI (shared/openai.ts → getCredential('openai'))
+  'embed_text',
+  // Civitai (shared/civitai.ts → getCredential('civitai'))
+  'civitai_generate_image',
+  // Twitter (twitter-social.ts → getCredential('twitter'))
+  'twitter_post_tweet',
+  'twitter_get_mentions',
+  'twitter_get_timeline',
+]);
+
+/**
  * Compute tool policy for a job based on its enabled tools and job type
- * 
+ *
  * @param jobEnabledTools - Tools explicitly enabled by the job definition (may be empty)
  * @param options - Configuration options including whether this is a coding job or reflection agent
  * @returns Tool policy result with MCP and CLI configurations
@@ -404,8 +453,18 @@ export function computeToolPolicy(
     ? baseUniversalTools.filter(t => !REFLECTION_EXCLUDED_TOOLS.includes(t as any))
     : baseUniversalTools;
 
-  // Merge universal tools with job-specific tools, removing duplicates
-  const allTools = [...effectiveUniversalTools, ...jobEnabledTools];
+  // Validate job-enabled tools against known set
+  const validatedJobTools: string[] = [];
+  for (const tool of jobEnabledTools) {
+    if (VALID_JOB_TOOLS.has(tool)) {
+      validatedJobTools.push(tool);
+    } else {
+      console.warn(`[toolPolicy] Dropping unknown tool from enabledTools: '${tool}'`);
+    }
+  }
+
+  // Merge universal tools with validated job-specific tools
+  const allTools = [...effectiveUniversalTools, ...validatedJobTools];
 
   // Expand browser_automation meta-tool to individual tools
   // This ensures chrome-devtools server receives actual tool names in includeTools
@@ -505,4 +564,3 @@ export function computeToolPolicy(
     cliAllowedTools: uniqueCliAllowedTools
   };
 }
-

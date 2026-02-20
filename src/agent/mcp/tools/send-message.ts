@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { supabase } from './shared/supabase.js';
+import { getSupabase } from './shared/supabase.js';
 import { getCurrentJobContext } from './shared/context.js';
 
 export const sendMessageParams = z.object({
@@ -40,7 +40,7 @@ export async function sendMessage(params: z.infer<typeof sendMessageParams>) {
             meta: {
               ok: false,
               code: 'NO_JOB_DEFINITION_CONTEXT',
-              message: 'Cannot send message: missing parent job definition in context. Ensure the worker passes JINN_JOB_DEFINITION_ID.'
+              message: 'Cannot send message: missing parent job definition in context. Ensure the worker passes JINN_CTX_JOB_DEFINITION_ID.'
             }
           })
         }]
@@ -62,11 +62,12 @@ export async function sendMessage(params: z.infer<typeof sendMessageParams>) {
     // If context carries project definition, include it
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
-    if (process.env.JINN_PROJECT_DEFINITION_ID) {
-      payload.project_definition_id = process.env.JINN_PROJECT_DEFINITION_ID;
+    if (process.env.JINN_CTX_PROJECT_DEFINITION_ID) {
+      payload.project_definition_id = process.env.JINN_CTX_PROJECT_DEFINITION_ID;
     }
 
     // Enforce DB-function-only write path
+    const supabase = await getSupabase();
     const { data: newId, error } = await supabase.rpc('create_record', {
       p_table_name: 'messages',
       p_data: payload,

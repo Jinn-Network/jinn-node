@@ -14,25 +14,17 @@
       "trust": true
     },
     "railway": {
-      "command": "npx",
+      "command": "tsx",
       "args": [
-        "-y",
-        "railway-mcp@2.2.0"
+        "./mcp/launchers/railway-mcp.ts"
       ],
       "trust": true,
-      "includeTools": [],
-      "env": {
-        "RAILWAY_API_TOKEN": "${RAILWAY_API_TOKEN}"
-      }
+      "includeTools": []
     },
     "fireflies": {
-      "command": "npx",
+      "command": "tsx",
       "args": [
-        "-y",
-        "mcp-remote",
-        "https://api.fireflies.ai/mcp",
-        "--header",
-        "Authorization: Bearer ${FIREFLIES_API_KEY}"
+        "./mcp/launchers/fireflies-mcp.ts"
       ],
       "trust": true,
       "includeTools": []

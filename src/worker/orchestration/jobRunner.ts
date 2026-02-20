@@ -13,7 +13,8 @@
  */
 
 import { workerLogger } from '../../logging/index.js';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
+import { assertValidBranchName } from '../../shared/git-validation.js';
 import { WorkerTelemetryService } from '../worker_telemetry.js';
 import { serializeError } from '../logging/errors.js';
 import { snapshotEnvironment, restoreEnvironment } from './env.js';
@@ -36,6 +37,7 @@ import { createSituationArtifactForRequest } from '../situation_artifact.js';
 import { createArtifact as apiCreateArtifact } from '../control_api_client.js';
 import { safeParseToolResponse } from '../tool_utils.js';
 import { getJinnWorkspaceDir, extractRepoName, getRepoRoot, normalizeSshUrl } from '../../shared/repo_utils.js';
+import { assertValidJinnJobEnvMap } from '../../shared/job-env.js';
 import { extractMemoryArtifacts } from '../reflection/memoryArtifacts.js';
 import { DEFAULT_WORKER_MODEL, normalizeGeminiModel, validateModelAllowed } from '../../shared/gemini-models.js';
 import type { UnclaimedRequest, IpfsMetadata, AgentExecutionResult, FinalStatus, ExecutionSummaryDetails, RecognitionPhaseResult, ReflectionResult, AdditionalContext } from '../types.js';
@@ -112,20 +114,25 @@ export async function processOnce(
         workstreamId: resolvedWorkstreamId
       }, 'Processing request');
 
-      // Inject environment variables from additionalContext.env
-      // This enables multi-tenant products to pass per-job configuration
+      // Inject environment variables from additionalContext.env.
+      // Invalid keys/values fail fast to avoid processing tampered payloads.
       if (metadata?.additionalContext?.env) {
-        const protectedVars = ['PATH', 'NODE_ENV', 'HOME', 'USER', 'SHELL'];
-        for (const [key, value] of Object.entries(metadata.additionalContext.env)) {
-          if (!protectedVars.includes(key)) {
-            process.env[key] = value;
-            workerLogger.info({ key }, 'Injected job environment variable from additionalContext.env');
-          } else {
-            workerLogger.warn({ key }, 'Skipped protected environment variable');
-          }
+        const validatedEnv = assertValidJinnJobEnvMap(
+          metadata.additionalContext.env,
+          'metadata.additionalContext.env',
+        );
+
+        for (const [key, value] of Object.entries(validatedEnv)) {
+          process.env[key] = value;
+          workerLogger.info({ key }, 'Injected job environment variable from additionalContext.env');
         }
-        // Store as JSON for child job inheritance via dispatch_new_job
-        process.env.JINN_INHERITED_ENV = JSON.stringify(metadata.additionalContext.env);
+
+        // Store injected vars as JSON for child job inheritance via dispatch_new_job.
+        if (Object.keys(validatedEnv).length > 0) {
+          process.env.JINN_CTX_INHERITED_ENV = JSON.stringify(validatedEnv);
+        } else {
+          delete process.env.JINN_CTX_INHERITED_ENV;
+        }
       }
 
       // Bootstrap workspace from additionalContext.workspaceRepo (root jobs only)
@@ -154,7 +161,7 @@ export async function processOnce(
 
       // Handle code metadata if present (artifact-only jobs may not have it)
       if (metadata?.codeMetadata) {
-        process.env.JINN_BASE_BRANCH = metadata.codeMetadata.branch?.name ||
+        process.env.JINN_CTX_BASE_BRANCH = metadata.codeMetadata.branch?.name ||
           metadata.codeMetadata.baseBranch ||
           DEFAULT_BASE_BRANCH;
 
@@ -279,11 +286,9 @@ export async function processOnce(
                 // Commit the conflicted state so we can continue to next dependency
                 // Agent will see conflict markers in committed files and must resolve them
                 try {
-                  execSync('git add .', { cwd: repoRoot, encoding: 'utf8' });
-                  execSync(
-                    `git commit -m "WIP: Merge conflict from ${branchInfo.branchName} - agent must resolve"`,
-                    { cwd: repoRoot, encoding: 'utf8' }
-                  );
+                  assertValidBranchName(branchInfo.branchName);
+                  execFileSync('git', ['add', '.'], { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' });
+                  execFileSync('git', ['commit', '-m', `WIP: Merge conflict from ${branchInfo.branchName} - agent must resolve`], { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' });
                   workerLogger.info({
                     requestId: target.id,
                     dependency: branchInfo.branchName

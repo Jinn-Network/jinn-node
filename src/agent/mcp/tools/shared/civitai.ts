@@ -1,20 +1,11 @@
 import * as civitaiPkg from 'civitai';
-
-// Environment helpers
-function getEnvApiKey(): string | undefined {
-  return process.env.CIVITAI_API_TOKEN || process.env.CIVITAI_API_KEY || undefined;
-}
-
-export function getCivitaiApiKey(): string | undefined {
-  return getEnvApiKey();
-}
+import { getCredential } from '../../../shared/credential-client.js';
 
 // Minimal SDK loader that works across ESM/CJS variations
 let _sdk: any | null = null;
-function getCivitaiSdk(): any {
+async function getCivitaiSdk(): Promise<any> {
   if (_sdk) return _sdk;
-  const apiKey = getEnvApiKey();
-  if (!apiKey) throw new Error('CIVITAI_API_TOKEN/CIVITAI_API_KEY not set');
+  const apiKey = await getCredential('civitai');
 
   const candidate: any = civitaiPkg as any;
   let Ctor: any = candidate?.Civitai;
@@ -34,7 +25,7 @@ function getCivitaiSdk(): any {
 // Public helpers
 export async function checkModelAvailability(): Promise<{ available: boolean; error?: string; models?: any[] }> {
   try {
-    const sdk = getCivitaiSdk();
+    const sdk = await getCivitaiSdk();
     
     // Temporarily suppress stdout/stderr to prevent MCP protocol corruption
     const originalStdout = process.stdout.write;

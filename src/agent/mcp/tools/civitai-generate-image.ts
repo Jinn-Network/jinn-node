@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import { supabase } from './shared/supabase.js';
+import { getSupabase } from './shared/supabase.js';
 import { getCurrentJobContext } from './shared/context.js';
 import { isControlApiEnabled, createArtifact as apiCreateArtifact } from './shared/control_api.js';
-import { getCivitaiApiKey, airCreateImage, extractFirstImageUrl, checkModelAvailability, waitForImageUrlByToken } from './shared/civitai.js';
+import { airCreateImage, extractFirstImageUrl, checkModelAvailability, waitForImageUrlByToken } from './shared/civitai.js';
 import { randomUUID } from 'crypto';
 
 // Schema for image generation using Civitai AIR. The tool waits for completion
@@ -73,13 +73,6 @@ export async function civitaiGenerateImage(params: CivitaiGenerateImageParams) {
 
     // 1) Obtain image URL via AIR
     let finalImageUrl: string | null = null;
-
-    const apiKey = getCivitaiApiKey();
-    if (!apiKey) {
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify({ data: null, meta: { ok: false, code: 'MISSING_API_KEY', message: 'CIVITAI_API_TOKEN/CIVITAI_API_KEY is not set.' } }, null, 2) }]
-      };
-    }
 
       // Check model availability first to debug API access
       const modelCheck = await checkModelAvailability();
@@ -157,6 +150,7 @@ export async function civitaiGenerateImage(params: CivitaiGenerateImageParams) {
       finalImageUrl = immediateUrl;
 
     // 2) Rehost to Supabase Storage for a durable public URL
+    const supabase = await getSupabase();
     const fetchFn: any = (globalThis as any).fetch;
     if (!fetchFn) {
       return {
@@ -212,10 +206,10 @@ export async function civitaiGenerateImage(params: CivitaiGenerateImageParams) {
     }
 
     // 3) Persist artifact when on-chain job context is available via Control API; otherwise return URL only
-    const hasRequestContext = !!process.env.JINN_REQUEST_ID;
+    const hasRequestContext = !!process.env.JINN_CTX_REQUEST_ID;
     if (hasRequestContext && isControlApiEnabled()) {
       try {
-        const requestId = String(process.env.JINN_REQUEST_ID);
+        const requestId = String(process.env.JINN_CTX_REQUEST_ID);
         const newId = await apiCreateArtifact(requestId, {
           cid: 'inline',
           topic: 'image.generated',

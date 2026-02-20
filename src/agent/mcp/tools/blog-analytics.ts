@@ -5,13 +5,15 @@
  * enabling data-driven content strategy decisions.
  *
  * Environment variables:
- * - UMAMI_HOST: Umami API host (e.g., https://analytics.example.com)
- * - UMAMI_WEBSITE_ID: Default Umami website ID (can be overridden per-call via websiteId param)
- * - UMAMI_USERNAME: Umami username for authentication
- * - UMAMI_PASSWORD: Umami password for authentication
+ * - JINN_JOB_UMAMI_WEBSITE_ID: Venture-scoped Umami website ID
+ *
+ * Credential bridge:
+ * - Provider: umami
+ * - Static config: UMAMI_HOST
  */
 
 import { z } from 'zod';
+import { getCredentialBundle } from '../../shared/credential-client.js';
 
 // ============================================
 // Type Definitions
@@ -64,9 +66,7 @@ export const blogGetStatsSchema = {
 Returns pageviews, visitors, visits, bounces, and total time with
 current and previous period values for trend comparison.
 
-Pass websiteId to query a specific site, or omit to use UMAMI_WEBSITE_ID env var.
-
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_USERNAME, UMAMI_PASSWORD
+REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
 
 Returns: {
   stats: { pageviews, visitors, visits, bounces, totaltime },
@@ -87,9 +87,7 @@ export const blogGetTopPagesSchema = {
 Use this to identify popular content and understand what resonates with readers.
 Pages are sorted by view count in descending order.
 
-Pass websiteId to query a specific site, or omit to use UMAMI_WEBSITE_ID env var.
-
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_USERNAME, UMAMI_PASSWORD
+REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
 
 Returns: { pages: [{ url, views }], count, period }`,
   inputSchema: blogGetTopPagesParams.shape,
@@ -107,9 +105,7 @@ export const blogGetReferrersSchema = {
 Shows where readers are coming from (search engines, social media, direct links, etc.).
 Use this to understand traffic sources and optimize distribution strategy.
 
-Pass websiteId to query a specific site, or omit to use UMAMI_WEBSITE_ID env var.
-
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_USERNAME, UMAMI_PASSWORD
+REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
 
 Returns: { referrers: [{ source, visits }], count, period }`,
   inputSchema: blogGetReferrersParams.shape,
@@ -135,9 +131,7 @@ Types available:
 - country: Geographic distribution
 - event: Custom events
 
-Pass websiteId to query a specific site, or omit to use UMAMI_WEBSITE_ID env var.
-
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_USERNAME, UMAMI_PASSWORD
+REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
 
 Returns: { metrics: [{ name, count }], type, count, period }`,
   inputSchema: blogGetMetricsParams.shape,
@@ -155,9 +149,7 @@ export const blogGetPageviewsSchema = {
 Returns daily or hourly pageviews and sessions over the specified period.
 Useful for visualizing traffic trends and identifying patterns.
 
-Pass websiteId to query a specific site, or omit to use UMAMI_WEBSITE_ID env var.
-
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_USERNAME, UMAMI_PASSWORD
+REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
 
 Returns: { pageviews: [{ date, count }], sessions: [{ date, count }], period }`,
   inputSchema: blogGetPageviewsParams.shape,
@@ -181,9 +173,7 @@ ANALYSIS TIPS:
 - Cross-reference top pages with referrers to understand traffic sources
 - Use this data to inform future content topics and distribution
 
-Pass websiteId to query a specific site, or omit to use UMAMI_WEBSITE_ID env var.
-
-REQUIRED ENVIRONMENT: UMAMI_HOST, UMAMI_USERNAME, UMAMI_PASSWORD
+REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
 
 Returns: { stats, topPages, referrers, period, insights }`,
   inputSchema: blogGetPerformanceSummaryParams.shape,
@@ -193,74 +183,37 @@ Returns: { stats, topPages, referrers, period, insights }`,
 // Helper Functions
 // ============================================
 
-// Cache for JWT token (valid for session)
-let cachedToken: { token: string; expiresAt: number } | null = null;
+interface UmamiConfig {
+  host: string;
+  websiteId: string;
+  token: string;
+}
 
-function getUmamiConfig(websiteIdOverride?: string) {
-  const host = process.env.UMAMI_HOST;
-  const websiteId = websiteIdOverride || process.env.UMAMI_WEBSITE_ID;
-  const username = process.env.UMAMI_USERNAME;
-  const password = process.env.UMAMI_PASSWORD;
+async function getUmamiConfig(): Promise<UmamiConfig> {
+  const bundle = await getCredentialBundle('umami');
+  const host = bundle.config.UMAMI_HOST;
+  const websiteId = process.env.JINN_JOB_UMAMI_WEBSITE_ID;
 
   const missing: string[] = [];
-  if (!host) missing.push('UMAMI_HOST');
-  if (!websiteId) missing.push('UMAMI_WEBSITE_ID (or pass websiteId param)');
-  if (!username) missing.push('UMAMI_USERNAME');
-  if (!password) missing.push('UMAMI_PASSWORD');
+  if (!host) missing.push('credential bridge config UMAMI_HOST');
+  if (!websiteId) missing.push('JINN_JOB_UMAMI_WEBSITE_ID');
 
   if (missing.length > 0) {
-    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+    throw new Error(`Missing required Umami configuration: ${missing.join(', ')}`);
   }
 
   return {
-    host: host!.replace(/\/$/, ''), // Remove trailing slash
+    host: host!.replace(/\/$/, ''),
     websiteId: websiteId!,
-    username: username!,
-    password: password!,
+    token: bundle.access_token,
   };
-}
-
-async function getAuthToken(config: ReturnType<typeof getUmamiConfig>): Promise<string> {
-  // Return cached token if still valid (with 5 min buffer)
-  if (cachedToken && cachedToken.expiresAt > Date.now() + 5 * 60 * 1000) {
-    return cachedToken.token;
-  }
-
-  // Login to get new token
-  const response = await fetch(`${config.host}/api/auth/login`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      username: config.username,
-      password: config.password,
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Umami auth failed: ${response.status} ${response.statusText} - ${errorText}`);
-  }
-
-  const data = await response.json();
-  const token = data.token;
-
-  // Cache token for 1 hour (typical JWT lifetime)
-  cachedToken = {
-    token,
-    expiresAt: Date.now() + 60 * 60 * 1000,
-  };
-
-  return token;
 }
 
 async function umamiApiCall<T>(
   endpoint: string,
-  config: ReturnType<typeof getUmamiConfig>,
+  config: UmamiConfig,
   params?: Record<string, string>
 ): Promise<T> {
-  const token = await getAuthToken(config);
   const url = new URL(`${config.host}/api/websites/${config.websiteId}${endpoint}`);
 
   if (params) {
@@ -269,19 +222,31 @@ async function umamiApiCall<T>(
     });
   }
 
-  const response = await fetch(url.toString(), {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-  });
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const response = await fetch(url.toString(), {
+        headers: {
+          'Authorization': `Bearer ${config.token}`,
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(15_000),
+      });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Umami API error: ${response.status} ${response.statusText} - ${errorText}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Umami API error: ${response.status} ${response.statusText} - ${errorText}`);
+      }
+
+      return response.json();
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < 2) {
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      }
+    }
   }
-
-  return response.json();
+  throw lastError!;
 }
 
 function getTimeRange(days: number): { startAt: Date; endAt: Date } {
@@ -371,7 +336,7 @@ export async function blogGetStats(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig(parsed.data.websiteId);
+    const config = await getUmamiConfig();
     const { days } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -391,12 +356,15 @@ export async function blogGetStats(args: unknown) {
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
+    const code = message.includes('Credential bridge') || message.includes('STATIC_PROVIDER_ERROR')
+      ? 'CREDENTIAL_ERROR'
+      : 'EXECUTION_ERROR';
     return {
       content: [{
         type: 'text' as const,
         text: JSON.stringify({
           data: null,
-          meta: { ok: false, code: 'EXECUTION_ERROR', message },
+          meta: { ok: false, code, message },
         }),
       }],
     };
@@ -418,7 +386,7 @@ export async function blogGetTopPages(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig(parsed.data.websiteId);
+    const config = await getUmamiConfig();
     const { days, limit } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -474,7 +442,7 @@ export async function blogGetReferrers(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig(parsed.data.websiteId);
+    const config = await getUmamiConfig();
     const { days, limit } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -530,7 +498,7 @@ export async function blogGetMetrics(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig(parsed.data.websiteId);
+    const config = await getUmamiConfig();
     const { type, days, limit } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -587,7 +555,7 @@ export async function blogGetPageviews(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig(parsed.data.websiteId);
+    const config = await getUmamiConfig();
     const { days, unit } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -638,7 +606,7 @@ export async function blogGetPerformanceSummary(args: unknown) {
       };
     }
 
-    const config = getUmamiConfig(parsed.data.websiteId);
+    const config = await getUmamiConfig();
     const { days } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
     const timeParams = getTimeParams(startAt, endAt);

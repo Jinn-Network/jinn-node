@@ -1,8 +1,11 @@
-import { getCurrentJobContext } from './context.js';
 import { mcpLogger } from '../../../../logging/index.js';
-import { postJson } from '../../../../http/client.js';
-import { getOptionalControlApiUrl, getUseControlApi } from './env.js';
-import { getMechAddress } from '../../../../env/operate-profile.js';
+import {
+  buildErc8128IdempotencyKey,
+  signRequestWithErc8128,
+  type Erc8128Signer,
+} from '../../../../http/erc8128.js';
+import { createProxyHttpSigner } from '../../../shared/signing-proxy-client.js';
+import { getOptionalControlApiUrl, getRequiredChainId, getUseControlApi } from './env.js';
 
 type RequestClaim = {
   request_id: string;
@@ -38,30 +41,61 @@ const CONTROL_API_URL = getOptionalControlApiUrl();
 const RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1000; // 1 second
 
-function getWorkerAddress(): string {
-  const context = getCurrentJobContext();
-  if (context.mechAddress) {
-    return context.mechAddress;
-  }
+let signerPromise: Promise<Erc8128Signer> | null = null;
 
-  const addr = getMechAddress();
-  if (!addr) {
-    throw new Error('Service target mech address not configured. Check .operate service config (MECH_TO_CONFIG).');
+async function getControlApiSigner(): Promise<Erc8128Signer> {
+  if (!signerPromise) {
+    signerPromise = createProxyHttpSigner(getRequiredChainId());
   }
-  return addr;
+  return signerPromise;
 }
 
-function buildHeaders(requestId: string, operationType: string): Record<string, string> {
-  return {
-    'Content-Type': 'application/json',
-    'X-Worker-Address': getWorkerAddress(),
-    'Idempotency-Key': `${requestId}-${operationType}-${Date.now()}`, // Simple idempotency key
-  };
+function buildIdempotencyKey(requestId: string, operationType: string): string {
+  return buildErc8128IdempotencyKey([requestId, operationType]);
+}
+
+async function postSignedGraphql(
+  body: { query: string; variables?: Record<string, any> },
+  idempotencyKey: string,
+): Promise<any> {
+  const signer = await getControlApiSigner();
+  const request = await signRequestWithErc8128({
+    signer,
+    input: CONTROL_API_URL,
+    init: {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(10_000),
+    },
+    signOptions: {
+      label: 'eth',
+      binding: 'request-bound',
+      replay: 'non-replayable',
+      ttlSeconds: 60,
+    },
+  });
+
+  const response = await fetch(request);
+  const text = await response.text();
+
+  if (!response.ok) {
+    throw new Error(`Control API HTTP ${response.status}: ${text || response.statusText}`);
+  }
+
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch (err) {
+    throw new Error(`Control API returned invalid JSON: ${String(err)}`);
+  }
 }
 
 async function fetchWithRetry(
   body: { query: string; variables?: Record<string, any> },
-  headers: Record<string, string>,
+  idempotencyKey: string,
   attempts = RETRY_ATTEMPTS
 ): Promise<any> {
   let lastError: any;
@@ -72,21 +106,9 @@ async function fetchWithRetry(
     try {
       mcpLogger.debug({ attempt: i + 1, totalAttempts: attempts, operation }, 'Control API request attempt');
 
-      const json = await postJson<any>(
-        CONTROL_API_URL,
-        body,
-        {
-          headers,
-          timeoutMs: 10_000,
-          maxRetries: 0,
-          context: {
-            operation,
-            attempt: i + 1,
-          },
-        },
-      );
+      const json = await postSignedGraphql(body, idempotencyKey);
 
-      if (json.errors) {
+      if (json?.errors) {
         throw new Error(`Control API GraphQL error: ${JSON.stringify(json.errors)}`);
       }
 
@@ -108,10 +130,10 @@ async function fetchWithRetry(
 }
 
 export async function claimRequest(requestId: string): Promise<{ request_id: string; status: string }> {
-  const headers = buildHeaders(requestId, 'claim');
+  const idempotencyKey = buildIdempotencyKey(requestId, 'claim');
   const query = `mutation Claim($requestId: String!) { claimRequest(requestId: $requestId) { request_id status } }`;
   try {
-    const json = await fetchWithRetry({ query, variables: { requestId } }, headers);
+    const json = await fetchWithRetry({ query, variables: { requestId } }, idempotencyKey);
     return json.data.claimRequest;
   } catch (e: any) {
     const msg = String(e?.message || e);
@@ -123,23 +145,23 @@ export async function claimRequest(requestId: string): Promise<{ request_id: str
 }
 
 export async function createJobReport(requestId: string, report: JobReportInput): Promise<string> {
-  const headers = buildHeaders(requestId, 'report');
+  const idempotencyKey = buildIdempotencyKey(requestId, 'report');
   const query = `mutation Report($requestId: String!, $data: JobReportInput!) { createJobReport(requestId: $requestId, reportData: $data) { id } }`;
-  const json = await fetchWithRetry({ query, variables: { requestId, data: report } }, headers);
+  const json = await fetchWithRetry({ query, variables: { requestId, data: report } }, idempotencyKey);
   return json.data.createJobReport.id as string;
 }
 
 export async function createArtifact(requestId: string, artifact: ArtifactInput): Promise<string> {
-  const headers = buildHeaders(requestId, `artifact:${artifact.topic || 'default'}`);
+  const idempotencyKey = buildIdempotencyKey(requestId, `artifact:${artifact.topic || 'default'}`);
   const query = `mutation Artifact($requestId: String!, $data: ArtifactInput!) { createArtifact(requestId: $requestId, artifactData: $data) { id } }`;
-  const json = await fetchWithRetry({ query, variables: { requestId, data: artifact } }, headers);
+  const json = await fetchWithRetry({ query, variables: { requestId, data: artifact } }, idempotencyKey);
   return json.data.createArtifact.id as string;
 }
 
 export async function createMessage(requestId: string, message: MessageInput): Promise<string> {
-  const headers = buildHeaders(requestId, `message:${message.status || 'PENDING'}`);
+  const idempotencyKey = buildIdempotencyKey(requestId, `message:${message.status || 'PENDING'}`);
   const query = `mutation Message($requestId: String!, $data: MessageInput!) { createMessage(requestId: $requestId, messageData: $data) { id } }`;
-  const json = await fetchWithRetry({ query, variables: { requestId, data: message } }, headers);
+  const json = await fetchWithRetry({ query, variables: { requestId, data: message } }, idempotencyKey);
   return json.data.createMessage.id as string;
 }
 
@@ -149,7 +171,9 @@ export function isControlApiEnabled(): boolean {
 
 export function shouldUseControlApi(tableName: string): boolean {
   if (!isControlApiEnabled()) return false;
-  
+
   const onchainTables = ['onchain_request_claims', 'onchain_job_reports', 'onchain_artifacts', 'onchain_messages'];
   return onchainTables.includes(tableName);
 }
+
+export type { RequestClaim };

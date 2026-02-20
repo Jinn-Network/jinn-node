@@ -1,50 +1,21 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 export { getCurrentJobContext, setJobContext, clearJobContext, type JobContext } from './context.js';
-import { loadEnvOnce } from './env.js';
+import { getCredentialBundle } from '../../../shared/credential-client.js';
 
-// Ensure env is loaded when supabase is referenced (idempotent)
-loadEnvOnce();
+let cachedClient: any = null;
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+/**
+ * Get the Supabase client from credential bridge token + static provider config.
+ */
+export async function getSupabase(): Promise<any> {
+  if (cachedClient) return cachedClient;
 
-// Mock client for when Supabase is not configured or URL is invalid
-class MockSupabaseClient {
-  from(_table: string) {
-    return new MockQueryBuilder();
+  const bundle = await getCredentialBundle('supabase');
+  const supabaseUrl = bundle.config.SUPABASE_URL;
+  if (!supabaseUrl) {
+    throw new Error('Credential bridge config missing SUPABASE_URL for provider supabase');
   }
+
+  cachedClient = createClient(supabaseUrl, bundle.access_token);
+  return cachedClient;
 }
-
-class MockQueryBuilder {
-  select(_columns?: string) { return this; }
-  insert(_values: any) { return this; }
-  eq(_column: string, _value: any) { return this; }
-  limit(_count: number) { return this; }
-  range(_from: number, _to: number) { return this; }
-  single() { return this; }
-
-  // Make it thenable so it can be awaited
-  then(resolve: (result: { data: any, error: any }) => void, _reject: any) {
-    resolve({
-      data: null,
-      error: { message: 'Supabase is not configured or URL is invalid. Database operations are disabled.' }
-    });
-  }
-}
-
-let client: any;
-
-// Check for missing credentials
-if (!supabaseUrl || !supabaseKey) {
-  console.warn('Supabase URL or key missing or invalid. Supabase features will be disabled (using Mock client).');
-  client = new MockSupabaseClient();
-} else {
-  try {
-    client = createClient(supabaseUrl, supabaseKey);
-  } catch (error) {
-    console.warn('Failed to initialize Supabase client:', error);
-    client = new MockSupabaseClient();
-  }
-}
-
-export const supabase = client;

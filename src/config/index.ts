@@ -224,32 +224,32 @@ const externalApisSchema = z.object({
  * Runtime values set by job execution system
  */
 const jobContextSchema = z.object({
-  // JINN_JOB_ID: Current job identifier
-  JINN_JOB_ID: z.string().optional(),
+  // JINN_CTX_JOB_ID: Current job identifier
+  JINN_CTX_JOB_ID: z.string().optional(),
 
-  // JINN_JOB_NAME: Current job name
-  JINN_JOB_NAME: z.string().optional(),
+  // JINN_CTX_JOB_NAME: Current job name
+  JINN_CTX_JOB_NAME: z.string().optional(),
 
-  // JINN_JOB_DEFINITION_ID: Job definition identifier
-  JINN_JOB_DEFINITION_ID: z.string().optional(),
+  // JINN_CTX_JOB_DEFINITION_ID: Job definition identifier
+  JINN_CTX_JOB_DEFINITION_ID: z.string().optional(),
 
-  // JINN_PROJECT_RUN_ID: Project run identifier
-  JINN_PROJECT_RUN_ID: z.string().optional(),
+  // JINN_CTX_PROJECT_RUN_ID: Project run identifier
+  JINN_CTX_PROJECT_RUN_ID: z.string().optional(),
 
-  // JINN_PROJECT_DEFINITION_ID: Project definition identifier
-  JINN_PROJECT_DEFINITION_ID: z.string().optional(),
+  // JINN_CTX_PROJECT_DEFINITION_ID: Project definition identifier
+  JINN_CTX_PROJECT_DEFINITION_ID: z.string().optional(),
 
-  // JINN_REQUEST_ID: Mech request identifier
-  JINN_REQUEST_ID: z.string().optional(),
+  // JINN_CTX_REQUEST_ID: Mech request identifier
+  JINN_CTX_REQUEST_ID: z.string().optional(),
 
-  // JINN_SOURCE_EVENT_ID: Source event identifier
-  JINN_SOURCE_EVENT_ID: z.string().optional(),
+  // JINN_CTX_SOURCE_EVENT_ID: Source event identifier
+  JINN_CTX_SOURCE_EVENT_ID: z.string().optional(),
 
-  // JINN_THREAD_ID: Thread identifier for conversations
-  JINN_THREAD_ID: z.string().optional(),
+  // JINN_CTX_THREAD_ID: Thread identifier for conversations
+  JINN_CTX_THREAD_ID: z.string().optional(),
 
-  // JINN_MECH_ADDRESS: Mech address for current job
-  JINN_MECH_ADDRESS: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
+  // JINN_CTX_MECH_ADDRESS: Mech address for current job
+  JINN_CTX_MECH_ADDRESS: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
 
   // JINN_WALLET_STORAGE_PATH: Override wallet storage for testing
   JINN_WALLET_STORAGE_PATH: z.string().optional(),
@@ -286,8 +286,8 @@ const gitWorkflowSchema = z.object({
   // GITHUB_REPOSITORY: GitHub repository in format "owner/repo"
   GITHUB_REPOSITORY: z.string().optional(),
 
-  // JINN_BASE_BRANCH: Base branch for current job (runtime context)
-  JINN_BASE_BRANCH: z.string().optional(),
+  // JINN_CTX_BASE_BRANCH: Base branch for current job (runtime context)
+  JINN_CTX_BASE_BRANCH: z.string().optional(),
 
   // JINN_REPO_ROOT: Repository root override for test scenarios
   JINN_REPO_ROOT: z.string().optional(),
@@ -872,39 +872,39 @@ export function getOptionalSnykToken(): string | undefined {
 // ============================================================================
 
 export function getOptionalJobId(): string | undefined {
-  return getConfig().JINN_JOB_ID;
+  return getConfig().JINN_CTX_JOB_ID;
 }
 
 export function getOptionalJobName(): string | undefined {
-  return getConfig().JINN_JOB_NAME;
+  return getConfig().JINN_CTX_JOB_NAME;
 }
 
 export function getOptionalJobDefinitionId(): string | undefined {
-  return getConfig().JINN_JOB_DEFINITION_ID;
+  return getConfig().JINN_CTX_JOB_DEFINITION_ID;
 }
 
 export function getOptionalProjectRunId(): string | undefined {
-  return getConfig().JINN_PROJECT_RUN_ID;
+  return getConfig().JINN_CTX_PROJECT_RUN_ID;
 }
 
 export function getOptionalProjectDefinitionId(): string | undefined {
-  return getConfig().JINN_PROJECT_DEFINITION_ID;
+  return getConfig().JINN_CTX_PROJECT_DEFINITION_ID;
 }
 
 export function getOptionalRequestId(): string | undefined {
-  return getConfig().JINN_REQUEST_ID;
+  return getConfig().JINN_CTX_REQUEST_ID;
 }
 
 export function getOptionalSourceEventId(): string | undefined {
-  return getConfig().JINN_SOURCE_EVENT_ID;
+  return getConfig().JINN_CTX_SOURCE_EVENT_ID;
 }
 
 export function getOptionalThreadId(): string | undefined {
-  return getConfig().JINN_THREAD_ID;
+  return getConfig().JINN_CTX_THREAD_ID;
 }
 
 export function getOptionalJobMechAddress(): string | undefined {
-  return getConfig().JINN_MECH_ADDRESS;
+  return getConfig().JINN_CTX_MECH_ADDRESS;
 }
 
 export function getOptionalWalletStoragePath(): string | undefined {
@@ -1120,7 +1120,7 @@ export function getOptionalGithubRepository(): string | undefined {
 }
 
 export function getOptionalBaseBranch(): string | undefined {
-  return getConfig().JINN_BASE_BRANCH;
+  return getConfig().JINN_CTX_BASE_BRANCH;
 }
 
 export function getOptionalRepoRoot(): string | undefined {

@@ -9,7 +9,8 @@ import { join, dirname } from 'path';
 import { createRequire } from 'module';
 import { workerLogger } from '../../logging/index.js';
 import { getOptionalMechChainConfig, getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
-import { getServiceSafeAddress, getServicePrivateKey, getMechAddress } from '../../env/operate-profile.js';
+import { getMechAddress, getServiceSafeAddress, getServicePrivateKey } from '../../env/operate-profile.js';
+import { getActiveMechAddress } from '../rotation/ActiveServiceContext.js';
 import type { UnclaimedRequest, AgentExecutionResult, FinalStatus, IpfsMetadata, RecognitionPhaseResult, ReflectionResult } from '../types.js';
 import { buildDeliveryPayload } from './payload.js';
 import { checkDeliveryStatusViaPonder } from './ponderVerification.js';
@@ -476,11 +477,30 @@ export async function deliverViaSafeTransaction(
 ): Promise<{ tx_hash?: string; status?: string }> {
   workerLogger.info({ requestId: context.requestId }, '[DELIVERY_START] Function entered');
   const chainConfig = getOptionalMechChainConfig() || 'base';
-  const safeAddress = getServiceSafeAddress();
-  let targetMechAddress = context.request.mech;
-  const privateKey = getServicePrivateKey();
   const rpcHttpUrl = getRequiredRpcUrl();
-  workerLogger.info({ requestId: context.requestId, hasRpc: !!rpcHttpUrl }, '[DELIVERY_START] Config loaded');
+
+  // Always deliver through our own mech. The marketplace allows any mech to
+  // deliver after cooldown, so we use the active service's mech + Safe regardless
+  // of which mech the request was originally dispatched to.
+  let targetMechAddress = getActiveMechAddress() ?? getMechAddress();
+  const safeAddress = getServiceSafeAddress();
+  const privateKey = getServicePrivateKey();
+
+  if (!targetMechAddress) {
+    workerLogger.warn('Missing mech delivery configuration; skipping on-chain delivery');
+    throw new Error('Missing mech delivery configuration');
+  }
+
+  const isCrossMech = context.request.mech.toLowerCase() !== targetMechAddress.toLowerCase();
+  if (isCrossMech) {
+    workerLogger.info({
+      requestId: context.requestId,
+      requestMech: context.request.mech,
+      deliveryMech: targetMechAddress,
+    }, 'Cross-mech delivery: delivering via own mech');
+  }
+
+  workerLogger.info({ requestId: context.requestId, hasRpc: !!rpcHttpUrl, isCrossMech }, '[DELIVERY_START] Config loaded');
 
   if (!safeAddress || !privateKey) {
     workerLogger.warn({ safeAddress: !!safeAddress, privateKey: !!privateKey }, 'Missing Safe delivery configuration; skipping on-chain delivery');
@@ -745,6 +765,17 @@ export async function deliverViaSafeTransaction(
         };
         workerLogger.error({ requestId: context.requestId, attempt, errorDetails },
           `Safe delivery error: ${decodedRevert || e.message}`);
+
+        // GS013-specific diagnostic: inner call to deliverToMarketplace reverted
+        if (e.message?.includes('GS013')) {
+          workerLogger.error({
+            requestId: context.requestId,
+            safeAddress,
+            targetMech: targetMechAddress,
+            activeMech: getActiveMechAddress(),
+            isCrossMech,
+          }, 'GS013: Inner call to deliverToMarketplace reverted. Likely mech↔safe authorization mismatch — the Safe calling the mech is not its operator.');
+        }
 
         // Only retry on specific transient errors
         if (e.message?.includes('nonce too low') || e.message?.includes('replacement transaction underpriced')) {

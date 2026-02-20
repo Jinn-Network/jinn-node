@@ -167,7 +167,7 @@ const CORE_CLI_TOOLS: ToolInfo[] = [
   // nano_banana: deprecated
   {
     name: 'telegram_messaging',
-    description: 'Meta-tool that enables Telegram messaging capabilities. When included in enabledTools, activates the telegram_send_message tool for broadcasting messages to Telegram channels/groups. Write-only: can send messages but cannot read replies. Requires TELEGRAM_BOT_TOKEN env var and optionally TELEGRAM_CHAT_ID/TELEGRAM_TOPIC_ID for default targets.',
+    description: 'Meta-tool that enables Telegram messaging capabilities. When included in enabledTools, activates the telegram_send_message tool for broadcasting messages to Telegram channels/groups. Write-only: can send messages but cannot read replies. Requires credential bridge provider "telegram" and JINN_JOB_TELEGRAM_CHAT_ID (optional JINN_JOB_TELEGRAM_TOPIC_ID).',
     parameters: {},
     examples: [
       'Enable Telegram for a distribution job: enabledTools: ["telegram_messaging"]',
@@ -187,7 +187,7 @@ export const listToolsSchema = {
 
 MANDATORY: Call this BEFORE using create_job or create_job_batch so you select appropriate enabled_tools. Research jobs should include web search tools (google_web_search or web_fetch) when internet research is required.
 
-Important scope note: If job context provides template tool policy (JINN_AVAILABLE_TOOLS or JINN_REQUIRED_TOOLS), this returns ONLY the tools that are actually enabled in the current workstream (universal tools + template tools). If no policy is provided, it falls back to the full tool catalog.
+Important scope note: If job context provides template tool policy (JINN_CTX_AVAILABLE_TOOLS or JINN_CTX_REQUIRED_TOOLS), this returns ONLY the tools that are actually enabled in the current workstream (universal tools + template tools). If no policy is provided, it falls back to the full tool catalog.
 
 Usage:
 - Default: returns tool names and descriptions
@@ -245,8 +245,8 @@ function getScopedToolsFromContext(): { allowList: string[] | null; source: 'ava
   const { availableTools, requiredTools } = getCurrentJobContext();
   const normalizedAvailable = normalizeTemplateTools(availableTools);
   const normalizedRequired = normalizeTemplateTools(requiredTools);
-  const hasAvailableTools = process.env.JINN_AVAILABLE_TOOLS !== undefined;
-  const hasRequiredTools = process.env.JINN_REQUIRED_TOOLS !== undefined;
+  const hasAvailableTools = process.env.JINN_CTX_AVAILABLE_TOOLS !== undefined;
+  const hasRequiredTools = process.env.JINN_CTX_REQUIRED_TOOLS !== undefined;
 
   if (hasAvailableTools) {
     const { mcpIncludeTools } = computeToolPolicy(normalizedAvailable, { isCodingJob: inferIsCodingJob() });

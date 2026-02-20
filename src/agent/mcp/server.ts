@@ -27,6 +27,9 @@ export const REGISTERED_MCP_TOOLS = [
   'template_update',
   'template_delete',
   'list_tools', // Special tool registered separately
+  'twitter_post_tweet',
+  'twitter_get_mentions',
+  'twitter_get_timeline',
   // Blog management tools
   'blog_create_post',
   'blog_list_posts',
@@ -153,6 +156,10 @@ async function main() {
       { name: 'moltbook_create_comment', schema: tools.moltbookCreateCommentSchema, handler: tools.moltbookCreateComment },
       { name: 'moltbook_upvote', schema: tools.moltbookUpvoteSchema, handler: tools.moltbookUpvote },
       { name: 'moltbook_get_profile', schema: tools.moltbookGetProfileSchema, handler: tools.moltbookGetProfile },
+      // Twitter tools
+      { name: 'twitter_post_tweet', schema: tools.twitterPostTweetSchema, handler: tools.twitterPostTweet },
+      { name: 'twitter_get_mentions', schema: tools.twitterGetMentionsSchema, handler: tools.twitterGetMentions },
+      { name: 'twitter_get_timeline', schema: tools.twitterGetTimelineSchema, handler: tools.twitterGetTimeline },
       // Telegram messaging tools
       { name: 'telegram_send_message', schema: tools.telegramSendMessageSchema, handler: tools.telegramSendMessage },
       { name: 'telegram_send_photo', schema: tools.telegramSendPhotoSchema, handler: tools.telegramSendPhoto },

@@ -16,7 +16,7 @@
 import { logger } from '../../logging/index.js';
 import { ActivityMonitor, type ServiceActivityStatus, type ServiceCheckInput } from './ActivityMonitor.js';
 import { type ServiceInfo, listServiceConfigs } from '../ServiceConfigReader.js';
-import { getActiveService, setActiveService, type ActiveServiceIdentity } from './ActiveServiceContext.js';
+import { getActiveService, setActiveService, setAllServices, type ActiveServiceIdentity } from './ActiveServiceContext.js';
 import { getServicePrivateKey } from '../../env/operate-profile.js';
 
 const rotationLogger = logger.child({ component: 'SERVICE-ROTATOR' });
@@ -57,6 +57,9 @@ export class ServiceRotator {
     // Load configs and filter out incomplete services that can't participate in rotation
     this.services = (await listServiceConfigs(this.middlewarePath))
       .filter(s => s.serviceSafeAddress && s.agentPrivateKey && s.serviceId != null && s.serviceId !== -1);
+
+    // Populate service registry for cross-mech credential resolution in delivery
+    setAllServices(this.services);
 
     const stakedServices = this.services.filter(s => s.stakingContractAddress);
     rotationLogger.info({
