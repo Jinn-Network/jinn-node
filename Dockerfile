@@ -67,7 +67,8 @@ RUN mkdir -p /home/jinn/.operate /home/jinn/.gemini /app/jinn-repos /tmp/.gemini
     && chown -R jinn:jinn /app /tmp/.gemini-worker /home/jinn
 
 # Persistent volume: home dir contains .operate/ (keystore) and .gemini/ (auth + extensions)
-VOLUME ["/home/jinn"]
+# Note: VOLUME directive removed — Railway bans it. Use Railway volumes instead.
+# For standalone docker, mount /home/jinn as a volume at runtime.
 
 # Cap V8 heap to force earlier GC — without this, Node uses up to ~50% of container
 # memory (4GB in 8GB container), inflating baseline RAM. Override at runtime via
