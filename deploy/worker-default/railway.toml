@@ -1,0 +1,36 @@
+[build]
+builder = "NIXPACKS"
+nixpacksConfigPath = "deploy/worker-default/nixpacks.toml"
+watchPatterns = ["/**"]
+
+[deploy]
+# Uses worker_launcher.js which provides:
+# - Healthcheck server for Railway monitoring
+# - Multi-process support (WORKER_COUNT env var)
+# - Graceful shutdown handling
+# - Log prefixing for worker identification
+#
+# init.sh runs first to configure:
+# - Git identity from GIT_AUTHOR_* env vars
+# - SSH known_hosts for GitHub
+# - Required directories
+startCommand = "export NODE_OPTIONS='--disable-warning=DEP0040' && bash deploy/worker-default/init.sh && node dist/worker/worker_launcher.js"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# Required environment variables (set in Railway dashboard):
+# - RPC_URL: Base mainnet RPC endpoint
+# - CHAIN_ID: Network ID (8453 for Base mainnet)
+# - JINN_SERVICE_MECH_ADDRESS: Mech contract address (identity)
+# - JINN_SERVICE_PRIVATE_KEY: Agent EOA private key (secret)
+# - VENTURE_FILTER: Venture ID(s) to claim work for
+# - CONTROL_API_URL: URL to Control API GraphQL
+# - PONDER_GRAPHQL_URL: URL to Ponder GraphQL
+#
+# Auto-derived on-chain (from mech address — no need to set):
+# - WORKER_SERVICE_ID, WORKER_STAKING_CONTRACT,
+#   JINN_SERVICE_SAFE_ADDRESS, MECH_MARKETPLACE_ADDRESS_BASE
+#
+# Optional:
+# - WORKSTREAM_FILTER: Filter to specific workstream(s)
+# - WORKER_ID: Identifier for this worker instance
