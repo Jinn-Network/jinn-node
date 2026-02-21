@@ -5,7 +5,7 @@
  * separate from workstream/agent templates.
  */
 
-import { supabase } from '../agent/mcp/tools/shared/supabase.js';
+import { getSupabase } from '../agent/mcp/tools/shared/supabase.js';
 
 export interface VentureTemplate {
   id: string;
@@ -30,6 +30,7 @@ export interface VentureTemplate {
  * Get a venture template by ID.
  */
 export async function getVentureTemplate(id: string): Promise<VentureTemplate | null> {
+  const supabase = await getSupabase();
   const { data, error } = await supabase
     .from('venture_templates')
     .select('*')
@@ -44,6 +45,7 @@ export async function getVentureTemplate(id: string): Promise<VentureTemplate | 
  * Get a venture template by slug.
  */
 export async function getVentureTemplateBySlug(slug: string): Promise<VentureTemplate | null> {
+  const supabase = await getSupabase();
   const { data, error } = await supabase
     .from('venture_templates')
     .select('*')
@@ -61,6 +63,7 @@ export async function listVentureTemplates(filters?: {
   status?: string;
   ventureId?: string;
 }): Promise<VentureTemplate[]> {
+  const supabase = await getSupabase();
   let query = supabase.from('venture_templates').select('*');
 
   if (filters?.status) query = query.eq('status', filters.status);
