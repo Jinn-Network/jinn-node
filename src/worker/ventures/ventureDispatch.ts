@@ -9,8 +9,11 @@
 import { randomUUID } from 'node:crypto';
 import { workerLogger } from '../../logging/index.js';
 import { getTemplate } from '../../scripts/templates/crud.js';
-import { dispatchToMarketplace } from '../../agent/shared/dispatch-core.js';
+import { buildIpfsPayload } from '../../agent/shared/ipfs-payload-builder.js';
 import { extractToolPolicyFromBlueprint } from '../../shared/template-tools.js';
+import { getMechAddress, getServicePrivateKey, getMechChainConfig } from '../../env/operate-profile.js';
+import { getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
+import { getRandomStakedMech } from '../filters/stakingFilter.js';
 import type { Venture } from '../../data/ventures.js';
 import type { ScheduleEntry } from '../../data/types/scheduleEntry.js';
 
@@ -82,8 +85,8 @@ export async function dispatchFromTemplate(
     'Venture dispatch: posting to marketplace'
   );
 
-  // 8. Dispatch via shared core with payload transform for venture context
-  const result = await dispatchToMarketplace({
+  // 8. Build IPFS payload
+  const buildResult = await buildIpfsPayload({
     blueprint: blueprintStr,
     jobName,
     jobDefinitionId,
@@ -95,35 +98,72 @@ export async function dispatchFromTemplate(
     additionalContextOverrides: {
       env: mergedInput.env || undefined,
     },
-    transformPayload: (payload) => {
-      // Inject ventureContext into additionalContext
-      if (payload.additionalContext) {
-        payload.additionalContext.ventureContext = ventureContext;
-      } else {
-        payload.additionalContext = { ventureContext };
-      }
+  });
+  const { ipfsJsonContents } = buildResult;
 
-      // Inject model preference from schedule entry input
-      if (mergedInput.model) {
-        payload.additionalContext = payload.additionalContext || {};
-        payload.additionalContext.model = mergedInput.model;
-      }
+  // 9. Apply venture context transform to payload
+  if (ipfsJsonContents.length > 0) {
+    const payload = ipfsJsonContents[0];
 
-      // Include outputSpec from template if available
-      if (template.output_spec && typeof template.output_spec === 'object') {
-        payload.outputSpec = template.output_spec;
-      }
+    // Inject ventureContext into additionalContext
+    if (payload.additionalContext) {
+      payload.additionalContext.ventureContext = ventureContext;
+    } else {
+      payload.additionalContext = { ventureContext };
+    }
 
-      return payload;
-    },
+    // Inject model preference from schedule entry input
+    if (mergedInput.model) {
+      payload.additionalContext = payload.additionalContext || {};
+      payload.additionalContext.model = mergedInput.model;
+    }
+
+    // Include outputSpec from template if available
+    if (template.output_spec && typeof template.output_spec === 'object') {
+      payload.outputSpec = template.output_spec;
+    }
+  }
+
+  // 10. Post to marketplace directly with worker credentials
+  const { marketplaceInteract } = await import('@jinn-network/mech-client-ts/dist/marketplace_interact.js');
+
+  const mechAddress = getMechAddress();
+  const privateKey = getServicePrivateKey();
+  const chainConfig = getMechChainConfig();
+  const rpcHttpUrl = getRequiredRpcUrl();
+
+  if (!mechAddress) {
+    throw new Error('Service target mech address not configured. Check .operate service config (MECH_TO_CONFIG).');
+  }
+
+  if (!privateKey) {
+    throw new Error('Service agent private key not found. Check .operate/keys directory.');
+  }
+
+  const priorityMech = await getRandomStakedMech(mechAddress);
+
+  const result = await (marketplaceInteract as any)({
+    prompts: [blueprintStr],
+    priorityMech,
+    tools: enabledTools,
+    ipfsJsonContents,
+    chainConfig,
+    keyConfig: { source: 'value', value: privateKey },
+    postOnly: true,
+    responseTimeout: 300,
+    rpcHttpUrl,
   });
 
+  // 11. Normalize request IDs
+  const rawIds = result?.request_ids ?? result?.requestIds ?? [];
+  const requestIds: string[] = Array.isArray(rawIds) ? rawIds.map(String) : [];
+
   workerLogger.info(
-    { ventureId: venture.id, templateId: template.id, requestIds: result.requestIds },
+    { ventureId: venture.id, templateId: template.id, requestIds },
     'Venture dispatch: marketplace request posted'
   );
 
-  return { requestIds: result.requestIds };
+  return { requestIds };
 }
 
 /**
