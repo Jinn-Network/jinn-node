@@ -392,6 +392,12 @@ export function getServicePrivateKey(): string | null {
     return activeKey;
   }
 
+  // Check explicit env var (Railway deployments without .operate directory)
+  const envKey = process.env.JINN_SERVICE_PRIVATE_KEY;
+  if (envKey) {
+    return envKey;
+  }
+
   // Fall back to service config to get agent address
   const config = readServiceConfig();
   if (!config) {
