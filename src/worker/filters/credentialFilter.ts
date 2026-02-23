@@ -273,8 +273,8 @@ export async function reprobeWithRequestId(requestId: string): Promise<WorkerCre
   return probeCredentialBridge(requestId);
 }
 
-/** Reset cached info (for testing). */
-export function _resetCredentialInfoCache(): void {
+/** Reset cached credential info (called on service rotation + tests). */
+export function resetCredentialInfoCache(): void {
   _cachedInfo = null;
   _cachedOperatorInfo = null;
 }

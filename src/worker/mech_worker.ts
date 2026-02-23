@@ -48,6 +48,7 @@ import {
   getRequiredCredentials,
   resolveMissingOperatorCapabilities,
   reprobeWithRequestId,
+  resetCredentialInfoCache,
 } from './filters/credentialFilter.js';
 import { ServiceRotator } from './rotation/ServiceRotator.js';
 import { setActiveService } from './rotation/ActiveServiceContext.js';
@@ -1930,9 +1931,10 @@ async function main() {
           const decision = await rotator.reevaluate();
           if (decision.switched) {
             setActiveService(rotator.buildIdentity(decision.service));
-            // Flush signer caches so next job uses the new service's key/address
+            // Flush signer + credential caches so next job uses the new service's key/address
             resetControlApiSigner();
             resetSigningProxyAddress();
+            resetCredentialInfoCache();
             workerLogger.info({
               activeService: decision.service.serviceConfigId,
               serviceId: decision.service.serviceId,
