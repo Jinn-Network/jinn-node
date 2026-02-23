@@ -227,17 +227,22 @@ export async function probeOperatorCapabilities(): Promise<WorkerOperatorCapabil
   }
 }
 
-// Cached singleton (computed once at first call)
+// Cache TTL: re-probe every 5 minutes to pick up policy changes without restart
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
 let _cachedInfo: WorkerCredentialInfo | null = null;
+let _cachedInfoAt = 0;
 let _cachedOperatorInfo: WorkerOperatorCapabilityInfo | null = null;
+let _cachedOperatorInfoAt = 0;
 
 /**
- * Get the worker's credential capability info (cached after first call).
- * Async because the bridge probe is an HTTP call on first invocation.
+ * Get the worker's credential capability info (cached with TTL).
+ * Re-probes the bridge when cache expires to pick up policy changes.
  */
 export async function getWorkerCredentialInfo(): Promise<WorkerCredentialInfo> {
-  if (_cachedInfo) return _cachedInfo;
+  if (_cachedInfo && Date.now() - _cachedInfoAt < CACHE_TTL_MS) return _cachedInfo;
   _cachedInfo = await probeCredentialBridge();
+  _cachedInfoAt = Date.now();
   if (_cachedInfo.providers.size > 0) {
     workerLogger.info(
       { providers: [..._cachedInfo.providers] },
@@ -248,11 +253,13 @@ export async function getWorkerCredentialInfo(): Promise<WorkerCredentialInfo> {
 }
 
 /**
- * Get the worker's operator-local capabilities (cached after first call).
+ * Get the worker's operator-local capabilities (cached with TTL).
+ * Re-probes when cache expires to pick up env/token changes.
  */
 export async function getWorkerOperatorCapabilityInfo(): Promise<WorkerOperatorCapabilityInfo> {
-  if (_cachedOperatorInfo) return _cachedOperatorInfo;
+  if (_cachedOperatorInfo && Date.now() - _cachedOperatorInfoAt < CACHE_TTL_MS) return _cachedOperatorInfo;
   _cachedOperatorInfo = await probeOperatorCapabilities();
+  _cachedOperatorInfoAt = Date.now();
   if (_cachedOperatorInfo.capabilities.size > 0) {
     workerLogger.info(
       { capabilities: [..._cachedOperatorInfo.capabilities] },
@@ -276,10 +283,13 @@ export async function reprobeWithRequestId(requestId: string): Promise<WorkerCre
 /** Reset cached credential info (called on service rotation + tests). */
 export function resetCredentialInfoCache(): void {
   _cachedInfo = null;
+  _cachedInfoAt = 0;
   _cachedOperatorInfo = null;
+  _cachedOperatorInfoAt = 0;
 }
 
 /** Reset operator capability cache (for testing). */
 export function _resetOperatorCapabilityInfoCache(): void {
   _cachedOperatorInfo = null;
+  _cachedOperatorInfoAt = 0;
 }
