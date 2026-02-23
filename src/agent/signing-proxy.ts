@@ -166,11 +166,24 @@ async function handleDispatch(req: IncomingMessage, res: ServerResponse): Promis
   json(res, 200, result);
 }
 
+/**
+ * Reset the cached address so the next proxy derives it fresh from the
+ * current active service key. Called automatically by startSigningProxy()
+ * and exported for explicit invalidation on service rotation.
+ */
+export function resetCachedAddress(): void {
+  cachedAddress = null;
+}
+
 export async function startSigningProxy(): Promise<{
   url: string;
   secret: string;
   close: () => Promise<void>;
 }> {
+  // Clear stale address from previous service — the new proxy must derive
+  // the address from the current active key to stay in sync with signing.
+  cachedAddress = null;
+
   const secret = randomBytes(32).toString('hex');
 
   const server = createServer(async (req, res) => {
