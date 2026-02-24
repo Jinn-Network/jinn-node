@@ -153,6 +153,18 @@ async function handleDispatch(req: IncomingMessage, res: ServerResponse): Promis
     return;
   }
 
+  // Pre-upload dispatch IPFS contents to private network (if Helia available)
+  if (heliaNode && Array.isArray(ipfsJsonContents)) {
+    try {
+      const { ipfsUploadJson } = await import('../ipfs/upload.js');
+      for (const content of ipfsJsonContents) {
+        await ipfsUploadJson(heliaNode, content);
+      }
+    } catch {
+      // Non-fatal: marketplaceInteract will still upload to Autonolas
+    }
+  }
+
   const result = await marketplaceInteract({
     prompts,
     priorityMech: mechAddress,

@@ -14,6 +14,7 @@ import { extractToolPolicyFromBlueprint } from '../../shared/template-tools.js';
 import { extractSchemaEnvVars } from '../../shared/job-env.js';
 import { getMechAddress, getServicePrivateKey, getMechChainConfig } from '../../env/operate-profile.js';
 import { getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
+import { getHeliaNodeOptional } from '../../ipfs/lifecycle.js';
 import { getRandomStakedMech } from '../filters/stakingFilter.js';
 import type { Venture } from '../../data/ventures.js';
 import type { ScheduleEntry } from '../../data/types/scheduleEntry.js';
@@ -159,6 +160,19 @@ export async function dispatchFromTemplate(
   }
 
   const priorityMech = await getRandomStakedMech(mechAddress);
+
+  // Pre-upload dispatch IPFS contents to private network
+  const helia = getHeliaNodeOptional();
+  if (helia && ipfsJsonContents.length > 0) {
+    try {
+      const { ipfsUploadJson } = await import('../../ipfs/upload.js');
+      for (const content of ipfsJsonContents) {
+        await ipfsUploadJson(helia, content);
+      }
+    } catch {
+      // Non-fatal: marketplaceInteract will still upload to Autonolas
+    }
+  }
 
   const result = await (marketplaceInteract as any)({
     prompts: [blueprintStr],
