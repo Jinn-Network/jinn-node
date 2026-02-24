@@ -56,7 +56,8 @@ import { resetCachedAddress as resetSigningProxyAddress } from '../agent/signing
 import { maybeCallCheckpoint } from './staking/checkpoint.js';
 import { checkEpochGate } from './staking/epochGate.js';
 import { maybeSubmitHeartbeat } from './staking/heartbeat.js';
-import { resolveServiceConfig, type ResolvedServiceConfig } from './onchain/serviceResolver.js';
+import { resolveServiceConfig, clearServiceConfigCache, type ResolvedServiceConfig } from './onchain/serviceResolver.js';
+import { checkAndRestakeServices } from './staking/restake.js';
 
 export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
 
@@ -1750,6 +1751,39 @@ async function main() {
     }
   }
 
+  // Auto-restake evicted services before proceeding
+  // Routes through middleware's Safe tx path (same as `yarn wallet:restake`)
+  let pendingRestakeAt: number | null = null;
+
+  if (process.env.AUTO_RESTAKE !== 'false') {
+    const password = process.env.OPERATE_PASSWORD;
+    if (password && rpcUrl) {
+      try {
+        const results = await checkAndRestakeServices({ rpcUrl, operatePassword: password });
+        const restaked = results.filter(r => r.success);
+        const blocked = results.filter(r => !r.success && r.previousState === 2);
+        if (restaked.length > 0) {
+          workerLogger.info({ restaked: restaked.map(r => `#${r.serviceId}`) },
+            `Auto-restaked ${restaked.length} evicted service(s)`);
+          clearServiceConfigCache();
+          resolvedConfig = await resolveServiceConfig(mechAddress!, rpcUrl);
+        }
+        if (blocked.length > 0) {
+          const earliest = Math.min(...blocked.map(r => r.unstakeAvailableAt ?? Infinity));
+          if (earliest !== Infinity) {
+            pendingRestakeAt = earliest;
+            workerLogger.warn({
+              blocked: blocked.map(r => ({ id: r.serviceId, reason: r.reason })),
+              retryAt: new Date(earliest * 1000).toISOString(),
+            }, `${blocked.length} evicted service(s) in cooldown — will retry after cooldown expires`);
+          }
+        }
+      } catch (e: any) {
+        workerLogger.warn({ error: e.message }, 'Auto-restake check failed (non-fatal)');
+      }
+    }
+  }
+
   // Verify Control API is running before processing any jobs
   await checkControlApiHealth();
 
@@ -1896,6 +1930,27 @@ async function main() {
             await checkAndDispatchScheduledVentures();
           } catch (e: any) {
             workerLogger.warn({ error: serializeError(e) }, 'Venture watcher check failed (non-fatal)');
+          }
+        }
+      }
+
+      // Deferred restake: retry once cooldown has elapsed
+      if (pendingRestakeAt && Math.floor(Date.now() / 1000) >= pendingRestakeAt) {
+        pendingRestakeAt = null; // Only attempt once
+        const password = process.env.OPERATE_PASSWORD;
+        if (password && rpcUrl) {
+          try {
+            workerLogger.info('Cooldown elapsed — attempting deferred restake');
+            const results = await checkAndRestakeServices({ rpcUrl, operatePassword: password });
+            const restaked = results.filter(r => r.success);
+            if (restaked.length > 0) {
+              workerLogger.info({ restaked: restaked.map(r => `#${r.serviceId}`) },
+                `Deferred restake succeeded for ${restaked.length} service(s)`);
+              clearServiceConfigCache();
+              resolvedConfig = await resolveServiceConfig(mechAddress!, rpcUrl);
+            }
+          } catch (e: any) {
+            workerLogger.warn({ error: e.message }, 'Deferred restake failed (non-fatal)');
           }
         }
       }

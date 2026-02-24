@@ -45,7 +45,7 @@ docker compose logs -f worker
 
 | Variable | Default |
 |----------|---------|
-| `PONDER_GRAPHQL_URL` | `https://ponder-production-6d16.up.railway.app/graphql` |
+| `PONDER_GRAPHQL_URL` | `https://indexer.jinn.network/graphql` |
 | `CONTROL_API_URL` | `https://control-api-production-c1f5.up.railway.app/graphql` |
 | `X402_GATEWAY_URL` | `https://x402-gateway-production-1b84.up.railway.app` |
 
