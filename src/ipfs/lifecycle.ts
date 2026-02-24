@@ -1,7 +1,12 @@
 import type { Helia } from '@helia/interface';
 import { createJinnNode, type JinnNodeConfig } from './node.js';
+import { maybeRunGc } from './gc.js';
 
 let heliaInstance: Helia | null = null;
+let gcCycleCount = 0;
+
+/** How often (in worker poll cycles) to check storage and run GC. */
+const GC_CHECK_INTERVAL = 100;
 
 /**
  * Initialize the Helia IPFS node singleton.
@@ -27,6 +32,17 @@ export function getHeliaNode(): Helia {
  */
 export function getHeliaNodeOptional(): Helia | null {
   return heliaInstance;
+}
+
+/**
+ * Check if GC should run this cycle and run it if needed.
+ * Call this once per worker poll cycle.
+ */
+export async function maybeRunGcCycle(): Promise<void> {
+  if (!heliaInstance) return;
+  gcCycleCount++;
+  if (gcCycleCount % GC_CHECK_INTERVAL !== 0) return;
+  await maybeRunGc(heliaInstance);
 }
 
 /**
