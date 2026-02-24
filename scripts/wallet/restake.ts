@@ -22,21 +22,14 @@ import 'dotenv/config';
 import { parseArgs } from 'util';
 import { ethers } from 'ethers';
 import { OlasOperateWrapper } from '../../src/worker/OlasOperateWrapper.js';
-
-const STAKING_ABI = [
-  'function getStakingState(uint256 serviceId) view returns (uint8)',
-  'function getServiceInfo(uint256 serviceId) view returns (address multisig, address owner, uint256[] nonces, uint256 tsStart, uint256 minStakingDuration)',
-  'function minStakingDuration() view returns (uint256)',
-  'function availableRewards() view returns (uint256)',
-  'function maxNumServices() view returns (uint256)',
-  'function getServiceIds() view returns (uint256[])',
-];
-
-const STAKING_STATE_NAMES: Record<number, string> = {
-  0: 'UNSTAKED',
-  1: 'STAKED',
-  2: 'EVICTED',
-};
+import {
+  getServiceStakingInfo,
+  getStakingSlots,
+  getRewardsAvailable,
+  checkAndRestakeServices,
+  STAKING_STATE_NAMES,
+  type RestakeResult,
+} from '../../src/worker/staking/restake.js';
 
 // Default Jinn staking contract on Base
 const DEFAULT_STAKING_CONTRACT = '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139';
@@ -50,68 +43,7 @@ interface ServiceInfo {
   stakingState: number;
   stakingStateName: string;
   canUnstake: boolean;
-  unstakeAvailableAt: Date | null;
-}
-
-async function getServiceStakingInfo(
-  provider: ethers.JsonRpcProvider,
-  serviceId: number,
-  stakingContractAddress: string,
-): Promise<{ state: number; canUnstake: boolean; unstakeAvailableAt: Date | null }> {
-  const staking = new ethers.Contract(stakingContractAddress, STAKING_ABI, provider);
-
-  let state: number;
-  try {
-    state = Number(await staking.getStakingState(serviceId));
-  } catch {
-    return { state: 0, canUnstake: false, unstakeAvailableAt: null };
-  }
-
-  if (state === 0) {
-    return { state: 0, canUnstake: false, unstakeAvailableAt: null };
-  }
-
-  try {
-    const info = await staking.getServiceInfo(serviceId);
-    const tsStart = Number(info.tsStart);
-    const minDuration = Number(info.minStakingDuration || await staking.minStakingDuration());
-    const now = Math.floor(Date.now() / 1000);
-    const elapsed = now - tsStart;
-    const canUnstake = elapsed >= minDuration;
-    const unstakeAvailableAt = canUnstake ? null : new Date((tsStart + minDuration) * 1000);
-    return { state, canUnstake, unstakeAvailableAt };
-  } catch {
-    // If we can't query service info, assume we can try
-    return { state, canUnstake: true, unstakeAvailableAt: null };
-  }
-}
-
-async function getStakingSlots(
-  provider: ethers.JsonRpcProvider,
-  stakingContractAddress: string,
-): Promise<{ available: boolean; used: number; max: number }> {
-  const staking = new ethers.Contract(stakingContractAddress, STAKING_ABI, provider);
-  try {
-    const maxServices = Number(await staking.maxNumServices());
-    const serviceIds: bigint[] = await staking.getServiceIds();
-    const used = serviceIds.length;
-    return { available: used < maxServices, used, max: maxServices };
-  } catch {
-    return { available: true, used: 0, max: 0 };
-  }
-}
-
-async function getRewardsAvailable(
-  provider: ethers.JsonRpcProvider,
-  stakingContractAddress: string,
-): Promise<boolean> {
-  const staking = new ethers.Contract(stakingContractAddress, STAKING_ABI, provider);
-  try {
-    const rewards = await staking.availableRewards();
-    return rewards > 0n;
-  } catch {
-    return true; // Assume available if query fails
-  }
+  unstakeAvailableAt: number | null;
 }
 
 async function main() {
@@ -165,6 +97,9 @@ which handles claim → unstake → approve → stake automatically.
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('');
 
+  // For the CLI, we do a verbose flow: list services, show states, pre-flight, then restake.
+  // This gives operators full visibility. The core logic is in checkAndRestakeServices().
+
   const wrapper = await OlasOperateWrapper.create({ rpcUrl });
   const provider = new ethers.JsonRpcProvider(rpcUrl);
 
@@ -199,9 +134,7 @@ which handles claim → unstake → approve → stake automatically.
       }
 
       const { state, canUnstake, unstakeAvailableAt } = await getServiceStakingInfo(
-        provider,
-        serviceId,
-        stakingProgramId,
+        provider, serviceId, stakingProgramId,
       );
 
       const info: ServiceInfo = {
@@ -223,7 +156,7 @@ which handles claim → unstake → approve → stake automatically.
         `  [${stateEmoji}] Service #${serviceId} (${configId.slice(0, 20)}...): ${info.stakingStateName}`,
       );
       if (state === 2 && !canUnstake && unstakeAvailableAt) {
-        console.log(`       Cannot unstake yet — available at ${unstakeAvailableAt.toISOString()}`);
+        console.log(`       Cannot unstake yet — available at ${new Date(unstakeAvailableAt * 1000).toISOString()}`);
       }
     }
 
@@ -316,7 +249,7 @@ which handles claim → unstake → approve → stake automatically.
         console.log(`\n${blocked.length} service(s) blocked:`);
         for (const svc of blocked) {
           const reason = !svc.canUnstake
-            ? `min duration not elapsed (available ${svc.unstakeAvailableAt?.toISOString() || 'unknown'})`
+            ? `min duration not elapsed (available ${svc.unstakeAvailableAt ? new Date(svc.unstakeAvailableAt * 1000).toISOString() : 'unknown'})`
             : 'no slots available';
           console.log(`  - Service #${svc.serviceId}: ${reason}`);
         }
@@ -341,9 +274,6 @@ which handles claim → unstake → approve → stake automatically.
         if (result.success) {
           console.log('  Middleware returned success');
         } else {
-          // startService triggers on-chain deploy + local deploy.
-          // Local deploy will likely fail (no Docker for Railway workers).
-          // The on-chain part (unstake + restake) may have succeeded.
           console.log(`  Middleware returned error: ${result.error}`);
           console.log('  (This may be expected — local Docker deploy fails for Railway workers)');
           console.log('  Checking on-chain state...');
@@ -355,9 +285,7 @@ which handles claim → unstake → approve → stake automatically.
 
       // Verify on-chain state regardless of middleware response
       const { state: finalState } = await getServiceStakingInfo(
-        provider,
-        svc.serviceId,
-        svc.stakingProgramId,
+        provider, svc.serviceId, svc.stakingProgramId,
       );
       const finalStateName = STAKING_STATE_NAMES[finalState] || `UNKNOWN(${finalState})`;
 

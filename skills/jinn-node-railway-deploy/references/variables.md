@@ -51,6 +51,7 @@ railway variables --set "KEY=value" --skip-deploys
 | `HEALTHCHECK_PORT` | Override healthcheck port (takes priority over Railway's `PORT`) |
 | `EARNING_SCHEDULE` | Time window for job claiming, e.g. `22:00-08:00` (unset = always) |
 | `EARNING_MAX_JOBS` | Max jobs per earning window (unset = unlimited) |
+| `AUTO_RESTAKE` | Set `false` to disable auto-restake of evicted services at startup (default: enabled) |
 
 **Note:** Railway auto-sets the `PORT` environment variable. The worker reads `HEALTHCHECK_PORT` > `PORT` > `8080` (default). Do not set `PORT` manually.
 
