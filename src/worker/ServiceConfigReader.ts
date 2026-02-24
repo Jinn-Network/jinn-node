@@ -26,6 +26,21 @@ export interface ServiceInfo {
   agentPrivateKey?: string;
 }
 
+export interface RedactedServiceInfoForLog extends Omit<ServiceInfo, 'agentPrivateKey'> {
+  hasAgentPrivateKey: boolean;
+}
+
+/**
+ * Remove sensitive fields before logging service info.
+ */
+export function redactServiceInfoForLog(serviceInfo: ServiceInfo): RedactedServiceInfoForLog {
+  const { agentPrivateKey, ...safe } = serviceInfo;
+  return {
+    ...safe,
+    hasAgentPrivateKey: Boolean(agentPrivateKey),
+  };
+}
+
 /**
  * Read service configuration from middleware .operate directory
  * 
@@ -166,7 +181,7 @@ export async function readServiceConfig(
       agentPrivateKey,
     };
     
-    configLogger.info({ serviceInfo }, 'Successfully read service configuration');
+    configLogger.info({ serviceInfo: redactServiceInfoForLog(serviceInfo) }, 'Successfully read service configuration');
     return serviceInfo;
     
   } catch (error) {
@@ -264,4 +279,3 @@ export async function listServiceConfigs(middlewarePath: string): Promise<Servic
     return [];
   }
 }
-
