@@ -1,4 +1,5 @@
 import fetch from 'cross-fetch';
+import { proxyIpfsGet } from '../../../shared/signing-proxy-client.js';
 
 const DEFAULT_IPFS_GATEWAY = 'https://gateway.autonolas.tech/ipfs/';
 const FALLBACK_IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
@@ -209,6 +210,15 @@ async function fetchFromGateways(
 }
 
 async function resolveIpfsContentInternal(ipfsHash: string, requestId: string, timeout: number = 10000): Promise<any> {
+  // Try private IPFS network via proxy first
+  try {
+    const result = await proxyIpfsGet(ipfsHash);
+    if (result !== null) return result;
+  } catch {
+    // Proxy unavailable or error — fall back to HTTP gateways
+  }
+
+  // Fall back to HTTP gateway resolution
   const candidates = buildCidCandidates(ipfsHash, { requestId });
   for (const candidate of candidates) {
     const { result, success } = await fetchFromGateways(candidate.cidPath, timeout, candidate.context);
@@ -228,6 +238,15 @@ export async function resolveIpfsContent(ipfsHash: string, requestId: string, ti
 }
 
 async function resolveRequestIpfsContentInternal(ipfsHash: string, timeout: number = 10000): Promise<any> {
+  // Try private IPFS network via proxy first
+  try {
+    const result = await proxyIpfsGet(ipfsHash);
+    if (result !== null) return result;
+  } catch {
+    // Proxy unavailable or error — fall back to HTTP gateways
+  }
+
+  // Fall back to HTTP gateway resolution
   const candidates = buildCidCandidates(ipfsHash);
   for (const candidate of candidates) {
     const { result, success } = await fetchFromGateways(candidate.cidPath, timeout, candidate.context);

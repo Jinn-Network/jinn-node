@@ -8,35 +8,63 @@ import {
   getIpfsFetchTimeoutMs,
 } from '../../agent/mcp/tools/shared/env.js';
 import type { IpfsMetadata } from '../types.js';
+import type { Helia } from '@helia/interface';
 
 /**
- * Fetch IPFS metadata from gateway
+ * Try to retrieve JSON from the private Helia IPFS node.
+ * Returns null if Helia is unavailable or content not found.
  */
-export async function fetchIpfsMetadata(ipfsHash?: string): Promise<IpfsMetadata | null> {
+async function tryHeliaRetrieve(helia: Helia, ipfsHash: string): Promise<unknown | null> {
+  try {
+    const { ipfsRetrieveJson } = await import('../../ipfs/retrieve.js');
+    return await ipfsRetrieveJson(helia, ipfsHash);
+  } catch (err: any) {
+    workerLogger.debug({ error: err?.message }, 'Helia retrieval failed, falling back to HTTP gateway');
+    return null;
+  }
+}
+
+/**
+ * Fetch IPFS metadata — tries private Helia node first, then HTTP gateway fallback.
+ */
+export async function fetchIpfsMetadata(ipfsHash?: string, helia?: Helia): Promise<IpfsMetadata | null> {
   if (!ipfsHash) return null;
   try {
-    const hash = String(ipfsHash).replace(/^0x/, '');
-    // Use configured IPFS gateway or fallback to Autonolas
-    const gatewayBase = getOptionalIpfsGatewayUrl() || 'https://gateway.autonolas.tech/ipfs/';
-    const url = gatewayBase.endsWith('/') ? `${gatewayBase}${hash}` : `${gatewayBase}/${hash}`;
-    
-    const timeoutMs = getIpfsFetchTimeoutMs() ?? 7000;
-    workerLogger.info({ url, hash, timeout: timeoutMs }, 'Fetching IPFS metadata');
+    let json: any;
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-    const res = await fetch(url, { method: 'GET', signal: controller.signal });
-    clearTimeout(timer);
-
-    workerLogger.info({ status: res.status, statusText: res.statusText }, 'IPFS fetch response');
-
-    if (!res.ok) {
-      workerLogger.warn({ status: res.status, statusText: res.statusText, url }, 'IPFS fetch returned non-OK status');
-      return null;
+    // Try private IPFS network first
+    if (helia) {
+      const heliaResult = await tryHeliaRetrieve(helia, ipfsHash);
+      if (heliaResult !== null) {
+        workerLogger.info({ hash: ipfsHash }, 'IPFS metadata retrieved from private network');
+        json = heliaResult;
+      }
     }
 
-    const json = await res.json();
+    // Fall back to HTTP gateway
+    if (!json) {
+      const hash = String(ipfsHash).replace(/^0x/, '');
+      const gatewayBase = getOptionalIpfsGatewayUrl() || 'https://gateway.autonolas.tech/ipfs/';
+      const url = gatewayBase.endsWith('/') ? `${gatewayBase}${hash}` : `${gatewayBase}/${hash}`;
+
+      const timeoutMs = getIpfsFetchTimeoutMs() ?? 7000;
+      workerLogger.info({ url, hash, timeout: timeoutMs }, 'Fetching IPFS metadata from HTTP gateway');
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+      const res = await fetch(url, { method: 'GET', signal: controller.signal });
+      clearTimeout(timer);
+
+      workerLogger.info({ status: res.status, statusText: res.statusText }, 'IPFS fetch response');
+
+      if (!res.ok) {
+        workerLogger.warn({ status: res.status, statusText: res.statusText, url }, 'IPFS fetch returned non-OK status');
+        return null;
+      }
+
+      json = await res.json();
+    }
     
     // Blueprint is at root level (new architecture)
     // Fall back to additionalContext.blueprint for backward compatibility
