@@ -1,4 +1,5 @@
 import type { Helia } from '@helia/interface';
+import toBuffer from 'it-to-buffer';
 import { digestHexToCid } from './cid.js';
 import { fetchLegacyContent } from './legacy.js';
 
@@ -18,9 +19,9 @@ export async function ipfsRetrieveJson(
   // Try private network first (raw codec CIDv1)
   const cid = digestHexToCid(digestHex);
   try {
-    const bytes = await helia.blockstore.get(cid, {
+    const bytes = await toBuffer(helia.blockstore.get(cid, {
       signal: AbortSignal.timeout(timeoutMs),
-    });
+    }));
     return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     // Not in private network — try legacy HTTP gateway

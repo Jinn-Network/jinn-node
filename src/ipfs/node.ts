@@ -1,7 +1,7 @@
 import { createHelia, libp2pDefaults } from 'helia';
 import { tcp } from '@libp2p/tcp';
 import { bootstrap } from '@libp2p/bootstrap';
-import { gossipsub } from '@chainsafe/libp2p-gossipsub';
+import { gossipsub } from '@libp2p/gossipsub';
 import { FsBlockstore } from 'blockstore-fs';
 import { LevelDatastore } from 'datastore-level';
 import { MemoryBlockstore } from 'blockstore-core';

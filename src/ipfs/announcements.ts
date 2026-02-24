@@ -1,6 +1,6 @@
 import type { Helia } from '@helia/interface';
 import type { CID } from 'multiformats/cid';
-import type { GossipSub } from '@chainsafe/libp2p-gossipsub';
+import type { GossipSub } from '@libp2p/gossipsub';
 
 export const CONTENT_TOPIC = 'jinn/content/v1';
 
