@@ -65,7 +65,7 @@ COPY scripts/init.sh ./scripts/
 # Create directories the worker writes to at runtime.
 # IMPORTANT: /tmp/.gemini-worker is used as GEMINI_CLI_HOME (extensions + runtime config).
 # Do NOT mount volumes over /tmp — use subdirectory mounts (e.g., /tmp/jinn-telemetry).
-RUN mkdir -p /home/jinn/.operate /home/jinn/.gemini /app/jinn-repos /tmp/.gemini-worker \
+RUN mkdir -p /home/jinn/.operate /home/jinn/.gemini /home/jinn/.ipfs /app/jinn-repos /tmp/.gemini-worker \
     && chown -R jinn:jinn /app /tmp/.gemini-worker /home/jinn
 
 # Persistent volume: home dir contains .operate/ (keystore) and .gemini/ (auth + extensions).
@@ -87,6 +87,8 @@ ENV NODE_ENV=production \
 
 # Healthcheck endpoint (healthcheck defined in docker-compose.yml)
 EXPOSE 8080
+# libp2p TCP port for private IPFS network
+EXPOSE 4001
 
 # Run as non-root
 USER jinn

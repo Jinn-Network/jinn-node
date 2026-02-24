@@ -19,6 +19,7 @@ import { WorkerTelemetryService } from '../worker_telemetry.js';
 import { serializeError } from '../logging/errors.js';
 import { snapshotEnvironment, restoreEnvironment } from './env.js';
 import { fetchIpfsMetadata } from '../metadata/fetchIpfsMetadata.js';
+import { getHeliaNodeOptional } from '../../ipfs/lifecycle.js';
 import { ensureRepoCloned } from '../git/repoManager.js';
 import { ensureGitignore, ensureBeadsInit, commitRepoSetup } from '../git/repoSetup.js';
 import { checkoutJobBranch, syncWithBranch } from '../git/branch.js';
@@ -75,7 +76,7 @@ export async function processOnce(
     // Initialize: fetch metadata and set up repo
     telemetry.startPhase('initialization');
     try {
-      metadata = await fetchIpfsMetadata(target.ipfsHash!);
+      metadata = await fetchIpfsMetadata(target.ipfsHash!, getHeliaNodeOptional() ?? undefined);
       if (!metadata) {
         metadata = {};
       }

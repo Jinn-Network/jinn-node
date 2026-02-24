@@ -52,7 +52,8 @@ import {
 } from './filters/credentialFilter.js';
 import { ServiceRotator } from './rotation/ServiceRotator.js';
 import { setActiveService } from './rotation/ActiveServiceContext.js';
-import { resetCachedAddress as resetSigningProxyAddress } from '../agent/signing-proxy.js';
+import { resetCachedAddress as resetSigningProxyAddress, setProxyHeliaNode } from '../agent/signing-proxy.js';
+import { initHeliaNode, stopHeliaNode, getHeliaNodeOptional } from '../ipfs/lifecycle.js';
 import { maybeCallCheckpoint } from './staking/checkpoint.js';
 import { checkEpochGate } from './staking/epochGate.js';
 import { maybeSubmitHeartbeat } from './staking/heartbeat.js';
@@ -1622,7 +1623,7 @@ async function processOnce(): Promise<boolean> {
   // Check if this is a heartbeat request — deliver immediately without agent execution
   if (target.ipfsHash) {
     try {
-      const meta = await fetchIpfsMetadata(target.ipfsHash);
+      const meta = await fetchIpfsMetadata(target.ipfsHash, getHeliaNodeOptional() ?? undefined);
       if (meta && (meta as any).heartbeat === true) {
         workerLogger.info({ requestId: target.id }, 'Heartbeat request — auto-delivering');
         const mechAddress = getMechAddress();
@@ -1787,6 +1788,22 @@ async function main() {
   // Verify Control API is running before processing any jobs
   await checkControlApiHealth();
 
+  // Initialize private IPFS node (Helia)
+  const serviceKey = getServicePrivateKey();
+  if (serviceKey) {
+    try {
+      const helia = await initHeliaNode({
+        privateKey: serviceKey,
+        isStaked: async () => true, // TODO(Task 10): query staking contract
+        storage: { type: 'filesystem', blocksPath: '/home/jinn/.ipfs/blocks', datastorePath: '/home/jinn/.ipfs/datastore' },
+      });
+      setProxyHeliaNode(helia);
+      workerLogger.info({ peerId: helia.libp2p.peerId.toString() }, 'Private IPFS node started');
+    } catch (err: any) {
+      workerLogger.warn({ error: err?.message || String(err) }, 'Failed to start IPFS node (non-fatal) — IPFS features will use HTTP fallback');
+    }
+  }
+
   // Initialize multi-service rotation if enabled
   let rotator: ServiceRotator | null = null;
   if (getWorkerMultiServiceEnabled()) {
@@ -1847,6 +1864,7 @@ async function main() {
     try {
       if (shouldStop()) {
         workerLogger.info('Stop signal detected before poll - exiting worker loop');
+        await stopHeliaNode();
         return;
       }
 
@@ -1977,6 +1995,7 @@ async function main() {
 
       if (shouldStop()) {
         workerLogger.info('Stop signal detected after job processing - exiting worker loop');
+        await stopHeliaNode();
         return;
       }
 
