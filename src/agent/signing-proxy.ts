@@ -17,6 +17,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { randomBytes } from 'node:crypto';
 import { getServicePrivateKey, getMechAddress, getMechChainConfig } from '../env/operate-profile.js';
 import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
+import type { Helia } from '@helia/interface';
 
 const READ_BODY_TIMEOUT_MS = 5_000;
 
@@ -166,6 +167,53 @@ async function handleDispatch(req: IncomingMessage, res: ServerResponse): Promis
   json(res, 200, result);
 }
 
+// --- IPFS Helia node injection ---
+
+let heliaNode: Helia | null = null;
+
+/**
+ * Inject a Helia node into the signing proxy so agent requests can
+ * upload/retrieve content via the private IPFS network.
+ * Called by the worker after Helia is initialized.
+ */
+export function setProxyHeliaNode(node: Helia): void {
+  heliaNode = node;
+}
+
+async function handleIpfsPut(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!heliaNode) {
+    json(res, 503, { error: 'IPFS node not yet available', code: 'IPFS_NOT_READY' });
+    return;
+  }
+  const body = await parseJsonBody(req);
+  if (body === undefined || body === null) {
+    json(res, 400, { error: 'Missing JSON payload', code: 'BAD_REQUEST' });
+    return;
+  }
+  const { ipfsUploadJson } = await import('../ipfs/upload.js');
+  const { digestHex, cid } = await ipfsUploadJson(heliaNode, body);
+  json(res, 200, { digestHex, cid: cid.toString() });
+}
+
+async function handleIpfsGet(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!heliaNode) {
+    json(res, 503, { error: 'IPFS node not yet available', code: 'IPFS_NOT_READY' });
+    return;
+  }
+  const body = await parseJsonBody(req);
+  if (!body?.digestHex || typeof body.digestHex !== 'string') {
+    json(res, 400, { error: 'Missing or invalid "digestHex" field', code: 'BAD_REQUEST' });
+    return;
+  }
+  const { ipfsRetrieveJson } = await import('../ipfs/retrieve.js');
+  const content = await ipfsRetrieveJson(heliaNode, body.digestHex);
+  if (content === null) {
+    json(res, 404, { error: 'Content not found', code: 'NOT_FOUND' });
+    return;
+  }
+  json(res, 200, { content });
+}
+
 /**
  * Reset the cached address so the next proxy derives it fresh from the
  * current active service key. Called automatically by startSigningProxy()
@@ -208,6 +256,10 @@ export async function startSigningProxy(): Promise<{
         await handleSignTypedData(req, res);
       } else if (method === 'POST' && url === '/dispatch') {
         await handleDispatch(req, res);
+      } else if (method === 'POST' && url === '/ipfs-put') {
+        await handleIpfsPut(req, res);
+      } else if (method === 'POST' && url === '/ipfs-get') {
+        await handleIpfsGet(req, res);
       } else {
         json(res, 404, { error: 'Not found', code: 'NOT_FOUND' });
       }

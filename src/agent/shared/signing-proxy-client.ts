@@ -131,6 +131,29 @@ export async function proxyDispatch(params: DispatchParams): Promise<DispatchRes
 }
 
 /**
+ * Upload JSON to the worker's private IPFS node via the signing proxy.
+ * Returns the CID string and 0x-prefixed digest hex.
+ */
+export async function proxyIpfsPut(payload: unknown): Promise<{ cid: string; digestHex: string }> {
+  return proxyRequest<{ cid: string; digestHex: string }>('POST', '/ipfs-put', payload);
+}
+
+/**
+ * Retrieve JSON content from the worker's private IPFS node via the signing proxy.
+ * Returns null if content is not found.
+ */
+export async function proxyIpfsGet(digestHex: string): Promise<unknown | null> {
+  try {
+    const result = await proxyRequest<{ content: unknown }>('POST', '/ipfs-get', { digestHex });
+    return result.content;
+  } catch (err: any) {
+    // 404 means content not found
+    if (err?.message?.includes('(404)')) return null;
+    throw err;
+  }
+}
+
+/**
  * Build an ERC-8128 signer backed by the signing proxy.
  * Keeps private key usage in the worker-owned proxy process.
  */

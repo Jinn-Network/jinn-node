@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { pushJsonToIpfs } from '@jinn-network/mech-client-ts/dist/ipfs.js';
+import { proxyIpfsPut } from '../../shared/signing-proxy-client.js';
 
 export const createArtifactParams = z.object({
   name: z.string().min(1),
@@ -46,10 +46,8 @@ export async function createArtifact(args: unknown) {
     const contentPreview = content.slice(0, 100);
     const payload = { name, topic, content, mimeType: mimeType || 'text/plain', type, tags } as const;
 
-    // Upload to IPFS and return artifact metadata
-    // Worker will extract this from telemetry and include in delivery payload
-    const [, cidHex] = await pushJsonToIpfs(payload);
-    const cid = cidHex;
+    // Upload to private IPFS via signing proxy → worker's Helia node
+    const { cid } = await proxyIpfsPut(payload);
 
     const result = { cid, name, topic, contentPreview, type, tags };
     return { content: [{ type: 'text' as const, text: JSON.stringify({ data: result, meta: { ok: true } }) }] };

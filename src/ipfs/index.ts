@@ -4,3 +4,5 @@ export { privateKeyToPeerId, peerIdToEthAddress } from './identity.js';
 export { createStakingGater, type StakingGaterConfig } from './gater.js';
 export { createJinnNode, type JinnNodeConfig } from './node.js';
 export { publishContentAnnouncement, subscribeContentAnnouncements, CONTENT_TOPIC } from './announcements.js';
+export { ipfsUploadJson } from './upload.js';
+export { ipfsRetrieveJson } from './retrieve.js';

@@ -1,4 +1,5 @@
 import type { Blockstore } from 'interface-blockstore';
+import type { CID } from 'multiformats/cid';
 import { MemoryBlockstore } from 'blockstore-core';
 import { FsBlockstore } from 'blockstore-fs';
 import { jsonToCid, bytesToCid, cidToDigestHex } from './cid.js';
