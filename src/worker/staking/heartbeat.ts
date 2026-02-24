@@ -4,16 +4,15 @@
  * The WhitelistedRequesterActivityChecker counts marketplace REQUESTS
  * (mapRequestCounts) to determine liveness, but the service is a mech
  * that primarily DELIVERS rather than requests. This module submits
- * periodic lightweight marketplace requests to satisfy the liveness
- * requirement of 60 requests per epoch.
+ * periodic lightweight marketplace requests to satisfy the staking
+ * liveness requirement for the current epoch window.
  *
  * Each heartbeat request targets our own mech with a trivial payload.
  * The worker auto-delivers these immediately so the ETH round-trips
  * and both request + delivery counts increment.
  *
- * Math: 60 requests / 24h epoch. At default interval of 8 min,
- * the module checks remaining deficit and submits 1 request if needed.
- * Over 8 active hours: 60/8 = 7.5/hr ≈ 1 every 8 min.
+ * The target is computed dynamically from on-chain livenessRatio and
+ * epoch timing, with an optional delay buffer for late checkpoints.
  */
 
 import { ethers } from 'ethers';
@@ -22,14 +21,19 @@ import { getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
 import { getServicePrivateKey, getServiceSafeAddress, getMechAddress } from '../../env/operate-profile.js';
 // NOTE: getServiceSafeAddress is only used for the warning log comparing worker vs staking multisig
 import { submitMarketplaceRequest } from '../MechMarketplaceRequester.js';
+import { computeProjectedEpochTarget, readNonNegativeIntEnv, readPositiveIntEnv } from './target.js';
 
 const log = workerLogger.child({ component: 'HEARTBEAT' });
 
-const TARGET_REQUESTS_PER_EPOCH = 60;
+const DEFAULT_TARGET_REQUESTS = 61;
+const DEFAULT_CHECKPOINT_DELAY_BUFFER_SEC = 0;
+const DEFAULT_SAFETY_MARGIN_REQUESTS = 1;
 
 const STAKING_ABI = [
+  'function livenessPeriod() view returns (uint256)',
   'function tsCheckpoint() view returns (uint256)',
   'function getNextRewardCheckpointTimestamp() view returns (uint256)',
+  'function activityChecker() view returns (address)',
   'function getServiceInfo(uint256 serviceId) view returns (tuple(address multisig, address owner, uint256[] nonces, uint256 tsStart, uint256 reward, uint256 inactivity))',
 ];
 
@@ -55,16 +59,22 @@ async function getRequestDeficit(
   stakingContract: string,
   serviceId: number,
   marketplaceAddress: string,
-): Promise<{ deficit: number; current: number; epochSecondsRemaining: number; multisig: string }> {
+): Promise<{ deficit: number; current: number; target: number; epochSecondsRemaining: number; multisig: string }> {
   const rpcUrl = getRequiredRpcUrl();
   const provider = new ethers.JsonRpcProvider(rpcUrl);
 
   const staking = new ethers.Contract(stakingContract, STAKING_ABI, provider);
   const marketplace = new ethers.Contract(marketplaceAddress, MARKETPLACE_ABI, provider);
+  const overrideTarget = readPositiveIntEnv('WORKER_STAKING_TARGET');
+  const delayBufferSeconds = readPositiveIntEnv('WORKER_STAKING_CHECKPOINT_DELAY_SEC') ?? DEFAULT_CHECKPOINT_DELAY_BUFFER_SEC;
+  const safetyMarginRequests = readNonNegativeIntEnv('WORKER_STAKING_SAFETY_MARGIN') ?? DEFAULT_SAFETY_MARGIN_REQUESTS;
 
-  const [nextCheckpoint, serviceInfo] = await Promise.all([
+  const [tsCheckpoint, nextCheckpoint, serviceInfo, activityCheckerAddress, livenessPeriod] = await Promise.all([
+    staking.tsCheckpoint().then(Number),
     staking.getNextRewardCheckpointTimestamp().then(Number),
     staking.getServiceInfo(serviceId),
+    staking.activityChecker(),
+    staking.livenessPeriod().then(Number),
   ]);
 
   // Use the staking multisig from on-chain (may differ from worker Safe)
@@ -80,23 +90,44 @@ async function getRequestDeficit(
   // Baseline from on-chain nonces[1] — authoritative epoch-start request count
   const baselineRequestCount = Number(serviceInfo.nonces[1]);
   const currentRequestCount = await marketplace.mapRequestCounts(multisig).then(Number);
+  const targetData = await computeProjectedEpochTarget({
+    provider,
+    activityCheckerAddress,
+    tsCheckpoint,
+    livenessPeriod,
+    delayBufferSeconds,
+    overrideTarget,
+    safetyMarginRequests,
+  });
+  const target = targetData.target || DEFAULT_TARGET_REQUESTS;
 
   const now = Math.floor(Date.now() / 1000);
   const epochSecondsRemaining = Math.max(0, nextCheckpoint - now);
 
   const requestsThisEpoch = currentRequestCount - baselineRequestCount;
-  const deficit = Math.max(0, TARGET_REQUESTS_PER_EPOCH - requestsThisEpoch);
+  const deficit = Math.max(0, target - requestsThisEpoch);
 
   log.info({
     multisig,
     baseline: baselineRequestCount,
     current: currentRequestCount,
     requestsThisEpoch,
+    target,
+    tsCheckpoint,
+    nextCheckpoint,
+    livenessPeriod,
+    effectivePeriodSeconds: targetData.effectivePeriodSeconds,
+    effectivePeriodSecondsWithoutBuffer: targetData.effectivePeriodSecondsWithoutBuffer,
+    baselineTimestamp: targetData.baselineTimestamp,
+    livenessRatio: targetData.livenessRatio.toString(),
+    delayBufferSeconds,
+    safetyMarginRequests: targetData.safetyMarginRequests,
+    targetFromOverride: targetData.usedOverride,
     deficit,
     epochSecondsRemaining,
   }, 'Epoch deficit check');
 
-  return { deficit, current: currentRequestCount, epochSecondsRemaining, multisig };
+  return { deficit, current: currentRequestCount, target, epochSecondsRemaining, multisig };
 }
 
 /**
@@ -178,10 +209,10 @@ export async function maybeSubmitHeartbeat(
   }
 
   try {
-    const { deficit, current, epochSecondsRemaining, multisig } = await getRequestDeficit(stakingContract, serviceId, marketplaceAddress);
+    const { deficit, current, target, epochSecondsRemaining, multisig } = await getRequestDeficit(stakingContract, serviceId, marketplaceAddress);
 
     if (deficit <= 0) {
-      log.info({ current, deficit: 0 }, 'Request target met for this epoch — no heartbeat needed');
+      log.info({ current, target, deficit: 0 }, 'Request target met for this epoch — no heartbeat needed');
       return;
     }
 
@@ -196,7 +227,7 @@ export async function maybeSubmitHeartbeat(
     log.info({
       deficit,
       currentRequestCount: current,
-      target: TARGET_REQUESTS_PER_EPOCH,
+      target,
       epochSecondsRemaining,
       multisig,
     }, `Request deficit: ${deficit} — submitting 1 heartbeat`);
