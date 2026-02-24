@@ -10,6 +10,8 @@
  */
 
 import { ethers } from 'ethers';
+import { promises as fs } from 'fs';
+import { join } from 'path';
 import { workerLogger } from '../../logging/index.js';
 import { OlasOperateWrapper } from '../OlasOperateWrapper.js';
 
@@ -123,7 +125,61 @@ export async function getRewardsAvailable(
 const DEFAULT_STAKING_CONTRACT = '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139';
 
 /**
+ * Read service configs from .operate/services on disk (no daemon needed).
+ * Returns parsed configs with serviceId, configId, and staking contract.
+ */
+async function readServiceConfigsFromDisk(): Promise<Array<{
+  configId: string;
+  serviceId: number;
+  stakingProgramId: string;
+}>> {
+  const candidates = [
+    join(process.cwd(), 'olas-operate-middleware', '.operate', 'services'),
+    join(process.cwd(), '..', 'olas-operate-middleware', '.operate', 'services'),
+  ];
+
+  let servicesDir: string | null = null;
+  for (const dir of candidates) {
+    try {
+      await fs.access(dir);
+      servicesDir = dir;
+      break;
+    } catch { /* not found, try next */ }
+  }
+
+  if (!servicesDir) {
+    log.debug('No .operate/services directory found on disk');
+    return [];
+  }
+
+  const entries = await fs.readdir(servicesDir, { withFileTypes: true });
+  const serviceDirs = entries.filter(e => e.isDirectory() && e.name.startsWith('sc-'));
+  const configs: Array<{ configId: string; serviceId: number; stakingProgramId: string }> = [];
+
+  for (const dir of serviceDirs) {
+    try {
+      const configPath = join(servicesDir, dir.name, 'config.json');
+      const raw = await fs.readFile(configPath, 'utf-8');
+      const config = JSON.parse(raw);
+      const serviceId = config.chain_configs?.base?.chain_data?.token;
+      const stakingProgramId =
+        config.chain_configs?.base?.chain_data?.user_params?.staking_program_id ||
+        DEFAULT_STAKING_CONTRACT;
+      if (serviceId) {
+        configs.push({ configId: dir.name, serviceId: Number(serviceId), stakingProgramId });
+      }
+    } catch { /* skip unreadable configs */ }
+  }
+
+  return configs;
+}
+
+/**
  * Check all services for eviction and restake any that are evicted.
+ *
+ * Phase 1: Reads service configs from disk and checks on-chain staking state.
+ *          This requires only ethers (no Python daemon).
+ * Phase 2: Only starts the middleware daemon if a service actually needs restaking.
  *
  * Returns results for every service that needed restaking (evicted or unstaked with staking configured).
  * Services already staked are silently skipped.
@@ -131,101 +187,115 @@ const DEFAULT_STAKING_CONTRACT = '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139';
 export async function checkAndRestakeServices(options: CheckAndRestakeOptions): Promise<RestakeResult[]> {
   const { rpcUrl, operatePassword, serviceFilter, dryRun } = options;
   const results: RestakeResult[] = [];
-
-  const wrapper = await OlasOperateWrapper.create({ rpcUrl });
   const provider = new ethers.JsonRpcProvider(rpcUrl);
 
+  // Phase 1: Read from disk + check on-chain state (no daemon needed)
+  const diskConfigs = await readServiceConfigsFromDisk();
+  if (diskConfigs.length === 0) {
+    log.info('No service configs found on disk — skipping restake check');
+    return results;
+  }
+
+  // Identify services that need restaking
+  const needsRestake: Array<{
+    configId: string;
+    serviceId: number;
+    stakingProgramId: string;
+    state: number;
+    canUnstake: boolean;
+    unstakeAvailableAt: number | null;
+  }> = [];
+
+  for (const cfg of diskConfigs) {
+    if (serviceFilter && cfg.configId !== serviceFilter) continue;
+
+    const { state, canUnstake, unstakeAvailableAt } = await getServiceStakingInfo(
+      provider, cfg.serviceId, cfg.stakingProgramId,
+    );
+
+    // Skip services that are already staked
+    if (state === 1) continue;
+
+    // Only process evicted (2) or unstaked-with-staking (0 with staking configured)
+    if (state !== 2 && !(state === 0 && cfg.stakingProgramId)) continue;
+
+    // Pre-flight: cooldown check
+    if (state === 2 && !canUnstake) {
+      log.info({ serviceId: cfg.serviceId, unstakeAvailableAt: unstakeAvailableAt ? new Date(unstakeAvailableAt * 1000).toISOString() : 'unknown' },
+        'Service evicted but cooldown not elapsed');
+      results.push({
+        serviceId: cfg.serviceId, configId: cfg.configId, previousState: state, finalState: state,
+        success: false, reason: 'cooldown not elapsed',
+        unstakeAvailableAt: unstakeAvailableAt ?? undefined,
+      });
+      continue;
+    }
+
+    // Pre-flight: staking slots
+    const slots = await getStakingSlots(provider, cfg.stakingProgramId);
+    if (!slots.available) {
+      log.info({ serviceId: cfg.serviceId, used: slots.used, max: slots.max }, 'No staking slots available');
+      results.push({
+        serviceId: cfg.serviceId, configId: cfg.configId, previousState: state, finalState: state,
+        success: false, reason: `no staking slots (${slots.used}/${slots.max})`,
+      });
+      continue;
+    }
+
+    // Dry run — report but don't execute
+    if (dryRun) {
+      results.push({
+        serviceId: cfg.serviceId, configId: cfg.configId, previousState: state, finalState: state,
+        success: false, reason: 'dry run',
+      });
+      continue;
+    }
+
+    needsRestake.push({ ...cfg, state, canUnstake, unstakeAvailableAt });
+  }
+
+  // If no services need restaking, we're done — no daemon needed
+  if (needsRestake.length === 0) {
+    log.info({ checkedServices: diskConfigs.length }, 'All services are staked — no restake needed');
+    return results;
+  }
+
+  // Phase 2: Start daemon only for services that need restaking
+  log.info({ servicesToRestake: needsRestake.map(s => `#${s.serviceId}`) }, 'Starting middleware daemon for restake');
+
+  const wrapper = await OlasOperateWrapper.create({ rpcUrl });
   try {
     await wrapper.startServer();
     await wrapper.login(operatePassword);
 
-    // List all services from middleware
-    const servicesResult = await wrapper.getServices();
-    if (!servicesResult.success || !servicesResult.services?.length) {
-      log.warn({ error: servicesResult.error }, 'Failed to get services from middleware');
-      return results;
-    }
-
-    // Check staking state for each service
-    for (const svc of servicesResult.services) {
-      const configId = svc.service_config_id;
-      const serviceId = svc.chain_configs?.base?.chain_data?.token;
-      const stakingProgramId =
-        svc.chain_configs?.base?.chain_data?.user_params?.staking_program_id ||
-        DEFAULT_STAKING_CONTRACT;
-
-      if (!serviceId) continue;
-      if (serviceFilter && configId !== serviceFilter) continue;
-
-      const { state, canUnstake, unstakeAvailableAt } = await getServiceStakingInfo(
-        provider, serviceId, stakingProgramId,
-      );
-
-      // Skip services that are already staked
-      if (state === 1) continue;
-
-      // Only process evicted (2) or unstaked-with-staking (0 with staking configured)
-      if (state !== 2 && !(state === 0 && stakingProgramId)) continue;
-
-      // Pre-flight: cooldown check
-      if (state === 2 && !canUnstake) {
-        log.info({ serviceId, unstakeAvailableAt: unstakeAvailableAt ? new Date(unstakeAvailableAt * 1000).toISOString() : 'unknown' },
-          'Service evicted but cooldown not elapsed');
-        results.push({
-          serviceId, configId, previousState: state, finalState: state,
-          success: false, reason: 'cooldown not elapsed',
-          unstakeAvailableAt: unstakeAvailableAt ?? undefined,
-        });
-        continue;
-      }
-
-      // Pre-flight: staking slots
-      const slots = await getStakingSlots(provider, stakingProgramId);
-      if (!slots.available) {
-        log.info({ serviceId, used: slots.used, max: slots.max }, 'No staking slots available');
-        results.push({
-          serviceId, configId, previousState: state, finalState: state,
-          success: false, reason: `no staking slots (${slots.used}/${slots.max})`,
-        });
-        continue;
-      }
-
+    for (const svc of needsRestake) {
       // Pre-flight: rewards (warning only, still attempt)
-      const rewardsAvailable = await getRewardsAvailable(provider, stakingProgramId);
+      const rewardsAvailable = await getRewardsAvailable(provider, svc.stakingProgramId);
       if (!rewardsAvailable) {
-        log.warn({ serviceId }, 'No rewards available in staking contract (will still attempt restake)');
-      }
-
-      // Dry run — report but don't execute
-      if (dryRun) {
-        results.push({
-          serviceId, configId, previousState: state, finalState: state,
-          success: false, reason: 'dry run',
-        });
-        continue;
+        log.warn({ serviceId: svc.serviceId }, 'No rewards available in staking contract (will still attempt restake)');
       }
 
       // Execute restake via middleware
-      log.info({ serviceId, configId, stakingState: STAKING_STATE_NAMES[state] }, 'Restaking service via middleware');
+      log.info({ serviceId: svc.serviceId, configId: svc.configId, stakingState: STAKING_STATE_NAMES[svc.state] }, 'Restaking service via middleware');
 
       try {
-        const result = await wrapper.startService(configId);
+        const result = await wrapper.startService(svc.configId);
         if (!result.success) {
-          log.debug({ serviceId, error: result.error }, 'Middleware returned error (may be expected — local deploy fails for Railway workers)');
+          log.debug({ serviceId: svc.serviceId, error: result.error }, 'Middleware returned error (may be expected — local deploy fails for Railway workers)');
         }
       } catch (err: any) {
-        log.debug({ serviceId, error: err.message }, 'Middleware call threw (checking on-chain state)');
+        log.debug({ serviceId: svc.serviceId, error: err.message }, 'Middleware call threw (checking on-chain state)');
       }
 
       // Verify on-chain state regardless of middleware response
-      const { state: finalState } = await getServiceStakingInfo(provider, serviceId, stakingProgramId);
+      const { state: finalState } = await getServiceStakingInfo(provider, svc.serviceId, svc.stakingProgramId);
       const success = finalState === 1;
 
-      log.info({ serviceId, previousState: STAKING_STATE_NAMES[state], finalState: STAKING_STATE_NAMES[finalState] ?? finalState, success },
+      log.info({ serviceId: svc.serviceId, previousState: STAKING_STATE_NAMES[svc.state], finalState: STAKING_STATE_NAMES[finalState] ?? finalState, success },
         success ? 'Service restaked successfully' : 'Service restake may have failed');
 
       results.push({
-        serviceId, configId, previousState: state, finalState,
+        serviceId: svc.serviceId, configId: svc.configId, previousState: svc.state, finalState,
         success, reason: success ? 'restaked' : `final state: ${STAKING_STATE_NAMES[finalState] ?? finalState}`,
       });
     }
