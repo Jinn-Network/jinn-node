@@ -53,7 +53,7 @@ type MetricType = 'url' | 'referrer' | 'browser' | 'os' | 'device' | 'country' |
 // Schema Definitions
 // ============================================
 
-const websiteIdParam = z.string().optional().describe('Umami website ID. If omitted, uses UMAMI_WEBSITE_ID env var.');
+const websiteIdParam = z.string().optional().describe('Umami website ID. If omitted, uses JINN_JOB_UMAMI_WEBSITE_ID env var.');
 
 export const blogGetStatsParams = z.object({
   websiteId: websiteIdParam,
