@@ -1,12 +1,13 @@
 import type { Helia } from '@helia/interface';
 import { digestHexToCid } from './cid.js';
+import { fetchLegacyContent } from './legacy.js';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 /**
  * Retrieve JSON content from the Helia blockstore by digest hex.
- * When the CID is not in the local blockstore, Helia's bitswap
- * automatically queries connected peers (with timeout).
+ * Tries the private network first (raw codec CIDv1), then falls back
+ * to legacy HTTP gateway resolution for historical dag-pb content.
  * Returns null if content is not found or timeout is reached.
  */
 export async function ipfsRetrieveJson(
@@ -14,6 +15,7 @@ export async function ipfsRetrieveJson(
   digestHex: string,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<unknown | null> {
+  // Try private network first (raw codec CIDv1)
   const cid = digestHexToCid(digestHex);
   try {
     const bytes = await helia.blockstore.get(cid, {
@@ -21,6 +23,8 @@ export async function ipfsRetrieveJson(
     });
     return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
-    return null;
+    // Not in private network — try legacy HTTP gateway
   }
+
+  return fetchLegacyContent(digestHex, { timeoutMs });
 }
