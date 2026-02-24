@@ -54,6 +54,8 @@ import { ServiceRotator } from './rotation/ServiceRotator.js';
 import { setActiveService } from './rotation/ActiveServiceContext.js';
 import { resetCachedAddress as resetSigningProxyAddress, setProxyHeliaNode } from '../agent/signing-proxy.js';
 import { initHeliaNode, stopHeliaNode, getHeliaNodeOptional, maybeRunGcCycle } from '../ipfs/lifecycle.js';
+import { isOperatorStaked } from '../ipfs/staking.js';
+import { fetchBootstrapPeers, registerMultiaddrs } from '../ipfs/bootstrap.js';
 import { maybeCallCheckpoint } from './staking/checkpoint.js';
 import { checkEpochGate } from './staking/epochGate.js';
 import { maybeSubmitHeartbeat } from './staking/heartbeat.js';
@@ -1792,13 +1794,16 @@ async function main() {
   const serviceKey = getServicePrivateKey();
   if (serviceKey) {
     try {
+      const bootstrapPeers = await fetchBootstrapPeers();
       const helia = await initHeliaNode({
         privateKey: serviceKey,
-        isStaked: async () => true, // TODO(Task 10): query staking contract
+        isStaked: isOperatorStaked,
+        bootstrapPeers: bootstrapPeers.length > 0 ? bootstrapPeers : undefined,
         storage: { type: 'filesystem', blocksPath: '/home/jinn/.ipfs/blocks', datastorePath: '/home/jinn/.ipfs/datastore' },
       });
       setProxyHeliaNode(helia);
-      workerLogger.info({ peerId: helia.libp2p.peerId.toString() }, 'Private IPFS node started');
+      workerLogger.info({ peerId: helia.libp2p.peerId.toString(), bootstrapPeers: bootstrapPeers.length }, 'Private IPFS node started');
+      await registerMultiaddrs(helia);
     } catch (err: any) {
       workerLogger.warn({ error: err?.message || String(err) }, 'Failed to start IPFS node (non-fatal) — IPFS features will use HTTP fallback');
     }
