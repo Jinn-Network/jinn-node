@@ -11,6 +11,7 @@ import { getActiveMechAddress } from '../rotation/ActiveServiceContext.js';
 import type { UnclaimedRequest, AgentExecutionResult, FinalStatus, IpfsMetadata, RecognitionPhaseResult, ReflectionResult } from '../types.js';
 import { buildDeliveryPayload } from './payload.js';
 import { checkDeliveryStatusViaPonder } from './ponderVerification.js';
+import { getHeliaNodeOptional } from '../../ipfs/lifecycle.js';
 
 /**
  * Known Safe error codes for decoding revert reasons
@@ -500,6 +501,20 @@ export async function deliverViaSafeTransaction(
   // Add artifacts if provided
   if (context.artifactsForDelivery && context.artifactsForDelivery.length > 0) {
     resultContent.artifacts = context.artifactsForDelivery;
+  }
+
+  // Pre-upload delivery payload to private IPFS network (if available).
+  // This ensures content is immediately available to other Jinn nodes via bitswap.
+  // deliverViaSafe will also upload to Autonolas as a transitional fallback.
+  const helia = getHeliaNodeOptional();
+  if (helia) {
+    try {
+      const { ipfsUploadJson } = await import('../../ipfs/upload.js');
+      const { digestHex } = await ipfsUploadJson(helia, resultContent);
+      workerLogger.info({ requestId: context.requestId, digestHex }, 'Delivery payload pre-uploaded to private IPFS');
+    } catch (err: any) {
+      workerLogger.warn({ requestId: context.requestId, error: err?.message }, 'Failed to pre-upload to private IPFS (non-fatal)');
+    }
   }
 
   const payload = {
