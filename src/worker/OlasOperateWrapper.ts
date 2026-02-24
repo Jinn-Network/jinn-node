@@ -805,6 +805,12 @@ export class OlasOperateWrapper {
         detached: false
       });
 
+      // Catch spawn errors (e.g. ENOENT when python3 is not installed)
+      // Without this handler, the 'error' event becomes an unhandled exception
+      this.serverProcess.on('error', (err) => {
+        operateLogger.error({ error: err.message, code: (err as NodeJS.ErrnoException).code }, 'Server process spawn error');
+      });
+
       this.serverProcess.stdout?.on('data', (data) => {
         const output = data.toString().trim();
         if (output) {
