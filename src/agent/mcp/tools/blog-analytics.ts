@@ -5,7 +5,7 @@
  * enabling data-driven content strategy decisions.
  *
  * Environment variables:
- * - JINN_JOB_UMAMI_WEBSITE_ID: Venture-scoped Umami website ID
+ * - JINN_JOB_UMAMI_WEBSITE_ID: Default Umami website ID (fallback when websiteId arg omitted)
  *
  * Credential bridge:
  * - Provider: umami
@@ -66,7 +66,8 @@ export const blogGetStatsSchema = {
 Returns pageviews, visitors, visits, bounces, and total time with
 current and previous period values for trend comparison.
 
-REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
+REQUIRED: credential bridge provider "umami"
+Pass websiteId per call for multi-site queries, or set JINN_JOB_UMAMI_WEBSITE_ID as default.
 
 Returns: {
   stats: { pageviews, visitors, visits, bounces, totaltime },
@@ -87,7 +88,8 @@ export const blogGetTopPagesSchema = {
 Use this to identify popular content and understand what resonates with readers.
 Pages are sorted by view count in descending order.
 
-REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
+REQUIRED: credential bridge provider "umami"
+Pass websiteId per call for multi-site queries, or set JINN_JOB_UMAMI_WEBSITE_ID as default.
 
 Returns: { pages: [{ url, views }], count, period }`,
   inputSchema: blogGetTopPagesParams.shape,
@@ -105,7 +107,8 @@ export const blogGetReferrersSchema = {
 Shows where readers are coming from (search engines, social media, direct links, etc.).
 Use this to understand traffic sources and optimize distribution strategy.
 
-REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
+REQUIRED: credential bridge provider "umami"
+Pass websiteId per call for multi-site queries, or set JINN_JOB_UMAMI_WEBSITE_ID as default.
 
 Returns: { referrers: [{ source, visits }], count, period }`,
   inputSchema: blogGetReferrersParams.shape,
@@ -131,7 +134,8 @@ Types available:
 - country: Geographic distribution
 - event: Custom events
 
-REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
+REQUIRED: credential bridge provider "umami"
+Pass websiteId per call for multi-site queries, or set JINN_JOB_UMAMI_WEBSITE_ID as default.
 
 Returns: { metrics: [{ name, count }], type, count, period }`,
   inputSchema: blogGetMetricsParams.shape,
@@ -149,7 +153,8 @@ export const blogGetPageviewsSchema = {
 Returns daily or hourly pageviews and sessions over the specified period.
 Useful for visualizing traffic trends and identifying patterns.
 
-REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
+REQUIRED: credential bridge provider "umami"
+Pass websiteId per call for multi-site queries, or set JINN_JOB_UMAMI_WEBSITE_ID as default.
 
 Returns: { pageviews: [{ date, count }], sessions: [{ date, count }], period }`,
   inputSchema: blogGetPageviewsParams.shape,
@@ -173,7 +178,8 @@ ANALYSIS TIPS:
 - Cross-reference top pages with referrers to understand traffic sources
 - Use this data to inform future content topics and distribution
 
-REQUIRED: credential bridge provider "umami" and JINN_JOB_UMAMI_WEBSITE_ID
+REQUIRED: credential bridge provider "umami"
+Pass websiteId per call for multi-site queries, or set JINN_JOB_UMAMI_WEBSITE_ID as default.
 
 Returns: { stats, topPages, referrers, period, insights }`,
   inputSchema: blogGetPerformanceSummaryParams.shape,
@@ -189,14 +195,14 @@ interface UmamiConfig {
   token: string;
 }
 
-async function getUmamiConfig(): Promise<UmamiConfig> {
+async function getUmamiConfig(websiteIdOverride?: string): Promise<UmamiConfig> {
   const bundle = await getCredentialBundle('umami');
   const host = bundle.config.UMAMI_HOST;
-  const websiteId = process.env.JINN_JOB_UMAMI_WEBSITE_ID;
+  const websiteId = websiteIdOverride || process.env.JINN_JOB_UMAMI_WEBSITE_ID;
 
   const missing: string[] = [];
   if (!host) missing.push('credential bridge config UMAMI_HOST');
-  if (!websiteId) missing.push('JINN_JOB_UMAMI_WEBSITE_ID');
+  if (!websiteId) missing.push('websiteId argument or JINN_JOB_UMAMI_WEBSITE_ID env var');
 
   if (missing.length > 0) {
     throw new Error(`Missing required Umami configuration: ${missing.join(', ')}`);
@@ -336,7 +342,7 @@ export async function blogGetStats(args: unknown) {
       };
     }
 
-    const config = await getUmamiConfig();
+    const config = await getUmamiConfig(parsed.data.websiteId);
     const { days } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -386,7 +392,7 @@ export async function blogGetTopPages(args: unknown) {
       };
     }
 
-    const config = await getUmamiConfig();
+    const config = await getUmamiConfig(parsed.data.websiteId);
     const { days, limit } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -442,7 +448,7 @@ export async function blogGetReferrers(args: unknown) {
       };
     }
 
-    const config = await getUmamiConfig();
+    const config = await getUmamiConfig(parsed.data.websiteId);
     const { days, limit } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -498,7 +504,7 @@ export async function blogGetMetrics(args: unknown) {
       };
     }
 
-    const config = await getUmamiConfig();
+    const config = await getUmamiConfig(parsed.data.websiteId);
     const { type, days, limit } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -555,7 +561,7 @@ export async function blogGetPageviews(args: unknown) {
       };
     }
 
-    const config = await getUmamiConfig();
+    const config = await getUmamiConfig(parsed.data.websiteId);
     const { days, unit } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
 
@@ -606,7 +612,7 @@ export async function blogGetPerformanceSummary(args: unknown) {
       };
     }
 
-    const config = await getUmamiConfig();
+    const config = await getUmamiConfig(parsed.data.websiteId);
     const { days } = parsed.data;
     const { startAt, endAt } = getTimeRange(days);
     const timeParams = getTimeParams(startAt, endAt);
