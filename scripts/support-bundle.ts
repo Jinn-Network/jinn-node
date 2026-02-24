@@ -225,7 +225,7 @@ async function collectConnectivity() {
   }
 
   // Ponder indexer
-  const ponderUrl = process.env.PONDER_GRAPHQL_URL || 'https://ponder-production-6d16.up.railway.app/graphql';
+  const ponderUrl = process.env.PONDER_GRAPHQL_URL || 'https://indexer.jinn.network/graphql';
   checks.ponder = await safe(async () => {
     const res = await fetch(ponderUrl, {
       method: 'POST',
