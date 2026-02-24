@@ -70,7 +70,7 @@ bash scripts/deploy-railway.sh --project jinn-worker --dry-run
 2. Links or creates Railway project + service
 3. Creates persistent volume at `/home/jinn`
 4. Reads `.env` and pushes all non-empty variables to Railway (batched, `--skip-deploys`)
-5. First-time only: deploys idle container (`tail -f /dev/null`), imports `.operate/` and `.gemini/` via SSH, then restores real start command
+5. First-time only: deploys idle container (`tail -f /dev/null`), imports `.operate/` (on-chain keys, wallets) and `.gemini/` (LLM OAuth tokens) via SSH, then restores real start command
 6. Deploys the worker
 7. Verifies deployment and shows recent logs
 
@@ -81,6 +81,16 @@ For canary rollout:
 2. Deploy with the script
 3. Validate tool/business success
 4. Promote: update `.env` with prod gateway URL, re-deploy with `--skip-import`
+
+## Credential bridge
+
+Workers do **not** carry third-party API keys (Twitter, Umami, Supabase, etc.). Instead:
+
+- **On-chain identity** (`.operate/`): Contains private keys, wallets, and service configs. Imported to volume at `/home/jinn/.operate`. Used for ERC-8128 signed HTTP requests to the Control API.
+- **LLM auth** (`.gemini/`): Contains Gemini CLI OAuth tokens. Imported to `/home/jinn/.gemini`. Alternatively, set `GEMINI_API_KEY` in `.env`.
+- **Third-party credentials**: Served at runtime by the credential bridge at `X402_GATEWAY_URL`. The worker probes the bridge at startup and on each job claim to discover which credential providers are available. No API keys in `.env`.
+
+This means `.env` should contain only infrastructure URLs, staking config, and git identity — not secrets for external services.
 
 ## Runtime contract reminders
 
