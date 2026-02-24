@@ -53,7 +53,7 @@ import {
 import { ServiceRotator } from './rotation/ServiceRotator.js';
 import { setActiveService } from './rotation/ActiveServiceContext.js';
 import { resetCachedAddress as resetSigningProxyAddress, setProxyHeliaNode } from '../agent/signing-proxy.js';
-import { initHeliaNode, stopHeliaNode, getHeliaNodeOptional } from '../ipfs/lifecycle.js';
+import { initHeliaNode, stopHeliaNode, getHeliaNodeOptional, maybeRunGcCycle } from '../ipfs/lifecycle.js';
 import { maybeCallCheckpoint } from './staking/checkpoint.js';
 import { checkEpochGate } from './staking/epochGate.js';
 import { maybeSubmitHeartbeat } from './staking/heartbeat.js';
@@ -1998,6 +1998,9 @@ async function main() {
         await stopHeliaNode();
         return;
       }
+
+      // Periodic IPFS blockstore GC (checks every 100 cycles, runs if >250k blocks)
+      await maybeRunGcCycle();
 
       // Multi-service rotation check (no-op when rotator is null)
       if (rotator) {

@@ -70,8 +70,8 @@ function isFullCidString(value: string): boolean {
 
 function extractDigestHexFromHexCid(hexCid: string): string | null {
   const s = hexCid.toLowerCase();
-  if (s.startsWith('f01701220')) return s.slice(10);
-  if (s.startsWith('f01551220')) return s.slice(10);
+  if (s.startsWith('f01701220')) return s.slice(9);
+  if (s.startsWith('f01551220')) return s.slice(9);
   return null;
 }
 
