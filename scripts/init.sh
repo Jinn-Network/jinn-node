@@ -76,6 +76,25 @@ fi
 # Ensure ~/.gemini exists for OAuth credential storage
 
 mkdir -p ~/.gemini
+
+# If GEMINI_API_KEY is set, always configure Gemini CLI for API key auth.
+# Force-overwrite settings.json to prevent stale OAuth config on the volume
+# from triggering the interactive OAuth prompt in non-interactive containers.
+if [ -n "$GEMINI_API_KEY" ]; then
+  cat > ~/.gemini/settings.json << 'SETTINGS'
+{
+  "security": {
+    "auth": {
+      "selectedType": "gemini-api-key"
+    }
+  }
+}
+SETTINGS
+  # Also remove stale OAuth credentials that may override API key auth
+  rm -f ~/.gemini/oauth_creds.json ~/.gemini/google_accounts.json
+  echo "[init] Configured Gemini CLI for API key auth (forced)"
+fi
+
 echo "[init] Ensured ~/.gemini exists"
 
 echo "[init] Worker initialization complete"
