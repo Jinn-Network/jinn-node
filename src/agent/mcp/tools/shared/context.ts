@@ -102,7 +102,7 @@ export function setJobContext(
   if (workstreamId !== undefined) {
     if (workstreamId) process.env.JINN_CTX_WORKSTREAM_ID = workstreamId; else delete process.env.JINN_CTX_WORKSTREAM_ID;
   }
-  // ventureId is set via worker metadata/jobContext.ts (JINN_VENTURE_ID env var)
+  // ventureId is set via worker metadata/jobContext.ts (JINN_CTX_VENTURE_ID env var)
   if (parentRequestId !== undefined) {
     if (parentRequestId) process.env.JINN_CTX_PARENT_REQUEST_ID = parentRequestId; else delete process.env.JINN_CTX_PARENT_REQUEST_ID;
   }
