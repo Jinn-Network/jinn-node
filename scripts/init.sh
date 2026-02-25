@@ -119,8 +119,8 @@ for var in $(env | grep '^OPERATE_SERVICE_.*_CONFIG=' | sed 's/=.*//'); do
 
   if [ -z "$config_b64" ]; then continue; fi
 
-  # Extract the full service_config_id from the JSON
-  sc_id=$(echo "$config_b64" | base64 -d | python3 -c "import sys,json; print(json.load(sys.stdin)['service_config_id'])" 2>/dev/null)
+  # Extract the full service_config_id from the JSON (use node since python3 may not be in runtime image)
+  sc_id=$(echo "$config_b64" | base64 -d | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).service_config_id))" 2>/dev/null || true)
   if [ -z "$sc_id" ]; then
     echo "[init] WARN: Could not extract service_config_id from $var"
     continue
