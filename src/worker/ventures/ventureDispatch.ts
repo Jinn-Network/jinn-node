@@ -11,6 +11,7 @@ import { workerLogger } from '../../logging/index.js';
 import { getTemplate } from '../../scripts/templates/crud.js';
 import { buildIpfsPayload } from '../../agent/shared/ipfs-payload-builder.js';
 import { extractToolPolicyFromBlueprint } from '../../shared/template-tools.js';
+import { extractSchemaEnvVars } from '../../shared/job-env.js';
 import { getMechAddress, getServicePrivateKey, getMechChainConfig } from '../../env/operate-profile.js';
 import { getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
 import { getRandomStakedMech } from '../filters/stakingFilter.js';
@@ -43,6 +44,23 @@ export async function dispatchFromTemplate(
   const mergedInput = template.input_schema
     ? { ...extractDefaults(template.input_schema as Record<string, any>), ...entry.input }
     : (entry.input || {});
+
+  // 2b. Extract env vars from input_schema envVar mappings
+  const extractedEnv = template.input_schema
+    ? extractSchemaEnvVars(template.input_schema as Record<string, any>, mergedInput, 'inputSchema.properties')
+    : undefined;
+
+  // Merge: schema-extracted base, explicit entry.input.env overrides
+  const mergedEnv = (extractedEnv || mergedInput.env)
+    ? { ...extractedEnv, ...(mergedInput.env || {}) }
+    : undefined;
+
+  if (extractedEnv) {
+    workerLogger.info(
+      { ventureId: venture.id, templateId: template.id, envKeys: Object.keys(extractedEnv) },
+      'Venture dispatch: extracted env vars from input schema'
+    );
+  }
 
   // 3. Build blueprint with substitution
   const blueprintObj = typeof template.blueprint === 'string'
@@ -96,7 +114,7 @@ export async function dispatchFromTemplate(
     templateId: template.id,
     skipBranch: true,
     additionalContextOverrides: {
-      env: mergedInput.env || undefined,
+      env: mergedEnv,
     },
   });
   const { ipfsJsonContents } = buildResult;

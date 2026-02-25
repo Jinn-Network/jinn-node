@@ -36,7 +36,12 @@ const RPC_URL = process.env.RPC_URL || 'https://mainnet.base.org';
 const STAKING_CONTRACTS: Record<string, { address: string; name: string; minStake: bigint }> = {
     jinn: {
         address: '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139',
-        name: 'Jinn Staking',
+        name: 'Jinn Staking (agent_id=43)',
+        minStake: ethers.parseEther('5000'), // 5,000 OLAS
+    },
+    jinn_v2: {
+        address: '0x66A92CDa5B319DCCcAC6c1cECbb690CA3Fb59488',
+        name: 'Jinn Staking v2 (agent 103, DeliveryActivityChecker)',
         minStake: ethers.parseEther('5000'), // 5,000 OLAS
     },
     agentsfun1: {

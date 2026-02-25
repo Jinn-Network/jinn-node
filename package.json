@@ -75,6 +75,7 @@
     "wallet:export-keys": "tsx scripts/wallet/export-keys.ts",
     "wallet:withdraw": "sh -c 'tsx scripts/wallet/withdraw.ts \"$@\"' --",
     "wallet:unstake": "sh -c 'tsx scripts/wallet/unstake.ts \"$@\"' --",
+    "wallet:restake": "sh -c 'tsx scripts/wallet/restake.ts \"$@\"' --",
     "wallet:recover": "sh -c 'tsx scripts/wallet/recover.ts \"$@\"' --",
     "service:add": "sh -c 'tsx scripts/service/add.ts \"$@\"' --",
     "service:list": "tsx scripts/service/list.ts",

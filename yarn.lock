@@ -1448,9 +1448,9 @@
   integrity sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ==
 
 "@slicekit/erc8128@^0.1.0":
-  version "0.1.0"
-  resolved "https://registry.yarnpkg.com/@slicekit/erc8128/-/erc8128-0.1.0.tgz#63c34784d9c60ad54dc97d69c2aeb24e1619a5a8"
-  integrity sha512-App9GeEN2jDtGWKKLn2C9UC3NJCae5kxzZz9EyySMHzIKQAfCbMMbZwFQryUoStAfG92YS8nQlhYtHd4GZq8qw==
+  version "0.1.1"
+  resolved "https://registry.yarnpkg.com/@slicekit/erc8128/-/erc8128-0.1.1.tgz#8330479b1760ccf8b9228a243d630a605f94bb0a"
+  integrity sha512-BMjXbmt9+kwvhJlo656tyusC5qJcI8a2eJyQIdLN4EH8uB4EkwmtgvLySsXlx67poxnwwi6LwLjKxLkr0Bx7vQ==
   dependencies:
     "@noble/hashes" "^1.8.0"
 

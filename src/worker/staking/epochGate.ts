@@ -15,16 +15,21 @@
 import { ethers } from 'ethers';
 import { workerLogger } from '../../logging/index.js';
 import { getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
+import { computeProjectedEpochTarget, readNonNegativeIntEnv, readPositiveIntEnv } from './target.js';
 
 const log = workerLogger.child({ component: 'EPOCH_GATE' });
 
-const DEFAULT_TARGET_REQUESTS = 60;
+const DEFAULT_TARGET_REQUESTS = 61;
+const DEFAULT_CHECKPOINT_DELAY_BUFFER_SEC = 0;
+const DEFAULT_SAFETY_MARGIN_REQUESTS = 1;
 const EPOCH_CACHE_TTL_MS = 5 * 60_000; // 5 min — checkpoint only changes daily
 const REQUEST_CACHE_TTL_MS = 2 * 60_000; // 2 min — requests change frequently
 
 const STAKING_ABI = [
+  'function livenessPeriod() view returns (uint256)',
   'function tsCheckpoint() view returns (uint256)',
   'function getNextRewardCheckpointTimestamp() view returns (uint256)',
+  'function activityChecker() view returns (address)',
   'function getServiceInfo(uint256 serviceId) view returns (tuple(address multisig, address owner, uint256[] nonces, uint256 tsStart, uint256 reward, uint256 inactivity))',
 ];
 
@@ -82,7 +87,10 @@ export async function checkEpochGate(
   serviceId: number,
   marketplaceAddress: string,
 ): Promise<EpochGateResult> {
-  const target = parseInt(process.env.WORKER_STAKING_TARGET || '', 10) || DEFAULT_TARGET_REQUESTS;
+  const overrideTarget = readPositiveIntEnv('WORKER_STAKING_TARGET');
+  const delayBufferSeconds = readPositiveIntEnv('WORKER_STAKING_CHECKPOINT_DELAY_SEC') ?? DEFAULT_CHECKPOINT_DELAY_BUFFER_SEC;
+  const safetyMarginRequests = readNonNegativeIntEnv('WORKER_STAKING_SAFETY_MARGIN') ?? DEFAULT_SAFETY_MARGIN_REQUESTS;
+  const fallbackTarget = overrideTarget ?? DEFAULT_TARGET_REQUESTS;
 
   // Return cached result if fresh enough
   if (cachedGate && Date.now() - cachedGate.fetchedAt < REQUEST_CACHE_TTL_MS) {
@@ -95,17 +103,28 @@ export async function checkEpochGate(
     const stakingContract = new ethers.Contract(stakingContractAddress, STAKING_ABI, provider);
     const marketplace = new ethers.Contract(marketplaceAddress, MARKETPLACE_ABI, provider);
 
-    const [{ tsCheckpoint, nextCheckpoint }, serviceInfo] = await Promise.all([
+    const [{ tsCheckpoint, nextCheckpoint }, serviceInfo, activityCheckerAddress, livenessPeriod] = await Promise.all([
       getEpochBounds(stakingContract),
       stakingContract.getServiceInfo(serviceId),
+      stakingContract.activityChecker(),
+      stakingContract.livenessPeriod().then(Number),
     ]);
 
     // Use the staking contract's multisig — authoritative source
     const multisig: string = serviceInfo.multisig;
     // nonces[1] is the request count baseline recorded at epoch checkpoint
     const baselineRequestCount = Number(serviceInfo.nonces[1]);
-
     const requestCount = await getEpochRequestCount(stakingContract, marketplace, multisig, baselineRequestCount);
+    const targetData = await computeProjectedEpochTarget({
+      provider,
+      activityCheckerAddress,
+      tsCheckpoint,
+      livenessPeriod,
+      delayBufferSeconds,
+      overrideTarget,
+      safetyMarginRequests,
+    });
+    const target = targetData.target;
 
     const result: EpochGateResult = {
       targetMet: requestCount >= target,
@@ -121,6 +140,16 @@ export async function checkEpochGate(
       targetMet: result.targetMet,
       baselineRequestCount,
       multisig,
+      tsCheckpoint,
+      nextCheckpoint,
+      livenessPeriod,
+      effectivePeriodSeconds: targetData.effectivePeriodSeconds,
+      effectivePeriodSecondsWithoutBuffer: targetData.effectivePeriodSecondsWithoutBuffer,
+      baselineTimestamp: targetData.baselineTimestamp,
+      livenessRatio: targetData.livenessRatio.toString(),
+      delayBufferSeconds,
+      safetyMarginRequests: targetData.safetyMarginRequests,
+      targetFromOverride: targetData.usedOverride,
       epochStart: new Date(tsCheckpoint * 1000).toISOString(),
       epochEnd: new Date(nextCheckpoint * 1000).toISOString(),
     }, 'Epoch gate check');
@@ -130,6 +159,6 @@ export async function checkEpochGate(
   } catch (error: any) {
     log.warn({ error: error.message }, 'Epoch gate check failed — allowing job pickup');
     // Fail open: if we can't check, don't block work
-    return { targetMet: false, requestCount: 0, target, nextCheckpoint: 0, multisig: '' };
+    return { targetMet: false, requestCount: 0, target: fallbackTarget, nextCheckpoint: 0, multisig: '' };
   }
 }

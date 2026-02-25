@@ -248,8 +248,16 @@ ensure_project_linked() {
   # Try linking to existing project + service
   info "Linking to project: $PROJECT_NAME, service: $SERVICE_NAME"
   if run railway link -p "$PROJECT_NAME" -s "$SERVICE_NAME" -e production 2>/dev/null; then
-    success "Linked to existing project + service"
-    return 0
+    # railway link can return 0 even when the service doesn't exist (links project only).
+    # Verify the service is actually linked before proceeding.
+    local verify_status verify_service
+    verify_status=$(railway status 2>&1 || true)
+    verify_service=$(echo "$verify_status" | sed -n 's/.*Service: //p' || true)
+    if [[ -n "$verify_service" && "$verify_service" != "None" ]]; then
+      success "Linked to existing project + service"
+      return 0
+    fi
+    info "Project linked but service '$SERVICE_NAME' not found — will create it"
   fi
 
   # Project might exist but service doesn't — link project, then create service
