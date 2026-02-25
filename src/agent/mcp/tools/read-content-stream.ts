@@ -17,7 +17,7 @@ export const readContentStreamSchema = {
   inputSchema: readContentStreamParams.shape,
 };
 
-export async function readContentStream(params: unknown) {
+export async function readContentStream(params: ReadContentStreamParams) {
   try {
     const parsed = readContentStreamParams.safeParse(params);
     if (!parsed.success) {
@@ -36,32 +36,40 @@ export async function readContentStream(params: unknown) {
 
     // Default since to 24h ago if not provided
     const sinceTs = since || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    // blockTimestamp is stored as Unix seconds (from event.block.timestamp)
+    const sinceUnix = Math.floor(new Date(sinceTs).getTime() / 1000);
 
     const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
-    const gql = `query ReadContentStream($topic: String!, $limit: Int!) {
-      artifacts(where: { topic: $topic }, limit: $limit, orderBy: "id", orderDirection: "desc") {
+    const gql = `query ReadContentStream($topic: String!, $sinceTs: BigInt!, $limit: Int!) {
+      artifacts(where: { topic: $topic, blockTimestamp_gte: $sinceTs }, limit: $limit, orderBy: "blockTimestamp", orderDirection: "desc") {
         items {
-          id name contentPreview cid requestId
+          id name contentPreview cid requestId blockTimestamp
         }
       }
     }`;
 
-    const variables = { topic: stream, limit };
+    const variables = { topic: stream, sinceTs: String(sinceUnix), limit };
     const res = await fetch(PONDER_GRAPHQL_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: gql, variables }),
     });
 
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Ponder returned ${res.status}: ${text.slice(0, 200)}`);
+    }
+
     const json = await res.json();
     const artifacts = json?.data?.artifacts?.items || [];
 
-    // Map results to the expected shape
+    // Map results to the expected shape, converting blockTimestamp to ISO createdAt
     const data = artifacts.map((a: any) => ({
       name: a.name,
       contentPreview: a.contentPreview,
       cid: a.cid,
       requestId: a.requestId,
+      createdAt: a.blockTimestamp ? new Date(Number(a.blockTimestamp) * 1000).toISOString() : null,
     }));
 
     return {

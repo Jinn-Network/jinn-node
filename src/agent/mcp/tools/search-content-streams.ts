@@ -14,7 +14,7 @@ export const searchContentStreamsSchema = {
   inputSchema: searchContentStreamsParams.shape,
 };
 
-export async function searchContentStreams(params: unknown) {
+export async function searchContentStreams(params: SearchContentStreamsParams) {
   try {
     const parsed = searchContentStreamsParams.safeParse(params);
     if (!parsed.success) {
@@ -32,8 +32,15 @@ export async function searchContentStreams(params: unknown) {
     const { query, limit } = parsed.data;
 
     const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
+    /**
+     * Ponder GraphQL doesn't support GROUP BY or DISTINCT, so we fetch up to
+     * AGGREGATION_LIMIT artifacts and aggregate by topic client-side. If the
+     * result count hits this ceiling, itemCounts may be inaccurate and some
+     * streams could be missing — indicated by meta.truncated.
+     */
+    const AGGREGATION_LIMIT = 1000;
     const gql = `query SearchContentStreams($topicPrefix: String!) {
-      artifacts(where: { topic_starts_with: $topicPrefix }, limit: 1000, orderBy: "id", orderDirection: "desc") {
+      artifacts(where: { topic_starts_with: $topicPrefix }, limit: ${AGGREGATION_LIMIT}, orderBy: "id", orderDirection: "desc") {
         items {
           id name topic
         }
@@ -47,8 +54,14 @@ export async function searchContentStreams(params: unknown) {
       body: JSON.stringify({ query: gql, variables }),
     });
 
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Ponder returned ${res.status}: ${text.slice(0, 200)}`);
+    }
+
     const json = await res.json();
     const artifacts = json?.data?.artifacts?.items || [];
+    const truncated = artifacts.length >= AGGREGATION_LIMIT;
 
     // Aggregate by topic: count items and track latest item name per stream
     const streamMap = new Map<string, { itemCount: number; latestItemName: string }>();
@@ -82,7 +95,7 @@ export async function searchContentStreams(params: unknown) {
         type: 'text' as const,
         text: JSON.stringify({
           data: streams,
-          meta: { ok: true, source: 'ponder', type: 'content_streams' },
+          meta: { ok: true, source: 'ponder', type: 'content_streams', truncated },
         }),
       }],
     };
