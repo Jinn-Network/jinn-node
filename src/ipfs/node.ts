@@ -17,6 +17,8 @@ export interface JinnNodeConfig {
   isStaked: StakingGaterConfig['isStaked'];
   /** Bootstrap peer multiaddrs */
   bootstrapPeers?: string[];
+  /** Addresses to advertise to peers (e.g. public IP in containers) */
+  announceAddresses?: string[];
   /** Storage config */
   storage?: {
     type: 'memory' | 'filesystem';
@@ -44,7 +46,10 @@ export async function createJinnNode(config: JinnNodeConfig): Promise<Helia> {
   delete (defaults.services as any).http;
 
   // TCP-only transport
-  defaults.addresses = { listen: [`/ip4/0.0.0.0/tcp/${port}`] };
+  defaults.addresses = {
+    listen: [`/ip4/0.0.0.0/tcp/${port}`],
+    ...(config.announceAddresses?.length && { announce: config.announceAddresses }),
+  };
   defaults.transports = [tcp()];
 
   // Bootstrap peers

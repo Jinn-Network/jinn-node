@@ -1795,10 +1795,12 @@ async function main() {
   if (serviceKey) {
     try {
       const bootstrapPeers = await fetchBootstrapPeers();
+      const announceAddress = process.env.IPFS_ANNOUNCE_ADDRESS;
       const helia = await initHeliaNode({
         privateKey: serviceKey,
         isStaked: isOperatorStaked,
         bootstrapPeers: bootstrapPeers.length > 0 ? bootstrapPeers : undefined,
+        announceAddresses: announceAddress ? [announceAddress] : undefined,
         storage: { type: 'filesystem', blocksPath: '/home/jinn/.ipfs/blocks', datastorePath: '/home/jinn/.ipfs/datastore' },
       });
       setProxyHeliaNode(helia);
