@@ -1404,10 +1404,14 @@ async function processOnce(): Promise<boolean> {
     return false;
   }
 
+  // Optional: target a specific request id if provided (for deterministic tests).
+  // A targeted recovery run should bypass epoch pickup gating.
+  const targetIdEnv = (getOptionalMechTargetRequestId() || '').trim();
+
   // Staking target gate: stop claiming if request target met for this epoch
   // Use resolved config (on-chain derived) with env var override
   const stakingContract = getOptionalWorkerStakingContract() || resolvedConfig?.stakingContract || null;
-  if (stakingContract && resolvedConfig) {
+  if (!targetIdEnv && stakingContract && resolvedConfig) {
     const gate = await checkEpochGate(stakingContract, resolvedConfig.serviceId, resolvedConfig.marketplace);
     if (gate.targetMet) {
       const resetIn = Math.max(0, gate.nextCheckpoint - Math.floor(Date.now() / 1000));
@@ -1418,10 +1422,10 @@ async function processOnce(): Promise<boolean> {
       }, `Staking target met (${gate.requestCount}/${gate.target}) — skipping job pickup`);
       return false;
     }
+  } else if (targetIdEnv) {
+    workerLogger.info({ target: targetIdEnv }, 'Bypassing staking target gate for targeted request');
   }
 
-  // Optional: target a specific request id if provided (for deterministic tests)
-  const targetIdEnv = (getOptionalMechTargetRequestId() || '').trim();
   let candidates: UnclaimedRequest[];
 
   if (targetIdEnv) {

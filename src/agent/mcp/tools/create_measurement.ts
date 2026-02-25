@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { pushJsonToIpfs } from '@jinn-network/mech-client-ts/dist/ipfs.js';
+import { createHash } from 'crypto';
 
 // ============================================================================
 // Type-Specific Measurement Schemas (Discriminated Union)
@@ -11,6 +12,7 @@ const floorMeasurementSchema = z.object({
   measured_value: z.number().describe('Actual numeric value measured'),
   min_threshold: z.number().describe('The min threshold from the invariant'),
   context: z.string().min(1).describe('Explanation of the measurement'),
+  idempotencyKey: z.string().min(1).optional(),
 });
 
 const ceilingMeasurementSchema = z.object({
@@ -19,6 +21,7 @@ const ceilingMeasurementSchema = z.object({
   measured_value: z.number().describe('Actual numeric value measured'),
   max_threshold: z.number().describe('The max threshold from the invariant'),
   context: z.string().min(1).describe('Explanation of the measurement'),
+  idempotencyKey: z.string().min(1).optional(),
 });
 
 const rangeMeasurementSchema = z.object({
@@ -28,6 +31,7 @@ const rangeMeasurementSchema = z.object({
   min_threshold: z.number().describe('The min threshold from the invariant'),
   max_threshold: z.number().describe('The max threshold from the invariant'),
   context: z.string().min(1).describe('Explanation of the measurement'),
+  idempotencyKey: z.string().min(1).optional(),
 });
 
 const booleanMeasurementSchema = z.object({
@@ -35,6 +39,7 @@ const booleanMeasurementSchema = z.object({
   invariant_id: z.string().min(1).describe('The invariant ID being measured'),
   passed: z.boolean().describe('Whether the condition was satisfied'),
   context: z.string().min(1).describe('Explanation of the measurement'),
+  idempotencyKey: z.string().min(1).optional(),
 });
 
 export const createMeasurementParams = z.discriminatedUnion('invariant_type', [
@@ -60,6 +65,7 @@ export const createMeasurementFlatParams = z.object({
   threshold: z.any().optional(),
   id: z.string().optional(),
   name: z.string().optional(),
+  idempotencyKey: z.string().optional(),
 });
 
 export type CreateMeasurementParams = z.infer<typeof createMeasurementParams>;
@@ -76,6 +82,30 @@ interface MeasurementPayload {
   threshold?: { min?: number; max?: number };
   passed: boolean;
   context: string;
+}
+
+type MeasurementResult = {
+  cid: string;
+  name: string;
+  topic: 'MEASUREMENT';
+  contentPreview: string;
+  invariant_id: string;
+  passed: boolean;
+  warnings?: string[];
+};
+
+const measurementDedupeCache = new Map<string, MeasurementResult>();
+
+function getMeasurementDedupeKey(
+  params: CreateMeasurementParams,
+  payload: MeasurementPayload
+): string {
+  const requestId = process.env.JINN_CTX_REQUEST_ID || process.env.JINN_CTX_WORKSTREAM_ID || 'unknown_request';
+  const idempotencyKey = (params as any).idempotencyKey;
+  const stablePart = typeof idempotencyKey === 'string' && idempotencyKey.trim().length > 0
+    ? idempotencyKey.trim()
+    : createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  return `${requestId}:${params.invariant_type}:${params.invariant_id}:${stablePart}`;
 }
 
 // ============================================================================
@@ -179,6 +209,16 @@ export async function createMeasurement(args: unknown) {
     }
 
     const payload = buildPayload(parsed.data);
+    const dedupeKey = getMeasurementDedupeKey(parsed.data, payload);
+    const cached = measurementDedupeCache.get(dedupeKey);
+    if (cached) {
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify({ data: cached, meta: { ok: true, deduped: true } })
+        }]
+      };
+    }
     const artifactName = `Measurement: ${payload.invariant_id}`;
 
     // Validate invariant_id against known blueprint IDs
@@ -207,7 +247,7 @@ export async function createMeasurement(args: unknown) {
     const [, cidHex] = await pushJsonToIpfs(ipfsPayload);
     const contentPreview = JSON.stringify(payload).slice(0, 100);
 
-    const result: Record<string, any> = {
+    const result: MeasurementResult = {
       cid: cidHex,
       name: artifactName,
       topic: 'MEASUREMENT',
@@ -218,6 +258,7 @@ export async function createMeasurement(args: unknown) {
     if (warnings.length > 0) {
       result.warnings = warnings;
     }
+    measurementDedupeCache.set(dedupeKey, result);
 
     return {
       content: [{
