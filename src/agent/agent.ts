@@ -1309,6 +1309,16 @@ export class Agent {
 
       const templateSettings: GeminiSettings = JSON.parse(readFileSync(templatePath, 'utf8'));
 
+      // Dynamically resolve auth type based on available credentials.
+      // GEMINI_API_KEY → "gemini-api-key", otherwise fall back to "oauth-personal".
+      // This prevents the template from hardcoding an auth type that conflicts
+      // with the user's ~/.gemini/settings.json (which init.sh configures).
+      if (!templateSettings.security) templateSettings.security = {};
+      if (!templateSettings.security.auth) templateSettings.security.auth = {};
+      templateSettings.security.auth.selectedType = process.env.GEMINI_API_KEY
+        ? 'gemini-api-key'
+        : 'oauth-personal';
+
       if (!templateSettings.mcpServers) {
         throw new Error('No MCP servers configured in settings.template.json');
       }
@@ -1770,57 +1780,70 @@ export class Agent {
     if (!telemetry.requestText || telemetry.toolCalls.length === 0) return;
 
     try {
-      // Parse conversation history from requestText to find tool responses
-      for (const requestText of telemetry.requestText) {
-        if (typeof requestText !== 'string') continue;
+      // Use the latest/fullest conversation snapshot first; older snapshots are usually cumulative and can
+      // otherwise cause response reattachment (same function response mapped to later calls).
+      const snapshots = telemetry.requestText
+        .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+        .sort((a, b) => b.length - a.length);
 
+      if (snapshots.length === 0) return;
+
+      const pendingByTool = new Map<string, ToolCall[]>();
+      for (const tc of telemetry.toolCalls) {
+        if (!tc || typeof tc.tool !== 'string') continue;
+        if (tc.result) continue;
+        const queue = pendingByTool.get(tc.tool) || [];
+        queue.push(tc);
+        pendingByTool.set(tc.tool, queue);
+      }
+
+      for (const requestText of snapshots) {
+        let conversations: any[] = [];
         try {
-          const conversations = JSON.parse(requestText);
-          if (!Array.isArray(conversations)) continue;
-
-          for (const message of conversations) {
-            if (message.role === 'user' && Array.isArray(message.parts)) {
-              for (const part of message.parts) {
-                if (part.functionResponse && part.functionResponse.name && part.functionResponse.response) {
-                  const toolName = part.functionResponse.name;
-                  const response = part.functionResponse.response;
-
-                  // Find corresponding tool call and attach result
-                  // NOTE: Removed tc.success check to include failed tool calls
-                  const toolCall = telemetry.toolCalls.find(tc =>
-                    tc.tool === toolName && !tc.result
-                  );
-
-                  if (toolCall && response.output) {
-                    try {
-                      // Parse the tool response output
-                      const output = JSON.parse(response.output);
-                      // Attach result regardless of output.meta.ok to capture errors
-                      if (output.data) {
-                        toolCall.result = output.data;
-                        agentLogger.debug({ toolName, resultKeys: Object.keys(output.data) }, 'Attached result to tool call');
-                      } else if (output.error) {
-                        // Capture error responses
-                        toolCall.result = { error: output.error };
-                        agentLogger.debug({ toolName, error: output.error }, 'Attached error result to tool call');
-                      } else {
-                        // Fallback: attach entire output object
-                        toolCall.result = output;
-                        agentLogger.debug({ toolName }, 'Attached raw output to tool call');
-                      }
-                    } catch (parseError) {
-                      // If JSON parsing fails, store raw output
-                      toolCall.result = { rawOutput: response.output };
-                    }
-                  }
-                }
-              }
-            }
-          }
-        } catch (parseError) {
-          // Skip malformed conversation JSON
+          const parsed = JSON.parse(requestText);
+          if (!Array.isArray(parsed)) continue;
+          conversations = parsed;
+        } catch {
           continue;
         }
+
+        const responses: Array<{ toolName: string; output: string }> = [];
+        for (const message of conversations) {
+          if (message?.role !== 'user' || !Array.isArray(message.parts)) continue;
+          for (const part of message.parts) {
+            const functionResponse = part?.functionResponse;
+            if (!functionResponse?.name || !functionResponse?.response?.output) continue;
+            responses.push({
+              toolName: String(functionResponse.name),
+              output: String(functionResponse.response.output),
+            });
+          }
+        }
+
+        if (responses.length === 0) continue;
+
+        for (const response of responses) {
+          const queue = pendingByTool.get(response.toolName);
+          if (!queue || queue.length === 0) continue;
+          const toolCall = queue.shift();
+          if (!toolCall) continue;
+
+          try {
+            const output = JSON.parse(response.output);
+            if (output.data) {
+              toolCall.result = output.data;
+            } else if (output.error) {
+              toolCall.result = { error: output.error };
+            } else {
+              toolCall.result = output;
+            }
+          } catch {
+            toolCall.result = { rawOutput: response.output };
+          }
+        }
+
+        // Snapshot successfully processed; avoid remapping from older cumulative snapshots.
+        break;
       }
     } catch (error: any) {
       agentLogger.warn({ error: error.message }, 'Failed to attach tool results to telemetry');

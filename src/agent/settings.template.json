@@ -1,9 +1,5 @@
 {
-  "security": {
-    "auth": {
-      "selectedType": "oauth-personal"
-    }
-  },
+  "security": {},
   "previewFeatures": true,
   "mcpServers": {
     "metacog": {
