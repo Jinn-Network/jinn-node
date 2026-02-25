@@ -261,23 +261,24 @@ function readServiceConfig(): ServiceConfig | null {
  * Get the service's target mech contract address
  *
  * Priority:
- * 1. JINN_SERVICE_MECH_ADDRESS environment variable (for Railway deployment)
- * 2. .operate service config MECH_TO_CONFIG
+ * 1. ActiveServiceContext (multi-service rotation)
+ * 2. JINN_SERVICE_MECH_ADDRESS environment variable (single-service deployment)
+ * 3. .operate service config MECH_TO_CONFIG
  *
  * @returns Mech contract address or null if not found
  */
 export function getMechAddress(): string | null {
-  // Check environment variable first (for Railway deployment)
+  // Check ActiveServiceContext first (multi-service rotation overrides static env vars)
+  const activeMech = getActiveMechAddress();
+  if (activeMech) {
+    return activeMech;
+  }
+
+  // Fall back to environment variable (single-service Railway deployment)
   const envMech = process.env.JINN_SERVICE_MECH_ADDRESS;
   if (envMech && /^0x[a-fA-F0-9]{40}$/i.test(envMech)) {
     configLogger.info(` Using mech address from JINN_SERVICE_MECH_ADDRESS: ${envMech}`);
     return envMech;
-  }
-
-  // Check ActiveServiceContext (multi-service rotation)
-  const activeMech = getActiveMechAddress();
-  if (activeMech) {
-    return activeMech;
   }
 
   // Fall back to service config
@@ -316,24 +317,25 @@ export function getMechAddress(): string | null {
  * Get the Gnosis Safe multisig address for this service
  *
  * Priority:
- * 1. JINN_SERVICE_SAFE_ADDRESS environment variable (for Railway deployment)
- * 2. chain_configs.<chain>.chain_data.multisig (primary location)
- * 3. safe_address at root (backwards compatibility)
+ * 1. ActiveServiceContext (multi-service rotation)
+ * 2. JINN_SERVICE_SAFE_ADDRESS environment variable (single-service deployment)
+ * 3. chain_configs.<chain>.chain_data.multisig (primary location)
+ * 4. safe_address at root (backwards compatibility)
  *
  * @returns Safe address or null if not found
  */
 export function getServiceSafeAddress(): string | null {
-  // Check environment variable first (for Railway deployment)
+  // Check ActiveServiceContext first (multi-service rotation overrides static env vars)
+  const activeSafe = getActiveSafeAddress();
+  if (activeSafe) {
+    return activeSafe;
+  }
+
+  // Fall back to environment variable (single-service Railway deployment)
   const envSafe = process.env.JINN_SERVICE_SAFE_ADDRESS;
   if (envSafe && /^0x[a-fA-F0-9]{40}$/i.test(envSafe)) {
     configLogger.info(` Using safe address from JINN_SERVICE_SAFE_ADDRESS: ${envSafe}`);
     return envSafe;
-  }
-
-  // Check ActiveServiceContext (multi-service rotation)
-  const activeSafe = getActiveSafeAddress();
-  if (activeSafe) {
-    return activeSafe;
   }
 
   // Fall back to service config
