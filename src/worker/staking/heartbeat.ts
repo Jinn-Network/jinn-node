@@ -41,8 +41,8 @@ const MARKETPLACE_ABI = [
   'function mapRequestCounts(address) view returns (uint256)',
 ];
 
-// Cached staking multisig — resolved once from on-chain getServiceInfo()
-let resolvedMultisig: string | null = null;
+// Cached staking multisig per service — resolved from on-chain getServiceInfo()
+const resolvedMultisigByService = new Map<number, string>();
 
 /**
  * Calculate how many more requests we need to submit this epoch.
@@ -79,12 +79,13 @@ async function getRequestDeficit(
 
   // Use the staking multisig from on-chain (may differ from worker Safe)
   const multisig: string = serviceInfo.multisig;
-  if (!resolvedMultisig) {
+  const cachedMultisig = resolvedMultisigByService.get(serviceId);
+  if (!cachedMultisig) {
     const workerSafe = getServiceSafeAddress();
     if (workerSafe?.toLowerCase() !== multisig.toLowerCase()) {
       log.warn({ workerSafe, stakingMultisig: multisig }, 'Worker Safe differs from staking multisig — using staking multisig for heartbeats');
     }
-    resolvedMultisig = multisig;
+    resolvedMultisigByService.set(serviceId, multisig);
   }
 
   // Baseline from on-chain nonces[1] — authoritative epoch-start request count
@@ -179,7 +180,7 @@ async function submitHeartbeat(
 // Minimum seconds between heartbeat submissions to avoid gas waste
 const HEARTBEAT_MIN_INTERVAL_SEC = parseInt(process.env.HEARTBEAT_MIN_INTERVAL_SEC || '60');
 
-let lastHeartbeatTimestamp = 0;
+const lastHeartbeatTimestampByService = new Map<number, number>();
 
 /**
  * Maybe submit heartbeat requests to meet the staking liveness requirement.
@@ -203,8 +204,9 @@ export async function maybeSubmitHeartbeat(
 
   // Throttle: don't submit more often than HEARTBEAT_MIN_INTERVAL_SEC
   const now = Math.floor(Date.now() / 1000);
+  const lastHeartbeatTimestamp = lastHeartbeatTimestampByService.get(serviceId) ?? 0;
   if (now - lastHeartbeatTimestamp < HEARTBEAT_MIN_INTERVAL_SEC) {
-    log.info({ secondsSinceLast: now - lastHeartbeatTimestamp, minInterval: HEARTBEAT_MIN_INTERVAL_SEC }, 'Heartbeat throttled');
+    log.info({ serviceId, secondsSinceLast: now - lastHeartbeatTimestamp, minInterval: HEARTBEAT_MIN_INTERVAL_SEC }, 'Heartbeat throttled');
     return;
   }
 
@@ -234,7 +236,7 @@ export async function maybeSubmitHeartbeat(
 
     await submitHeartbeat(multisig, mechAddress, serviceId, marketplaceAddress);
 
-    lastHeartbeatTimestamp = Math.floor(Date.now() / 1000);
+    lastHeartbeatTimestampByService.set(serviceId, Math.floor(Date.now() / 1000));
   } catch (error: any) {
     log.warn({ error: error.message }, 'Heartbeat check failed (non-fatal)');
   }

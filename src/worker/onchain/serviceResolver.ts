@@ -46,8 +46,10 @@ export interface ResolvedServiceConfig {
   serviceState: number;
 }
 
-// Process-lifetime cache
-let _cached: ResolvedServiceConfig | null = null;
+// Process-lifetime cache keyed by mech address.
+// Multi-service workers may resolve multiple mechs in one process.
+const _cachedByMech = new Map<string, ResolvedServiceConfig>();
+let _lastCached: ResolvedServiceConfig | null = null;
 
 /**
  * Resolve all derived config from on-chain state.
@@ -57,7 +59,9 @@ export async function resolveServiceConfig(
   mechAddress: string,
   rpcUrl: string,
 ): Promise<ResolvedServiceConfig> {
-  if (_cached) return _cached;
+  const mechKey = mechAddress.toLowerCase();
+  const cached = _cachedByMech.get(mechKey);
+  if (cached) return cached;
 
   const provider = new ethers.JsonRpcProvider(rpcUrl);
   const mech = new ethers.Contract(mechAddress, MECH_ABI, provider);
@@ -123,22 +127,29 @@ export async function resolveServiceConfig(
     serviceState,
   };
 
-  _cached = result;
+  _cachedByMech.set(mechKey, result);
+  _lastCached = result;
   return result;
 }
 
 /**
  * Get the cached resolved config, or null if not yet resolved.
+ * If mechAddress is provided, returns the cache entry for that mech.
+ * Without mechAddress, returns the most recently resolved config.
  */
-export function getCachedServiceConfig(): ResolvedServiceConfig | null {
-  return _cached;
+export function getCachedServiceConfig(mechAddress?: string): ResolvedServiceConfig | null {
+  if (mechAddress) {
+    return _cachedByMech.get(mechAddress.toLowerCase()) ?? null;
+  }
+  return _lastCached;
 }
 
 /**
  * Clear the cached config (for testing or forced re-resolution).
  */
 export function clearServiceConfigCache(): void {
-  _cached = null;
+  _cachedByMech.clear();
+  _lastCached = null;
 }
 
 // ── Standalone self-test ─────────────────────────────────────────────────────

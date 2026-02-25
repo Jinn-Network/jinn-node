@@ -48,10 +48,27 @@ export interface EpochGateResult {
 
 // ── Caches ──────────────────────────────────────────────────────────────────
 
-let cachedEpoch: { tsCheckpoint: number; nextCheckpoint: number; fetchedAt: number } | null = null;
-let cachedGate: { result: EpochGateResult; fetchedAt: number } | null = null;
+const cachedEpochByStakingContract = new Map<string, { tsCheckpoint: number; nextCheckpoint: number; fetchedAt: number }>();
+const cachedGateByService = new Map<string, { result: EpochGateResult; fetchedAt: number }>();
 
-async function getEpochBounds(stakingContract: ethers.Contract): Promise<{ tsCheckpoint: number; nextCheckpoint: number }> {
+function getEpochCacheKey(stakingContractAddress: string): string {
+  return stakingContractAddress.toLowerCase();
+}
+
+function getGateCacheKey(
+  stakingContractAddress: string,
+  serviceId: number,
+  marketplaceAddress: string,
+): string {
+  return `${stakingContractAddress.toLowerCase()}::${serviceId}::${marketplaceAddress.toLowerCase()}`;
+}
+
+async function getEpochBounds(
+  stakingContract: ethers.Contract,
+  stakingContractAddress: string,
+): Promise<{ tsCheckpoint: number; nextCheckpoint: number }> {
+  const cacheKey = getEpochCacheKey(stakingContractAddress);
+  const cachedEpoch = cachedEpochByStakingContract.get(cacheKey);
   if (cachedEpoch && Date.now() - cachedEpoch.fetchedAt < EPOCH_CACHE_TTL_MS) {
     return { tsCheckpoint: cachedEpoch.tsCheckpoint, nextCheckpoint: cachedEpoch.nextCheckpoint };
   }
@@ -61,7 +78,7 @@ async function getEpochBounds(stakingContract: ethers.Contract): Promise<{ tsChe
     stakingContract.getNextRewardCheckpointTimestamp().then(Number),
   ]);
 
-  cachedEpoch = { tsCheckpoint, nextCheckpoint, fetchedAt: Date.now() };
+  cachedEpochByStakingContract.set(cacheKey, { tsCheckpoint, nextCheckpoint, fetchedAt: Date.now() });
   return { tsCheckpoint, nextCheckpoint };
 }
 
@@ -92,7 +109,10 @@ export async function checkEpochGate(
   const safetyMarginRequests = readNonNegativeIntEnv('WORKER_STAKING_SAFETY_MARGIN') ?? DEFAULT_SAFETY_MARGIN_REQUESTS;
   const fallbackTarget = overrideTarget ?? DEFAULT_TARGET_REQUESTS;
 
+  const gateCacheKey = getGateCacheKey(stakingContractAddress, serviceId, marketplaceAddress);
+
   // Return cached result if fresh enough
+  const cachedGate = cachedGateByService.get(gateCacheKey);
   if (cachedGate && Date.now() - cachedGate.fetchedAt < REQUEST_CACHE_TTL_MS) {
     return cachedGate.result;
   }
@@ -104,7 +124,7 @@ export async function checkEpochGate(
     const marketplace = new ethers.Contract(marketplaceAddress, MARKETPLACE_ABI, provider);
 
     const [{ tsCheckpoint, nextCheckpoint }, serviceInfo, activityCheckerAddress, livenessPeriod] = await Promise.all([
-      getEpochBounds(stakingContract),
+      getEpochBounds(stakingContract, stakingContractAddress),
       stakingContract.getServiceInfo(serviceId),
       stakingContract.activityChecker(),
       stakingContract.livenessPeriod().then(Number),
@@ -154,7 +174,7 @@ export async function checkEpochGate(
       epochEnd: new Date(nextCheckpoint * 1000).toISOString(),
     }, 'Epoch gate check');
 
-    cachedGate = { result, fetchedAt: Date.now() };
+    cachedGateByService.set(gateCacheKey, { result, fetchedAt: Date.now() });
     return result;
   } catch (error: any) {
     log.warn({ error: error.message }, 'Epoch gate check failed — allowing job pickup');
