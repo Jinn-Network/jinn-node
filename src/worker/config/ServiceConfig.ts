@@ -37,12 +37,12 @@ export const SERVICE_CONSTANTS = {
   DEFAULT_SAFE_OLAS_WEI: "50000000000000000000",   // 50 OLAS (unused by default)
   DEFAULT_OLAS_TOKEN_ADDRESS: "0x54330d28ca3357F294334BDC454a032e7f353416",
   
-  // jinn-node service package (uploaded during agent 103 registration)
-  DEFAULT_SERVICE_HASH: "QmdU7zr6XiYKB2jxYN6Z6YxDACmcyKHGx9vT3EioryqyMq",
+  // Pearl Agents.Fun service package + NFT
+  DEFAULT_SERVICE_HASH: "bafybeiawqqwkoeovm453mscwkxvmtnvaanhatlqh52cf5sdqavz6ldybae",
   DEFAULT_SERVICE_NFT: "bafybeiaakdeconw7j5z76fgghfdjmsr6tzejotxcwnvmp3nroaw3glgyve",
 
   // Staking configuration
-  DEFAULT_STAKING_PROGRAM_ID: "0x66A92CDa5B319DCCcAC6c1cECbb690CA3Fb59488", // Jinn v2 staking (agent 103, DeliveryActivityChecker)
+  DEFAULT_STAKING_PROGRAM_ID: "0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139", // Jinn Staking (Base)
   
   // Supported chain with working configuration
   DEFAULT_HOME_CHAIN: "base" as SupportedChain,
@@ -58,16 +58,16 @@ export const SERVICE_CONSTANTS = {
     arbitrum: "https://arb1.arbitrum.io/rpc",
   } as Record<SupportedChain, string>,
   
-  // jinn-node agent (registered on Ethereum mainnet, tx 0x4a3d8d35...)
-  DEFAULT_AGENT_ID: 103,
+  // Default agent ID for memeooorr on Base
+  DEFAULT_AGENT_ID: 43,
 
-  // Default agent release metadata for the service package
+  // Default agent release metadata for the service package (Pearl Agents.Fun)
   DEFAULT_AGENT_RELEASE: {
     is_aea: true,
     repository: {
-      owner: "Jinn-Network",
-      name: "jinn-node",
-      version: "v1.0.0",
+      owner: "valory-xyz",
+      name: "meme-ooorr",
+      version: "v2.0.2",
     },
   },
   
