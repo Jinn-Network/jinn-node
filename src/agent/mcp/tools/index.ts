@@ -95,4 +95,5 @@ export { updateDispatchSchedule, updateDispatchScheduleParams, updateDispatchSch
 
 // Content stream tools
 export { searchContentStreams, searchContentStreamsParams, searchContentStreamsSchema, type SearchContentStreamsParams } from './search-content-streams.js';
+export { readContentStream, readContentStreamParams, readContentStreamSchema, type ReadContentStreamParams } from './read-content-stream.js';
 
