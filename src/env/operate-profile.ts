@@ -99,17 +99,11 @@ function resolveOperateHome(): string | null {
     return standaloneCandidate;
   }
 
-  // Fall back to monorepo/submodule mode (<repoRoot>/olas-operate-middleware/.operate)
-  const submoduleCandidate = join(repoRoot, 'olas-operate-middleware', '.operate');
-  if (existsSync(submoduleCandidate)) {
-    return submoduleCandidate;
-  }
-
-  // Neither location exists
+  // .operate directory not found at repo root
   if (!hasAllServiceEnvVars()) {
     configLogger.warn(
-      { standaloneCandidate, submoduleCandidate },
-      '.operate directory not found in standalone or submodule location'
+      { standaloneCandidate },
+      '.operate directory not found at repo root'
     );
   }
   return null;
