@@ -97,4 +97,51 @@ fi
 
 echo "[init] Ensured ~/.gemini exists"
 
+# =============================================================================
+# Multi-Service Config Hydration
+# =============================================================================
+# Populate .operate/services/ from OPERATE_SERVICE_*_CONFIG env vars.
+# Each service needs two env vars (base64-encoded):
+#   OPERATE_SERVICE_<id>_CONFIG  → config.json
+#   OPERATE_SERVICE_<id>_KEYS    → keys.json
+# where <id> uses underscores (e.g., sc_b3aaf73c for sc-b3aaf73c-...).
+# The full directory name is resolved from config.json's service_config_id field.
+
+MIDDLEWARE_DIR="${MIDDLEWARE_PATH:-$(dirname "${OPERATE_PROFILE_DIR:-/home/jinn/.operate}")}"
+SERVICES_DIR="${MIDDLEWARE_DIR}/.operate/services"
+
+hydrated=0
+for var in $(env | grep '^OPERATE_SERVICE_.*_CONFIG=' | sed 's/=.*//'); do
+  prefix="${var%_CONFIG}"
+  config_b64="${!var}"
+  keys_var="${prefix}_KEYS"
+  keys_b64="${!keys_var}"
+
+  if [ -z "$config_b64" ]; then continue; fi
+
+  # Extract the full service_config_id from the JSON
+  sc_id=$(echo "$config_b64" | base64 -d | python3 -c "import sys,json; print(json.load(sys.stdin)['service_config_id'])" 2>/dev/null)
+  if [ -z "$sc_id" ]; then
+    echo "[init] WARN: Could not extract service_config_id from $var"
+    continue
+  fi
+
+  target_dir="${SERVICES_DIR}/${sc_id}"
+  mkdir -p "$target_dir"
+
+  echo "$config_b64" | base64 -d > "${target_dir}/config.json"
+  echo "[init] Wrote ${target_dir}/config.json"
+
+  if [ -n "$keys_b64" ]; then
+    echo "$keys_b64" | base64 -d > "${target_dir}/keys.json"
+    echo "[init] Wrote ${target_dir}/keys.json"
+  fi
+
+  hydrated=$((hydrated + 1))
+done
+
+if [ "$hydrated" -gt 0 ]; then
+  echo "[init] Hydrated $hydrated service config(s) into $SERVICES_DIR"
+fi
+
 echo "[init] Worker initialization complete"

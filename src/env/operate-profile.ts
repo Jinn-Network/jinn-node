@@ -602,8 +602,13 @@ export function getMasterWallet(): { eoa: string; safes: Record<string, string> 
  */
 export function getMiddlewarePath(): string | null {
   const operateDir = getOperateDir();
-  if (!operateDir) return null;
-  return dirname(operateDir);
+  if (operateDir) return dirname(operateDir);
+
+  // Fall back to explicit env vars (used in Docker where .operate isn't at repo root)
+  const envPath = process.env.OLAS_MIDDLEWARE_PATH || process.env.MIDDLEWARE_PATH;
+  if (envPath) return envPath;
+
+  return null;
 }
 
 /**
