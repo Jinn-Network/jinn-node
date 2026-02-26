@@ -8,7 +8,8 @@ import { agentLogger } from '../logging/index.js';
 import { getOptionalCodeMetadataRepoRoot, getSandboxMode } from '../config/index.js';
 import { getRepoRoot } from '../shared/repo_utils.js';
 import { computeToolPolicy, UNIVERSAL_TOOLS, hasBrowserAutomation, BROWSER_AUTOMATION_TOOLS, hasRailwayDeployment, RAILWAY_TOOLS, hasFirefliesMeetings, FIREFLIES_TOOLS, getEnabledExtensions, EXTENSION_META_TOOLS, getExtensionExcludedTools, type ToolPolicyResult } from './toolPolicy.js';
-import { startSigningProxy } from './signing-proxy.js';
+// Signing proxy is now managed at the worker level (mech_worker.ts)
+// Agent subprocess inherits AGENT_SIGNING_PROXY_URL/TOKEN from process.env
 
 dotenv.config({ path: join(process.cwd(), '.env') });
 
@@ -466,7 +467,7 @@ export class Agent {
       const extensionsDir = join(this.geminiHome, 'extensions');
       mkdirSync(extensionsDir, { recursive: true });
 
-// Handle local extensions — install directly to GEMINI_HOME (always writable)
+      // Handle local extensions — install directly to GEMINI_HOME (always writable)
       // Avoids ~/.gemini/ conflicts when host directory is mounted in Docker
       if (extensionUrl.startsWith('local:')) {
         const localDir = extensionUrl.replace('local:', '');
@@ -840,10 +841,9 @@ export class Agent {
   }
 
   private async runGeminiWithTelemetry(prompt: string): Promise<{ output: string; telemetryFile: string; stderr: string; exitCode: number }> {
-    // Start the signing proxy before spawning the agent subprocess.
-    // The proxy mediates all private key operations so the agent never has direct key access.
-    const signingProxy = await startSigningProxy();
-    agentLogger.info({ url: signingProxy.url }, 'Signing proxy started');
+    // Signing proxy is managed at the worker level (mech_worker.ts)
+    // AGENT_SIGNING_PROXY_URL and AGENT_SIGNING_PROXY_TOKEN flow from process.env
+    // through buildAllowlistedEnv() into the agent subprocess environment.
 
     return new Promise((resolvePromise) => {
       // Initialize CLI args
@@ -940,9 +940,8 @@ export class Agent {
       const envWithJob: NodeJS.ProcessEnv = buildAllowlistedEnv();
       assertNoForbiddenAgentEnv(envWithJob);
 
-      // Inject signing proxy configuration so agent-side code can delegate signing
-      envWithJob.AGENT_SIGNING_PROXY_URL = signingProxy.url;
-      envWithJob.AGENT_SIGNING_PROXY_TOKEN = signingProxy.secret;
+      // AGENT_SIGNING_PROXY_URL and AGENT_SIGNING_PROXY_TOKEN are inherited
+      // from process.env via AGENT_ENV_ALLOWLIST — no explicit injection needed
 
       // Configure telemetry via environment variables (CLI 0.11+ no longer accepts telemetry flags)
       envWithJob.GEMINI_TELEMETRY_ENABLED = 'true';
@@ -1236,10 +1235,7 @@ export class Agent {
       geminiProcess.on('close', (code) => {
         clearTimeout(processTimeout);
 
-        // Shut down signing proxy now that agent has exited
-        if (signingProxy) {
-          signingProxy.close().catch(() => {});
-        }
+        // Signing proxy cleanup is now handled at worker level (mech_worker.ts)
 
         // Inspect stderr for API/tool errors even if process exits 0
         let hasApiError = (stderr && (
@@ -1271,7 +1267,7 @@ export class Agent {
 
       geminiProcess.on('error', (err) => {
         clearTimeout(processTimeout);
-        signingProxy.close().catch(() => {});
+        // Signing proxy cleanup is handled at worker level (mech_worker.ts)
 
         // Surface as a synthetic non-zero exit with captured streams
         const exitCode = 1;

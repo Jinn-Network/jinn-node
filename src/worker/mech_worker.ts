@@ -52,7 +52,7 @@ import {
 } from './filters/credentialFilter.js';
 import { ServiceRotator } from './rotation/ServiceRotator.js';
 import { getActiveService, setActiveService } from './rotation/ActiveServiceContext.js';
-import { resetCachedAddress as resetSigningProxyAddress } from '../agent/signing-proxy.js';
+import { resetCachedAddress as resetSigningProxyAddress, startSigningProxy } from '../agent/signing-proxy.js';
 import { maybeCallCheckpoint } from './staking/checkpoint.js';
 import { checkEpochGate } from './staking/epochGate.js';
 import { maybeSubmitHeartbeat } from './staking/heartbeat.js';
@@ -351,12 +351,14 @@ function cleanupGlobalMaps(): void {
   }
 
   if (cleaned > 0) {
-    workerLogger.debug({ cleaned, sizes: {
-      executedJobs: executedJobsThisSession.size,
-      reposts: recentReposts.size,
-      redispatch: dependencyRedispatchAttempts.size,
-      cancel: dependencyCancelAttempts.size,
-    }}, 'Cleaned up stale global map entries');
+    workerLogger.debug({
+      cleaned, sizes: {
+        executedJobs: executedJobsThisSession.size,
+        reposts: recentReposts.size,
+        redispatch: dependencyRedispatchAttempts.size,
+        cancel: dependencyCancelAttempts.size,
+      }
+    }, 'Cleaned up stale global map entries');
   }
 }
 
@@ -1764,6 +1766,14 @@ const WORKER_REPOST_CHECK_CYCLES = parseInt(process.env.WORKER_REPOST_CHECK_CYCL
 async function main() {
   workerLogger.info('Mech worker starting');
 
+  // Start worker-level signing proxy — available for all dispatch paths
+  // (parent dispatch, loop/timeout recovery, dependency redispatch, repost, etc.)
+  // The proxy runs on 127.0.0.1 with a random port and bearer token.
+  let signingProxy = await startSigningProxy();
+  process.env.AGENT_SIGNING_PROXY_URL = signingProxy.url;
+  process.env.AGENT_SIGNING_PROXY_TOKEN = signingProxy.secret;
+  workerLogger.info({ url: signingProxy.url }, 'Worker-level signing proxy started');
+
   // Resolve on-chain service config from mech address
   // This derives serviceId, safe, marketplace, and staking contract from chain state
   const mechAddress = getMechAddress();
@@ -2025,6 +2035,14 @@ async function main() {
             resetControlApiSigner();
             resetSigningProxyAddress();
             resetCredentialInfoCache();
+
+            // Restart signing proxy with the new service's key
+            await signingProxy.close();
+            signingProxy = await startSigningProxy();
+            process.env.AGENT_SIGNING_PROXY_URL = signingProxy.url;
+            process.env.AGENT_SIGNING_PROXY_TOKEN = signingProxy.secret;
+            workerLogger.info({ url: signingProxy.url }, 'Signing proxy restarted for new service');
+
             workerLogger.info({
               activeService: decision.service.serviceConfigId,
               serviceId: decision.service.serviceId,
@@ -2050,6 +2068,11 @@ async function main() {
     }
     await new Promise(r => setTimeout(r, currentPollIntervalMs));
   }
+
+  // Clean up signing proxy on worker exit
+  await signingProxy.close().catch(() => { });
+  delete process.env.AGENT_SIGNING_PROXY_URL;
+  delete process.env.AGENT_SIGNING_PROXY_TOKEN;
 }
 
 main().catch((err) => {
