@@ -214,23 +214,36 @@ export async function maybeDistributeFunds(
     const signedTx = await safeSdk.signTransaction(safeTransaction);
     const executeTxResponse = await safeSdk.executeTransaction(signedTx);
 
+    const txHash = executeTxResponse.hash;
     const txResponse = executeTxResponse.transactionResponse;
-    if (!txResponse) {
-      throw new Error('Safe transaction response is missing');
-    }
 
-    const receipt = await (txResponse as ethers.ContractTransactionResponse).wait();
-
-    if (receipt?.status === 1) {
+    if (txResponse) {
+      // Wait for confirmation if transaction response is available
+      const receipt = await (txResponse as any).wait();
+      const status = receipt?.status;
+      // Safe SDK v6 may return status as string "success" or number 1
+      if (status === 1 || status === 'success') {
+        result.funded = affordableTransfers;
+        result.txHash = receipt?.hash ?? txHash;
+        log.info({
+          txHash: result.txHash,
+          fundedCount: affordableTransfers.length,
+          totalEth: ethers.formatEther(runningTotal),
+        }, 'Fund distribution complete');
+      } else {
+        throw new Error(`Safe transaction reverted (status: ${status})`);
+      }
+    } else if (txHash) {
+      // No transactionResponse but we have a hash — assume success
       result.funded = affordableTransfers;
-      result.txHash = receipt.hash;
+      result.txHash = txHash;
       log.info({
-        txHash: receipt.hash,
+        txHash,
         fundedCount: affordableTransfers.length,
         totalEth: ethers.formatEther(runningTotal),
-      }, 'Fund distribution complete');
+      }, 'Fund distribution submitted (hash only)');
     } else {
-      throw new Error('Safe transaction failed or was not mined');
+      throw new Error('Safe transaction response and hash both missing');
     }
   } catch (err) {
     result.error = (err as Error).message;
