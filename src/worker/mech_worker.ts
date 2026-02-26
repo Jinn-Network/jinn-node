@@ -58,6 +58,7 @@ import { checkEpochGate } from './staking/epochGate.js';
 import { maybeSubmitHeartbeat } from './staking/heartbeat.js';
 import { resolveServiceConfig, clearServiceConfigCache, type ResolvedServiceConfig } from './onchain/serviceResolver.js';
 import { checkAndRestakeServices } from './staking/restake.js';
+import { ensureOperatorRegistered } from './register-operator.js';
 
 export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
 
@@ -351,12 +352,14 @@ function cleanupGlobalMaps(): void {
   }
 
   if (cleaned > 0) {
-    workerLogger.debug({ cleaned, sizes: {
-      executedJobs: executedJobsThisSession.size,
-      reposts: recentReposts.size,
-      redispatch: dependencyRedispatchAttempts.size,
-      cancel: dependencyCancelAttempts.size,
-    }}, 'Cleaned up stale global map entries');
+    workerLogger.debug({
+      cleaned, sizes: {
+        executedJobs: executedJobsThisSession.size,
+        reposts: recentReposts.size,
+        redispatch: dependencyRedispatchAttempts.size,
+        cancel: dependencyCancelAttempts.size,
+      }
+    }, 'Cleaned up stale global map entries');
   }
 }
 
@@ -1812,6 +1815,9 @@ async function main() {
 
   // Verify Control API is running before processing any jobs
   await checkControlApiHealth();
+
+  // Auto-register with credential bridge (idempotent, non-blocking)
+  await ensureOperatorRegistered();
 
   // Initialize multi-service rotation if enabled
   let rotator: ServiceRotator | null = null;
