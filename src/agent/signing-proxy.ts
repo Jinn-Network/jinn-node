@@ -10,13 +10,16 @@
  * - POST /sign             — EIP-191 personal_sign
  * - POST /sign-raw         — EIP-191 sign raw bytes (0x-prefixed hex)
  * - POST /sign-typed-data  — EIP-712 typed data sign
- * - POST /dispatch         — Full marketplaceInteract() call
+ * - POST /dispatch         — Marketplace dispatch via Safe execTransaction
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { getServicePrivateKey, getMechAddress, getMechChainConfig } from '../env/operate-profile.js';
-import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
+import { getServicePrivateKey, getMechAddress, getServiceSafeAddress } from '../env/operate-profile.js';
+import { getRequiredRpcUrl } from './mcp/tools/shared/env.js';
+import { get_mech_config } from '@jinn-network/mech-client-ts/dist/config.js';
+import { getMechChainConfig } from '../env/operate-profile.js';
+import { dispatchViaSafe } from '../worker/safe-dispatch.js';
 
 const READ_BODY_TIMEOUT_MS = 5_000;
 
@@ -145,21 +148,36 @@ async function handleDispatch(req: IncomingMessage, res: ServerResponse): Promis
 
   const privateKey = loadPrivateKey();
   const mechAddress = body.priorityMech || getMechAddress();
-  const chainConfig = body.chainConfig || getMechChainConfig();
+  const safeAddress = getServiceSafeAddress();
+  const rpcUrl = getRequiredRpcUrl();
 
   if (!mechAddress) {
     json(res, 500, { error: 'Service mech address not configured', code: 'CONFIG_ERROR' });
     return;
   }
 
-  const result = await marketplaceInteract({
-    prompts,
+  if (!safeAddress) {
+    json(res, 500, { error: 'Service Safe address not configured. Check JINN_SERVICE_SAFE_ADDRESS or service config.', code: 'CONFIG_ERROR' });
+    return;
+  }
+
+  // Resolve marketplace address from chain config
+  const chainConfig = getMechChainConfig();
+  const mechConfig = get_mech_config(chainConfig);
+  const mechMarketplaceAddress = mechConfig.mech_marketplace_contract;
+
+  if (!mechMarketplaceAddress || mechMarketplaceAddress === '0x0000000000000000000000000000000000000000') {
+    json(res, 500, { error: 'Mech Marketplace contract address not configured for this chain', code: 'CONFIG_ERROR' });
+    return;
+  }
+
+  const result = await dispatchViaSafe({
+    serviceSafeAddress: safeAddress,
+    agentEoaPrivateKey: privateKey,
     priorityMech: mechAddress,
-    tools: tools || [],
+    mechMarketplaceAddress,
+    rpcUrl,
     ipfsJsonContents,
-    chainConfig,
-    keyConfig: { source: 'value', value: privateKey },
-    postOnly: postOnly !== false,
     responseTimeout: responseTimeout || 120,
   });
 

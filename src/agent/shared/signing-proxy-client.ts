@@ -21,10 +21,11 @@ function getConfig(): { url: string; secret: string } {
 }
 
 const PROXY_TIMEOUT_MS = 10_000;
+const PROXY_DISPATCH_TIMEOUT_MS = 60_000; // Safe dispatch involves ~6 sequential RPC calls + tx confirmation
 const PROXY_RETRIES = 2;
 const PROXY_RETRY_DELAY_MS = 500;
 
-async function proxyRequest<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function proxyRequest<T>(method: string, path: string, body?: unknown, timeoutMs = PROXY_TIMEOUT_MS): Promise<T> {
   const { url, secret } = getConfig();
   const headers: Record<string, string> = {
     'Authorization': `Bearer ${secret}`,
@@ -36,7 +37,7 @@ async function proxyRequest<T>(method: string, path: string, body?: unknown): Pr
       const init: RequestInit = {
         method,
         headers: { ...headers },
-        signal: AbortSignal.timeout(PROXY_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       };
 
       if (body !== undefined) {
@@ -124,10 +125,14 @@ export interface DispatchResult {
 
 /**
  * Dispatch a marketplace request via the signing proxy.
- * The proxy has the private key and calls marketplaceInteract() internally.
+ * The proxy dispatches through the Safe (execTransaction) to ensure
+ * mapRequestCounts[multisig] increments for staking.
+ *
+ * Uses a longer timeout (60s) since Safe dispatch involves multiple
+ * sequential RPC calls and transaction confirmation.
  */
 export async function proxyDispatch(params: DispatchParams): Promise<DispatchResult> {
-  return proxyRequest<DispatchResult>('POST', '/dispatch', params);
+  return proxyRequest<DispatchResult>('POST', '/dispatch', params, PROXY_DISPATCH_TIMEOUT_MS);
 }
 
 /**

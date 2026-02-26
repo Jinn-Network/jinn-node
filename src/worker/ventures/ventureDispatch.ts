@@ -12,9 +12,11 @@ import { getTemplate } from '../../scripts/templates/crud.js';
 import { buildIpfsPayload } from '../../agent/shared/ipfs-payload-builder.js';
 import { extractToolPolicyFromBlueprint } from '../../shared/template-tools.js';
 import { extractSchemaEnvVars } from '../../shared/job-env.js';
-import { getMechAddress, getServicePrivateKey, getMechChainConfig } from '../../env/operate-profile.js';
+import { getMechAddress, getServicePrivateKey, getServiceSafeAddress, getMechChainConfig } from '../../env/operate-profile.js';
 import { getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
 import { getRandomStakedMech } from '../filters/stakingFilter.js';
+import { get_mech_config } from '@jinn-network/mech-client-ts/dist/config.js';
+import { dispatchViaSafe } from '../safe-dispatch.js';
 import type { Venture } from '../../data/ventures.js';
 import type { ScheduleEntry } from '../../data/types/scheduleEntry.js';
 
@@ -75,8 +77,8 @@ export async function dispatchFromTemplate(
   const ventureBlueprint = venture.blueprint as any;
   const ventureInvariants = Array.isArray(ventureBlueprint?.invariants)
     ? ventureBlueprint.invariants.filter((inv: any) =>
-        inv.type === 'FLOOR' || inv.type === 'CEILING' || inv.type === 'RANGE'
-      )
+      inv.type === 'FLOOR' || inv.type === 'CEILING' || inv.type === 'RANGE'
+    )
     : [];
 
   // 5. Build venture context for the agent
@@ -142,13 +144,12 @@ export async function dispatchFromTemplate(
     }
   }
 
-  // 10. Post to marketplace directly with worker credentials
-  const { marketplaceInteract } = await import('@jinn-network/mech-client-ts/dist/marketplace_interact.js');
-
+  // 10. Post to marketplace via Safe (ensures mapRequestCounts[multisig] increments for staking)
   const mechAddress = getMechAddress();
   const privateKey = getServicePrivateKey();
-  const chainConfig = getMechChainConfig();
+  const safeAddress = getServiceSafeAddress();
   const rpcHttpUrl = getRequiredRpcUrl();
+  const chainConfig = getMechChainConfig();
 
   if (!mechAddress) {
     throw new Error('Service target mech address not configured. Check .operate service config (MECH_TO_CONFIG).');
@@ -158,22 +159,32 @@ export async function dispatchFromTemplate(
     throw new Error('Service agent private key not found. Check .operate/keys directory.');
   }
 
+  if (!safeAddress) {
+    throw new Error('Service Safe address not configured. Check JINN_SERVICE_SAFE_ADDRESS or service config.');
+  }
+
   const priorityMech = await getRandomStakedMech(mechAddress);
 
-  const result = await (marketplaceInteract as any)({
-    prompts: [blueprintStr],
+  // Resolve marketplace address from chain config
+  const mechConfig = get_mech_config(chainConfig);
+  const mechMarketplaceAddress = mechConfig.mech_marketplace_contract;
+
+  if (!mechMarketplaceAddress || mechMarketplaceAddress === '0x0000000000000000000000000000000000000000') {
+    throw new Error('Mech Marketplace contract address not configured for this chain.');
+  }
+
+  const result = await dispatchViaSafe({
+    serviceSafeAddress: safeAddress,
+    agentEoaPrivateKey: privateKey,
     priorityMech,
-    tools: enabledTools,
+    mechMarketplaceAddress,
+    rpcUrl: rpcHttpUrl,
     ipfsJsonContents,
-    chainConfig,
-    keyConfig: { source: 'value', value: privateKey },
-    postOnly: true,
     responseTimeout: 300,
-    rpcHttpUrl,
   });
 
   // 11. Normalize request IDs
-  const rawIds = result?.request_ids ?? result?.requestIds ?? [];
+  const rawIds = result?.request_ids ?? [];
   const requestIds: string[] = Array.isArray(rawIds) ? rawIds.map(String) : [];
 
   workerLogger.info(
