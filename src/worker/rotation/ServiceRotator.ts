@@ -206,6 +206,13 @@ export class ServiceRotator {
   }
 
   /**
+   * Get all loaded services (for fund distribution and diagnostics)
+   */
+  getAllServices(): ServiceInfo[] {
+    return [...this.services];
+  }
+
+  /**
    * Get all mech addresses across all services (for multi-service mech filtering)
    */
   getAllMechAddresses(): string[] {
