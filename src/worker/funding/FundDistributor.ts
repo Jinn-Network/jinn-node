@@ -30,6 +30,9 @@ const TOPUP_THRESHOLD_FRACTION = 0.5;
 /** Minimum ETH to keep in Master Safe (don't drain it completely) */
 const DEFAULT_RESERVE_WEI = ethers.parseEther('0.002');
 
+/** Minimum fund target per address — overrides low config.json values */
+const MIN_FUND_TARGET_WEI = ethers.parseEther('0.002');
+
 /** Zero address represents native ETH in fund_requirements */
 const ETH_ADDRESS = '0x0000000000000000000000000000000000000000';
 
@@ -133,8 +136,8 @@ export async function maybeDistributeFunds(
 
     result.checked++;
 
-    // Check service Safe balance against threshold
-    const safeTarget = BigInt(reqs.safe);
+    // Check service Safe balance against threshold (enforce minimum target)
+    const safeTarget = BigInt(reqs.safe) < MIN_FUND_TARGET_WEI ? MIN_FUND_TARGET_WEI : BigInt(reqs.safe);
     const safeThreshold = safeTarget / 2n;
     const safeBalance = await provider.getBalance(svc.serviceSafeAddress);
 
@@ -147,8 +150,8 @@ export async function maybeDistributeFunds(
       });
     }
 
-    // Check agent EOA balance against threshold
-    const agentTarget = BigInt(reqs.agent);
+    // Check agent EOA balance against threshold (enforce minimum target)
+    const agentTarget = BigInt(reqs.agent) < MIN_FUND_TARGET_WEI ? MIN_FUND_TARGET_WEI : BigInt(reqs.agent);
     const agentThreshold = agentTarget / 2n;
     const agentBalance = await provider.getBalance(svc.agentEoaAddress);
 
