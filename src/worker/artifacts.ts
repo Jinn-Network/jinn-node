@@ -1,10 +1,12 @@
 export type ExtractedArtifact = {
   cid: string;
+  contentCid?: string;
   name?: string;
   topic: string;
   contentPreview?: string;
   content?: string;
   type?: string;
+  documentType?: string;
   tags?: string[];
 };
 
@@ -66,6 +68,8 @@ export function extractArtifactsFromOutput(output: string): ExtractedArtifact[] 
       if (typeof maybe.name === 'string') item.name = maybe.name;
       if (typeof maybe.contentPreview === 'string') item.contentPreview = maybe.contentPreview;
       if (typeof maybe.type === 'string') item.type = maybe.type;
+      if (typeof maybe.contentCid === 'string') item.contentCid = maybe.contentCid;
+      if (typeof maybe.documentType === 'string') item.documentType = maybe.documentType;
       if (Array.isArray(maybe.tags)) item.tags = maybe.tags.map((t: any) => String(t));
       artifacts.push(item);
     }
@@ -92,6 +96,8 @@ export function extractArtifactsFromTelemetry(telemetry: any): ExtractedArtifact
           if (result.name) artifact.name = String(result.name);
           if (result.contentPreview) artifact.contentPreview = String(result.contentPreview);
           if (result.type) artifact.type = String(result.type);
+          if (result.contentCid) artifact.contentCid = String(result.contentCid);
+          if (result.documentType) artifact.documentType = String(result.documentType);
           if (Array.isArray(result.tags)) artifact.tags = result.tags.map((t: any) => String(t));
 
           artifacts.push(artifact);
@@ -170,6 +176,8 @@ function extractArtifactsFromNestedStructure(text: string): ExtractedArtifact[] 
                   if (typeof maybe.name === 'string') item.name = maybe.name;
                   if (typeof maybe.contentPreview === 'string') item.contentPreview = maybe.contentPreview;
                   if (typeof maybe.type === 'string') item.type = maybe.type;
+                  if (typeof maybe.contentCid === 'string') item.contentCid = maybe.contentCid;
+                  if (typeof maybe.documentType === 'string') item.documentType = maybe.documentType;
                   if (Array.isArray(maybe.tags)) item.tags = maybe.tags.map((t: any) => String(t));
                   artifacts.push(item);
                 }
