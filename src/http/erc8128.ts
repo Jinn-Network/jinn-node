@@ -43,7 +43,7 @@ export function getControlApiSigner(): EthHttpSigner {
   const account = privateKeyToAccount(key);
 
   _signer = {
-    address: account.address,
+    address: account.address as `0x${string}`,
     chainId: 8453, // Base
     signMessage: (msg: Uint8Array) =>
       account.signMessage({ message: { raw: msg } }),
@@ -185,7 +185,7 @@ export function resolveChainId(chainConfig?: string | null, fallback = 8453): nu
 export function createPrivateKeyHttpSigner(privateKey: Hex, chainId: number): EthHttpSigner {
   const account = privateKeyToAccount(privateKey);
   return {
-    address: account.address,
+    address: account.address as `0x${string}`,
     chainId,
     signMessage: (msg: Uint8Array) =>
       account.signMessage({ message: { raw: msg } }),
