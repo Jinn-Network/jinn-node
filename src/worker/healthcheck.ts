@@ -41,8 +41,17 @@ interface WorkerHealthInfo {
   totalIdleTimeMs: number;
 }
 
+export interface FleetStateInfo {
+  currentServiceConfigId: string | null;
+  totalServices: number;
+  stakedServices: number;
+  rotationCount: number;
+  lastPollAt: number | null;
+}
+
 // Global state for health tracking
 let healthInfo: WorkerHealthInfo | null = null;
+let fleetState: FleetStateInfo | null = null;
 
 export function initHealthInfo(workerId: string): void {
   healthInfo = {
@@ -88,6 +97,13 @@ export function recordExecutionTime(executionTimeMs: number): void {
     healthInfo.totalExecutionTimeMs += executionTimeMs;
     healthInfo.lastActivityAt = new Date();
   }
+}
+
+/**
+ * Update fleet state from ServiceRotator.getState() for /health endpoint.
+ */
+export function updateFleetState(state: FleetStateInfo): void {
+  fleetState = state;
 }
 
 export function startHealthcheckServer(): void {
@@ -148,6 +164,8 @@ export function startHealthcheckServer(): void {
             ? Math.round((totalIdleMs / uptimeMs) * 100)
             : 0,
         },
+        // Fleet state from ServiceRotator (if multi-service mode)
+        fleet: fleetState || undefined,
         // V8 memory usage for right-sizing VPS/container limits
         memory: (() => {
           const m = process.memoryUsage();

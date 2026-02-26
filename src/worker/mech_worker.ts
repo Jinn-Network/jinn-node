@@ -37,7 +37,8 @@ import {
   getRequiredRpcUrl as getConfigRpcUrl,
   type WorkerMechFilterMode,
 } from '../config/index.js';
-import { recordIdleCycle, recordExecutionTime } from './healthcheck.js';
+import { recordIdleCycle, recordExecutionTime, updateFleetState } from './healthcheck.js';
+import { maybeDistributeFunds } from './funding/FundDistributor.js';
 import { getMechAddressesForStakingContract } from './filters/stakingFilter.js';
 import {
   getWorkerCredentialInfo,
@@ -326,6 +327,10 @@ const WORKER_HEARTBEAT_CYCLES = parseInt(process.env.WORKER_HEARTBEAT_CYCLES || 
 // Venture watcher: check dispatch schedules every N cycles (~ every 2-3 min at default polling)
 const ENABLE_VENTURE_WATCHER = process.env.ENABLE_VENTURE_WATCHER === '1';
 const WORKER_VENTURE_WATCHER_CYCLES = parseInt(process.env.WORKER_VENTURE_WATCHER_CYCLES || '3');
+
+// Fund distribution: check service Safe/agent EOA balances and top up from Master Safe.
+// At 30s base poll, 120 cycles = ~60 min. Only active when WORKER_MULTI_SERVICE=true.
+const WORKER_FUND_CHECK_CYCLES = parseInt(process.env.WORKER_FUND_CHECK_CYCLES || '120');
 
 // Periodic cleanup of global maps to prevent unbounded growth over weeks of uptime
 const MAP_CLEANUP_INTERVAL_CYCLES = 50;
@@ -1877,6 +1882,7 @@ async function main() {
   let cyclesSinceLastCheckpoint = 0;
   let cyclesSinceLastHeartbeat = 0;
   let cyclesSinceLastVentureCheck = 0;
+  let cyclesSinceLastFundCheck = 0;
 
   for (; ;) {
     const cycleStart = Date.now();
@@ -1979,6 +1985,19 @@ async function main() {
         }
       }
 
+      // Fund distribution: top up service Safes/agents from Master Safe
+      if (rotator) {
+        cyclesSinceLastFundCheck++;
+        if (cyclesSinceLastFundCheck >= WORKER_FUND_CHECK_CYCLES) {
+          cyclesSinceLastFundCheck = 0;
+          try {
+            await maybeDistributeFunds(rotator.getAllServices(), rpcUrl);
+          } catch (e: any) {
+            workerLogger.warn({ error: serializeError(e) }, 'Fund distribution failed (non-fatal)');
+          }
+        }
+      }
+
       // Deferred restake: retry once cooldown has elapsed
       if (pendingRestakeAt && Math.floor(Date.now() / 1000) >= pendingRestakeAt) {
         pendingRestakeAt = null; // Only attempt once
@@ -2050,6 +2069,8 @@ async function main() {
               rotationState: rotator.getState(),
             }, 'Rotated to new service');
           }
+          // Update healthcheck fleet state
+          updateFleetState(rotator.getState());
         } catch (rotErr: any) {
           workerLogger.warn({ error: rotErr?.message || String(rotErr) }, 'Service rotation check failed');
         }

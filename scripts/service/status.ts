@@ -2,10 +2,10 @@
 /**
  * Service Status Dashboard - Comprehensive view of all OLAS services
  *
- * Usage: yarn service:status [--service <configId>]
+ * Usage: yarn service:status [--service <configId>] [--json]
  *
- * Shows epoch progress, activity requirements, staking health, and balances
- * for all services managed by this node.
+ * Shows epoch progress, activity requirements, staking health, balances,
+ * and alerts for all services managed by this node.
  *
  * Requires: RPC_URL environment variable
  */
@@ -22,15 +22,22 @@ import { fileURLToPath } from 'url';
 const OLAS_TOKEN_BASE = '0x54330d28ca3357F294334BDC454a032e7f353416';
 const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
 
-function parseArgs(): { serviceFilter?: string } {
+// Alert thresholds
+const LOW_SAFE_ETH = ethers.parseEther('0.002');
+const LOW_AGENT_ETH = ethers.parseEther('0.001');
+
+function parseArgs(): { serviceFilter?: string; json: boolean } {
   const args = process.argv.slice(2);
   let serviceFilter: string | undefined;
+  let json = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--service' && args[i + 1]) {
       serviceFilter = args[++i];
+    } else if (args[i] === '--json') {
+      json = true;
     }
   }
-  return { serviceFilter };
+  return { serviceFilter, json };
 }
 
 async function resolveMiddlewarePath(): Promise<string> {
@@ -44,17 +51,18 @@ async function resolveMiddlewarePath(): Promise<string> {
 async function getBalances(
   provider: ethers.JsonRpcProvider,
   address: string
-): Promise<{ eth: string; olas: string }> {
+): Promise<{ eth: string; ethRaw: bigint; olas: string }> {
   try {
     const ethBalance = await provider.getBalance(address);
     const olasContract = new ethers.Contract(OLAS_TOKEN_BASE, ERC20_ABI, provider);
     const olasBalance = await olasContract.balanceOf(address);
     return {
       eth: parseFloat(ethers.formatEther(ethBalance)).toFixed(6),
+      ethRaw: ethBalance,
       olas: parseFloat(ethers.formatEther(olasBalance)).toFixed(2),
     };
   } catch {
-    return { eth: '?', olas: '?' };
+    return { eth: '?', ethRaw: 0n, olas: '?' };
   }
 }
 
@@ -76,19 +84,10 @@ function renderProgressBar(pct: number, width: number = 20): string {
   return '\u2588'.repeat(filled) + '\u2591'.repeat(empty);
 }
 
-function stakingStateLabel(state: number): string {
-  switch (state) {
-    case 0: return 'NOT STAKED';
-    case 1: return 'STAKED';
-    case 2: return 'EVICTED';
-    default: return `UNKNOWN (${state})`;
-  }
-}
-
 async function main() {
-  const { serviceFilter } = parseArgs();
+  const { serviceFilter, json } = parseArgs();
 
-  printHeader('JINN Node Service Dashboard');
+  if (!json) printHeader('JINN Node Service Dashboard');
 
   const rpcUrl = process.env.RPC_URL;
   if (!rpcUrl) {
@@ -101,21 +100,21 @@ async function main() {
   const allServices = await listServiceConfigs(middlewarePath);
 
   if (allServices.length === 0) {
-    console.log('  No services found. Run initial setup first.\n');
+    if (json) { console.log(JSON.stringify({ error: 'No services found' })); }
+    else { console.log('  No services found. Run initial setup first.\n'); }
     process.exit(0);
   }
 
-  // Filter services
   const services = serviceFilter
     ? allServices.filter(s => s.serviceConfigId === serviceFilter)
     : allServices;
 
   if (services.length === 0) {
-    console.log(`  Service "${serviceFilter}" not found.\n`);
+    if (json) { console.log(JSON.stringify({ error: `Service "${serviceFilter}" not found` })); }
+    else { console.log(`  Service "${serviceFilter}" not found.\n`); }
     process.exit(1);
   }
 
-  // Get staked services for on-chain queries
   const stakedServices = services.filter(
     s => s.stakingContractAddress && s.serviceId && s.serviceSafeAddress
   );
@@ -134,26 +133,140 @@ async function main() {
     try {
       dashboardStatuses = await monitor.getAllDashboardData(inputs);
     } catch (error) {
-      console.log(`  Warning: Could not fetch on-chain data: ${error instanceof Error ? error.message : String(error)}\n`);
+      if (!json) {
+        console.log(`  Warning: Could not fetch on-chain data: ${error instanceof Error ? error.message : String(error)}\n`);
+      }
     }
   }
 
   const now = Math.floor(Date.now() / 1000);
+  const alerts: string[] = [];
+
+  // Collect per-service balances and alerts
+  interface ServiceData {
+    svc: ServiceInfo;
+    dashboard?: ServiceDashboardStatus;
+    safeEth: string;
+    safeEthRaw: bigint;
+    safeOlas: string;
+    agentEth: string;
+    agentEthRaw: bigint;
+  }
+
+  const serviceDataList: ServiceData[] = [];
+  for (const svc of services) {
+    const dashboard = dashboardStatuses.find(d => d.serviceConfigId === svc.serviceConfigId);
+    let safeEth = '?'; let safeEthRaw = 0n; let safeOlas = '?';
+    let agentEth = '?'; let agentEthRaw = 0n;
+
+    if (svc.serviceSafeAddress) {
+      const b = await getBalances(provider, svc.serviceSafeAddress);
+      safeEth = b.eth; safeEthRaw = b.ethRaw; safeOlas = b.olas;
+    }
+    if ((svc as any).agentEoaAddress) {
+      const b = await getBalances(provider, (svc as any).agentEoaAddress);
+      agentEth = b.eth; agentEthRaw = b.ethRaw;
+    }
+
+    // Alert collection
+    if (dashboard && !dashboard.error) {
+      if (dashboard.stakingState === 2) {
+        alerts.push(`#${svc.serviceId}: EVICTED from staking`);
+      } else if (dashboard.inactivityCount > 0) {
+        const threshold = dashboard.maxInactivityPeriods || 3;
+        if (dashboard.inactivityCount >= threshold - 1) {
+          alerts.push(`#${svc.serviceId}: ${dashboard.inactivityCount}/${threshold} inactive epochs (EVICTION IMMINENT)`);
+        } else {
+          alerts.push(`#${svc.serviceId}: ${dashboard.inactivityCount}/${threshold} inactive epochs`);
+        }
+      }
+    }
+    if (safeEthRaw > 0n && safeEthRaw < LOW_SAFE_ETH) {
+      alerts.push(`#${svc.serviceId}: Safe ETH < ${ethers.formatEther(LOW_SAFE_ETH)} (fund soon)`);
+    }
+    if (agentEthRaw > 0n && agentEthRaw < LOW_AGENT_ETH && (svc as any).agentEoaAddress) {
+      alerts.push(`#${svc.serviceId}: Agent ETH < ${ethers.formatEther(LOW_AGENT_ETH)} (fund soon)`);
+    }
+
+    serviceDataList.push({ svc, dashboard, safeEth, safeEthRaw, safeOlas, agentEth, agentEthRaw });
+  }
+
+  // ── JSON output ──
+  if (json) {
+    const first = dashboardStatuses[0];
+    const ONE_YEAR = 365 * 24 * 60 * 60;
+    let apyPct = 0;
+    if (first?.rewardsPerSecond > 0n && first?.minStakingDeposit > 0n) {
+      const rewardsPerYear = first.rewardsPerSecond * BigInt(ONE_YEAR);
+      const apyBps = (rewardsPerYear * 10000n) / first.minStakingDeposit;
+      apyPct = Number(apyBps) / 100;
+    }
+
+    const jsonRows = serviceDataList.map(({ svc, dashboard, safeEth, agentEth }) => ({
+      serviceId: svc.serviceId,
+      configId: svc.serviceConfigId,
+      deliveries: dashboard ? `${dashboard.eligibleRequests}/${dashboard.requiredRequests}` : 'N/A',
+      status: !dashboard || dashboard.error
+        ? 'ERROR'
+        : dashboard.stakingState === 2
+          ? 'EVICTED'
+          : dashboard.isEligibleForRewards
+            ? 'ELIGIBLE'
+            : `NEEDS ${dashboard.requestsNeeded}`,
+      safeEth,
+      agentEth,
+      rewards: dashboard ? parseFloat(ethers.formatEther(dashboard.accruedRewards)).toFixed(4) : '0',
+      inactivityCount: dashboard?.inactivityCount ?? 0,
+      maxInactivityPeriods: dashboard?.maxInactivityPeriods ?? 0,
+    }));
+
+    const eligible = jsonRows.filter(r => r.status === 'ELIGIBLE').length;
+    const evicted = jsonRows.filter(r => r.status === 'EVICTED').length;
+    const totalDeliveries = jsonRows.reduce((sum, r) => sum + (parseInt(r.deliveries.split('/')[0], 10) || 0), 0);
+    const totalRequired = jsonRows.reduce((sum, r) => sum + (parseInt(r.deliveries.split('/')[1], 10) || 0), 0);
+
+    const output = {
+      timestamp: new Date().toISOString(),
+      epoch: first ? {
+        number: first.currentEpoch,
+        progressPct: first.epochProgressPct,
+        remainingSeconds: Math.max(0, first.epochEndTimestamp - now),
+      } : null,
+      staking: first ? {
+        contract: first.stakingContract,
+        slotsUsed: first.currentStakedCount,
+        slotsTotal: first.maxNumServices,
+        apyPct,
+        depositOlas: parseFloat(ethers.formatEther(first.minStakingDeposit)),
+      } : null,
+      summary: {
+        total: jsonRows.length,
+        eligible,
+        needsWork: jsonRows.length - eligible - evicted,
+        evicted,
+        totalDeliveries,
+        totalRequired,
+      },
+      services: jsonRows,
+      alerts,
+    };
+    console.log(JSON.stringify(output, null, 2));
+    return;
+  }
+
+  // ── Terminal output ──
 
   // --- Epoch Info ---
   if (dashboardStatuses.length > 0) {
     const first = dashboardStatuses[0];
     const remainingSec = Math.max(0, first.epochEndTimestamp - now);
-
     console.log(`  Epoch #${first.currentEpoch}  ${renderProgressBar(first.epochProgressPct)} ${first.epochProgressPct}%  (${formatTimeRemaining(remainingSec)} remaining)\n`);
   }
 
   // --- Per-Service Status ---
   console.log('  \u2500\u2500 Services \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n');
 
-  for (const svc of services) {
-    const dashboard = dashboardStatuses.find(d => d.serviceConfigId === svc.serviceConfigId);
-
+  for (const { svc, dashboard, safeEth, safeOlas, agentEth } of serviceDataList) {
     if (dashboard && !dashboard.error) {
       const icon = dashboard.isEligibleForRewards ? '+' : '-';
       const statusLabel = dashboard.isEligibleForRewards
@@ -170,25 +283,23 @@ async function main() {
       console.log(`  [${icon}] ${svc.serviceConfigId}  Service #${svc.serviceId}  ${statusLabel}`);
       console.log(`      Requests: ${requestsDisplay}  |  Rewards: ${rewardsOlas} OLAS`);
 
-      // Inactivity warning
       if (dashboard.inactivityCount > 0) {
         const threshold = dashboard.maxInactivityPeriods || 3;
         const severity = dashboard.inactivityCount >= threshold - 1 ? 'CRITICAL' : 'WARNING';
         console.log(`      ${severity}: ${dashboard.inactivityCount}/${threshold} inactive epochs (eviction at ${threshold})`);
       }
 
-      // Balances
       if (svc.serviceSafeAddress) {
-        const balances = await getBalances(provider, svc.serviceSafeAddress);
-        console.log(`      Safe: ${formatAddress(svc.serviceSafeAddress)}  |  ETH: ${balances.eth}  |  OLAS: ${balances.olas}`);
+        console.log(`      Safe:  ${formatAddress(svc.serviceSafeAddress)}  ETH: ${safeEth}  OLAS: ${safeOlas}`);
+      }
+      if ((svc as any).agentEoaAddress) {
+        console.log(`      Agent: ${formatAddress((svc as any).agentEoaAddress)}  ETH: ${agentEth}`);
       }
     } else {
-      // Non-staked or errored service
       const errorMsg = dashboard?.error ? ` (${dashboard.error})` : '';
       console.log(`  [?] ${svc.serviceConfigId}  Service #${svc.serviceId ?? 'N/A'}  ${svc.stakingContractAddress ? 'ERROR' + errorMsg : 'NOT STAKED'}`);
       if (svc.serviceSafeAddress) {
-        const balances = await getBalances(provider, svc.serviceSafeAddress);
-        console.log(`      Safe: ${formatAddress(svc.serviceSafeAddress)}  |  ETH: ${balances.eth}  |  OLAS: ${balances.olas}`);
+        console.log(`      Safe:  ${formatAddress(svc.serviceSafeAddress)}  ETH: ${safeEth}  OLAS: ${safeOlas}`);
       }
     }
     console.log('');
@@ -196,7 +307,6 @@ async function main() {
 
   // --- Staking Health ---
   if (dashboardStatuses.length > 0) {
-    // Group by staking contract
     const contractGroups = new Map<string, ServiceDashboardStatus[]>();
     for (const d of dashboardStatuses) {
       const key = d.stakingContract.toLowerCase();
@@ -211,7 +321,6 @@ async function main() {
       const first = statuses[0];
       const depositOlas = parseFloat(ethers.formatEther(first.minStakingDeposit)).toFixed(0);
 
-      // APY calculation (Pearl formula)
       const ONE_YEAR = 365 * 24 * 60 * 60;
       let apyStr = 'N/A';
       if (first.rewardsPerSecond > 0n && first.minStakingDeposit > 0n) {
@@ -232,7 +341,6 @@ async function main() {
   // --- Wallet Balances ---
   console.log('  \u2500\u2500 Wallet Balances \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n');
 
-  // Try to get Master EOA + Safe from middleware
   const password = process.env.OPERATE_PASSWORD;
   if (password) {
     try {
@@ -260,6 +368,14 @@ async function main() {
     }
   } else {
     console.log('  (Set OPERATE_PASSWORD to see wallet balances)');
+  }
+
+  // --- Alerts ---
+  if (alerts.length > 0) {
+    console.log('\n  \u2500\u2500 Alerts \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n');
+    for (const alert of alerts) {
+      console.log(`  ! ${alert}`);
+    }
   }
 
   console.log('');

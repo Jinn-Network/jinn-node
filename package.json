@@ -80,6 +80,7 @@
     "service:add": "sh -c 'tsx scripts/service/add.ts \"$@\"' --",
     "service:list": "tsx scripts/service/list.ts",
     "service:status": "sh -c 'tsx scripts/service/status.ts \"$@\"' --",
+    "service:fleet": "sh -c 'tsx scripts/service/status.ts --json \"$@\"' --",
     "rewards:summary": "tsx scripts/service/rewards.ts",
     "staking:claim-incentives": "sh -c 'tsx scripts/staking/claim-incentives.ts \"$@\"' --",
     "staking:claim-rewards": "sh -c 'tsx scripts/staking/claim-service-rewards.ts \"$@\"' --",
