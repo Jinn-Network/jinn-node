@@ -24,7 +24,7 @@
 
 import { OlasOperateWrapper } from './OlasOperateWrapper.js';
 import { logger } from '../logging/index.js';
-import { writeFileSync, readFileSync, readdirSync, existsSync, statSync } from 'fs';
+import { writeFileSync, appendFileSync, readFileSync, readdirSync, existsSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { createDefaultServiceConfig, SERVICE_CONSTANTS } from './config/ServiceConfig.js';
@@ -81,7 +81,32 @@ export interface SimplifiedBootstrapConfig {
    * Defaults to true unless JINN_REUSE_SERVICE_CONFIG is set to false.
    */
   reuseExistingService?: boolean;
+  /**
+   * Path to write machine-readable JSON-lines events.
+   * Each line is a JSON object with an `event` field.
+   * Used by orchestrators to react to setup progress without parsing human output.
+   */
+  eventsPath?: string;
 }
+
+/**
+ * Structured event emitted during setup for machine consumption.
+ * Written as JSON-lines to the eventsPath file.
+ */
+export type SetupEvent =
+  | { event: 'account_ready'; timestamp: string }
+  | { event: 'wallet_ready'; address: string; isNew: boolean; timestamp: string }
+  | { event: 'service_ready'; serviceConfigId: string; reused: boolean; timestamp: string }
+  | { event: 'funding_required'; requirements: Array<{ purpose: string; address: string; amount: string; token: string }>; timestamp: string }
+  | { event: 'funding_detected'; timestamp: string }
+  | { event: 'safe_created'; address: string; timestamp: string }
+  | { event: 'service_deployed'; serviceConfigId: string; safe: string; timestamp: string }
+  | { event: 'complete'; success: true; serviceConfigId: string; safe: string; timestamp: string }
+  | { event: 'error'; error: string; timestamp: string };
+
+/** Distributive Omit that works across union members */
+type DistributiveOmit<T, K extends keyof any> = T extends any ? Omit<T, K> : never;
+type SetupEventInput = DistributiveOmit<SetupEvent, 'timestamp'>;
 
 export interface SimplifiedBootstrapResult {
   success: boolean;
@@ -131,6 +156,16 @@ export class SimplifiedServiceBootstrap {
       this.outputBuffer = this.outputBuffer.slice(-50000);
     }
     process.stdout.write(text);
+  }
+
+  /**
+   * Emit a structured event to the events file (if configured).
+   * Events are written as JSON-lines — one JSON object per line.
+   */
+  private emitEvent(event: SetupEventInput): void {
+    if (!this.config.eventsPath) return;
+    const line = JSON.stringify({ ...event, timestamp: new Date().toISOString() });
+    appendFileSync(this.config.eventsPath, line + '\n');
   }
 
   private findReusableServiceConfig(): { serviceConfigId: string } | null {
@@ -242,10 +277,12 @@ export class SimplifiedServiceBootstrap {
       return await this.runHttpFlow(serviceConfig, configPath);
       
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
       bootstrapLogger.error({ error }, "Bootstrap failed");
+      this.emitEvent({ event: 'error', error: msg });
       return {
         success: false,
-        error: error instanceof Error ? error.message : String(error)
+        error: msg
       };
     }
   }
@@ -428,9 +465,11 @@ ${'='.repeat(80)}
         throw new Error(`Account setup failed: ${accountResult.error}`);
       }
     }
+    this.emitEvent({ event: 'account_ready' });
 
     let walletAddress: string | undefined;
     let mnemonic: string[] | undefined;
+    let isNewWallet = false;
     const walletInfo = await this.operateWrapper.getWalletInfo();
     if (walletInfo.success && walletInfo.wallets?.length) {
       walletAddress = walletInfo.wallets[0].address;
@@ -441,17 +480,24 @@ ${'='.repeat(80)}
       }
       walletAddress = walletResult.wallet?.address;
       mnemonic = walletResult.wallet?.mnemonic;
+      isNewWallet = true;
     }
 
     if (mnemonic?.length) {
       this.writeOutput(`Please save the mnemonic phrase for the Master EOA: ${mnemonic.join(' ')}\n`);
     }
 
+    if (walletAddress) {
+      this.emitEvent({ event: 'wallet_ready', address: walletAddress, isNew: isNewWallet });
+    }
+
     let serviceConfigId: string | undefined;
+    let reusedService = false;
     if (this.reuseExistingService) {
       const existing = this.findReusableServiceConfig();
       if (existing?.serviceConfigId) {
         serviceConfigId = existing.serviceConfigId;
+        reusedService = true;
         bootstrapLogger.info({ serviceConfigId }, 'Reusing existing service config');
       }
     }
@@ -468,13 +514,15 @@ ${'='.repeat(80)}
       }
     }
 
+    this.emitEvent({ event: 'service_ready', serviceConfigId, reused: reusedService });
+
     const fundingResult = await this.operateWrapper.getFundingRequirements(serviceConfigId);
     if (!fundingResult.success) {
       throw new Error(`Failed to fetch funding requirements: ${fundingResult.error}`);
     }
 
     const initialFundingRequirements = fundingResult.requirements || {};
-    this.printFundingRequests({
+    const initialReqs = this.printFundingRequests({
       chain: this.config.chain,
       fundingRequirements: initialFundingRequirements,
       masterEoa: walletAddress,
@@ -490,7 +538,11 @@ ${'='.repeat(80)}
       );
 
     if (needsEoaFunding) {
+      if (initialReqs.length > 0) {
+        this.emitEvent({ event: 'funding_required', requirements: initialReqs });
+      }
       if (!this.isAttended) {
+        this.emitEvent({ event: 'error', error: 'Funding required (unattended mode — exiting)' });
         return {
           success: false,
           serviceConfigId,
@@ -502,6 +554,7 @@ ${'='.repeat(80)}
       }
       this.writeOutput('\n⏳ Waiting for Master EOA funding to be detected...\n');
       await this.waitForEoaFunding(serviceConfigId, this.config.chain, walletAddress);
+      this.emitEvent({ event: 'funding_detected' });
     }
 
     let masterSafe = await this.operateWrapper.getExistingSafeForChain(this.config.chain);
@@ -513,13 +566,17 @@ ${'='.repeat(80)}
       masterSafe = safeResult.safeAddress;
     }
 
+    if (masterSafe) {
+      this.emitEvent({ event: 'safe_created', address: masterSafe });
+    }
+
     const fundingResultAfterSafe = await this.operateWrapper.getFundingRequirements(serviceConfigId);
     if (!fundingResultAfterSafe.success) {
       throw new Error(`Failed to fetch funding requirements: ${fundingResultAfterSafe.error}`);
     }
 
     const fundingRequirements = fundingResultAfterSafe.requirements || {};
-    this.printFundingRequests({
+    const safeReqs = this.printFundingRequests({
       chain: this.config.chain,
       fundingRequirements,
       masterEoa: walletAddress,
@@ -528,7 +585,11 @@ ${'='.repeat(80)}
     });
 
     if (!this.isServiceFunded(fundingRequirements)) {
+      if (safeReqs.length > 0) {
+        this.emitEvent({ event: 'funding_required', requirements: safeReqs });
+      }
       if (!this.isAttended) {
+        this.emitEvent({ event: 'error', error: 'Funding required (unattended mode — exiting)' });
         return {
           success: false,
           serviceConfigId,
@@ -540,6 +601,7 @@ ${'='.repeat(80)}
       }
       this.writeOutput('\n⏳ Waiting for funding to be detected...\n');
       await this.waitForFunding(serviceConfigId);
+      this.emitEvent({ event: 'funding_detected' });
     }
 
     const startResult = await this.operateWrapper.startService(serviceConfigId);
@@ -552,7 +614,20 @@ ${'='.repeat(80)}
       this.config.chain
     ) || masterSafe;
 
+    this.emitEvent({
+      event: 'service_deployed',
+      serviceConfigId,
+      safe: serviceSafeAddress || '',
+    });
+
     await this.waitForDeployment(serviceConfigId);
+
+    this.emitEvent({
+      event: 'complete',
+      success: true,
+      serviceConfigId,
+      safe: serviceSafeAddress || '',
+    });
 
     return {
       success: true,
@@ -577,7 +652,7 @@ ${'='.repeat(80)}
     masterEoa?: string;
     masterSafe?: string;
     serviceConfig: ReturnType<typeof createDefaultServiceConfig>;
-  }): void {
+  }): Array<{ purpose: string; address: string; amount: string; token: string }> {
     const { chain, fundingRequirements, masterEoa, masterSafe } = params;
     const refill = fundingRequirements?.refill_requirements?.[chain] || {};
     const zeroAddress = "0x0000000000000000000000000000000000000000";
@@ -633,6 +708,8 @@ ${'='.repeat(80)}
     if (requirements.length > 0) {
       printFundingRequirements(requirements);
     }
+
+    return requirements;
   }
 
   private getRefillForAddress(

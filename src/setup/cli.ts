@@ -189,6 +189,7 @@ interface CLIArgs {
   help?: boolean;
   unattended?: boolean;
   isolated?: boolean;
+  events?: string;
 }
 
 function parseArgs(): CLIArgs {
@@ -211,6 +212,17 @@ function parseArgs(): CLIArgs {
       args.unattended = true;
     } else if (arg === '--isolated') {
       args.isolated = true;
+    } else if (arg.startsWith('--events=')) {
+      args.events = arg.split('=').slice(1).join('=');
+    } else if (arg === '--events') {
+      // Next arg is the path — handled below
+    }
+  }
+
+  // Handle --events <path> (space-separated)
+  for (let i = 0; i < process.argv.length; i++) {
+    if (process.argv[i] === '--events' && process.argv[i + 1] && !process.argv[i + 1].startsWith('--')) {
+      args.events = process.argv[i + 1];
     }
   }
 
@@ -241,6 +253,7 @@ OPTIONS:
   --staking-contract  Custom staking contract address (default: Jinn Staking on Base)
   --unattended        Run middleware in unattended mode (default)
   --isolated          Run in isolated temp directory (fresh .operate, no production state)
+  --events <path>     Write machine-readable JSON-lines events to file (for orchestrators)
   --help, -h          Show this help message
 
 NOTES:
@@ -385,6 +398,8 @@ async function main() {
     // Isolated environment paths (if --isolated flag used)
     middlewarePath: isolatedEnv?.middlewareDir,
     workingDirectory: isolatedEnv?.tempDir,
+    // Machine-readable events output (for orchestrators / CI)
+    eventsPath: args.events ? resolve(args.events) : undefined,
   };
 
   // Show mode banner
