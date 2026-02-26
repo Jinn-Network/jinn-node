@@ -145,3 +145,4 @@ if [ "$hydrated" -gt 0 ]; then
 fi
 
 echo "[init] Worker initialization complete"
+# trigger rebuild
