@@ -4,6 +4,59 @@
 
 import type { AgentExecutionResult, IpfsMetadata, RecognitionPhaseResult, ReflectionResult } from '../types.js';
 import type { MeasurementCoverage } from '../execution/measurementCoverage.js';
+import type { Provenance } from '../../shared/adw/types.js';
+
+/**
+ * Build execution provenance metadata from available params.
+ * Returns an ADW Provenance object for embedding in artifacts.
+ */
+function buildExecutionProvenance(params: {
+  requestId: string;
+  metadata: IpfsMetadata;
+  workerAddress?: string;
+  durationMs?: number;
+}): Provenance {
+  const { requestId, metadata, workerAddress, durationMs } = params;
+
+  const provenance: Provenance = {
+    method: 'agent-execution',
+    execution: {
+      requestId,
+      ...(workerAddress ? { agent: `eip155:8453:${workerAddress}` } : {}),
+      ...(metadata.blueprint ? { blueprint: metadata.blueprint } : {}),
+      ...(metadata.enabledTools ? { tools: metadata.enabledTools } : {}),
+      chain: 'eip155:8453',
+      timestamp: new Date().toISOString(),
+      ...(durationMs ? { duration: `PT${Math.round(durationMs / 1000)}S` } : {}),
+    },
+    derivedFrom: [],
+  };
+
+  // Add blueprint as a derivedFrom source if present
+  if (metadata.blueprint) {
+    provenance.derivedFrom!.push({
+      contentHash: metadata.blueprint,
+      relationship: 'blueprint',
+      description: 'Blueprint that defined the execution constraints',
+    });
+  }
+
+  // Add template reference if present
+  if (metadata.templateId) {
+    provenance.derivedFrom!.push({
+      contentHash: metadata.templateId,
+      relationship: 'template',
+      description: 'Template that structured the workflow',
+    });
+  }
+
+  // Clean up empty derivedFrom
+  if (provenance.derivedFrom!.length === 0) {
+    delete provenance.derivedFrom;
+  }
+
+  return provenance;
+}
 
 /**
  * Build delivery payload for IPFS registry
@@ -20,12 +73,24 @@ export function buildDeliveryPayload(params: {
 }): any {
   const { requestId, result, metadata, recognition, reflection, workerTelemetry, finalStatus, measurementCoverage } = params;
 
+  // Build execution provenance from available data
+  const workerAddress = process.env.JINN_SERVICE_MECH_ADDRESS;
+  const durationMs = result.telemetry?.durationMs || workerTelemetry?.durationMs;
+  const provenance = buildExecutionProvenance({ requestId, metadata, workerAddress, durationMs });
+
+  // Enrich artifacts with provenance metadata
+  const artifacts = (result.artifacts || []).map((artifact) => ({
+    ...artifact,
+    provenance,
+  }));
+
   return {
     requestId: String(requestId),
     output: result.output || '',
     structuredSummary: result.structuredSummary || result.output?.slice(-1200) || '',
     telemetry: result.telemetry || {},
-    artifacts: result.artifacts || [],
+    artifacts,
+    provenance,
     ...(result.jobInstanceStatusUpdate ? { jobInstanceStatusUpdate: result.jobInstanceStatusUpdate } : {}),
     ...(metadata?.jobDefinitionId ? { jobDefinitionId: metadata.jobDefinitionId } : {}),
     ...(metadata?.jobName ? { jobName: metadata.jobName } : {}),
@@ -69,4 +134,3 @@ export function buildDeliveryPayload(params: {
       : {}),
   };
 }
-
