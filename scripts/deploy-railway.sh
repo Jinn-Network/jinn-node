@@ -22,6 +22,7 @@ RAILWAY_TOML="$JINN_NODE_DIR/railway.toml"
 PROJECT_NAME=""
 SERVICE_NAME="jinn-worker"
 SKIP_IMPORT=false
+DEPLOY_ONLY=false
 DRY_RUN=false
 TOML_BACKED_UP=false
 
@@ -61,6 +62,7 @@ Options:
   --project <name>     Railway project (creates if not found)
   --service <name>     Service name (creates if not found, default: jinn-worker)
   --skip-import        Skip .operate/.gemini SSH import (for re-deploys)
+  --deploy-only        Deploy only (skip volume/env/import bootstrap)
   --dry-run            Preview commands without executing
   --help, -h           Show this help
 
@@ -73,6 +75,9 @@ Examples:
 
   # Re-deploy (credentials already on volume)
   bash scripts/deploy-railway.sh --project jinn-worker --skip-import
+
+  # Deploy only (no env/volume/import mutations)
+  bash scripts/deploy-railway.sh --project jinn-worker --service canary-worker --deploy-only
 
   # Preview what would happen
   bash scripts/deploy-railway.sh --project jinn-worker --dry-run
@@ -88,6 +93,7 @@ parse_args() {
       --project)   PROJECT_NAME="$2"; shift 2 ;;
       --service)   SERVICE_NAME="$2"; shift 2 ;;
       --skip-import) SKIP_IMPORT=true; shift ;;
+      --deploy-only) DEPLOY_ONLY=true; shift ;;
       --dry-run)   DRY_RUN=true; shift ;;
       --help|-h)   usage; exit 0 ;;
       *)           error "Unknown option: $1"; usage; exit 1 ;;
@@ -163,14 +169,14 @@ check_preconditions() {
   step "Checking preconditions"
 
   # .operate directory (required for import)
-  if [[ "$SKIP_IMPORT" == false && ! -d "$JINN_NODE_DIR/.operate" ]]; then
+  if [[ "$DEPLOY_ONLY" == false && "$SKIP_IMPORT" == false && ! -d "$JINN_NODE_DIR/.operate" ]]; then
     error ".operate/ not found in $JINN_NODE_DIR"
     error "Run local setup first (yarn setup), then re-run this script."
     exit 1
   fi
 
   # .env file
-  if [[ ! -f "$JINN_NODE_DIR/.env" ]]; then
+  if [[ "$DEPLOY_ONLY" == false && ! -f "$JINN_NODE_DIR/.env" ]]; then
     error ".env not found in $JINN_NODE_DIR"
     error "Copy .env.example to .env and fill in required values."
     exit 1
@@ -492,11 +498,17 @@ print_summary() {
 
   info "Project:  $current_project"
   info "Service:  $current_service"
-  info "Volume:   /home/jinn"
-  if [[ "$SKIP_IMPORT" == true ]]; then
-    info "Import:   skipped (--skip-import)"
+  if [[ "$DEPLOY_ONLY" == true ]]; then
+    info "Mode:     deploy-only (--deploy-only)"
+    info "Volume:   unchanged"
+    info "Import:   skipped"
   else
-    info "Import:   completed"
+    info "Volume:   /home/jinn"
+    if [[ "$SKIP_IMPORT" == true ]]; then
+      info "Import:   skipped (--skip-import)"
+    else
+      info "Import:   completed"
+    fi
   fi
 
   echo ""
@@ -518,9 +530,14 @@ main() {
   parse_args "$@"
   check_preconditions
   ensure_project_linked
-  ensure_volume
-  push_env_vars
-  import_credentials
+  if [[ "$DEPLOY_ONLY" == false ]]; then
+    ensure_volume
+    push_env_vars
+    import_credentials
+  else
+    step "Deploy-only mode"
+    info "Skipping volume setup, environment push, and credential import"
+  fi
   deploy_worker
   verify_deployment
   print_summary

@@ -61,6 +61,7 @@ import { checkEpochGate } from './staking/epochGate.js';
 import { maybeSubmitHeartbeat } from './staking/heartbeat.js';
 import { resolveServiceConfig, clearServiceConfigCache, type ResolvedServiceConfig } from './onchain/serviceResolver.js';
 import { checkAndRestakeServices } from './staking/restake.js';
+import { multiaddr } from '@multiformats/multiaddr';
 
 export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
 
@@ -1805,6 +1806,34 @@ async function main() {
       });
       setProxyHeliaNode(helia);
       workerLogger.info({ peerId: helia.libp2p.peerId.toString(), bootstrapPeers: bootstrapPeers.length }, 'Private IPFS node started');
+      if (bootstrapPeers.length > 0) {
+        const dialResults = await Promise.allSettled(
+          bootstrapPeers.map(async (peer) => {
+            const addr = multiaddr(peer);
+            await helia.libp2p.dial(addr as any, { signal: AbortSignal.timeout(5_000) } as any);
+            return peer;
+          }),
+        );
+        const connected = dialResults.filter(r => r.status === 'fulfilled').length;
+        const failed = dialResults.length - connected;
+        const failures = dialResults
+          .map((result, index) => {
+            if (result.status !== 'rejected') return null;
+            const reason = result.reason as any;
+            return {
+              peer: bootstrapPeers[index],
+              error: reason?.message || String(reason),
+            };
+          })
+          .filter((entry): entry is { peer: string; error: string } => Boolean(entry))
+          .slice(0, 5);
+        workerLogger.info({
+          attempted: bootstrapPeers.length,
+          connected,
+          failed,
+          ...(failures.length > 0 ? { failures } : {}),
+        }, 'Bootstrap dial attempts completed');
+      }
       await registerMultiaddrs(helia);
     } catch (err: any) {
       workerLogger.warn({ error: err?.message || String(err) }, 'Failed to start IPFS node (non-fatal) — IPFS features will use HTTP fallback');

@@ -38,6 +38,16 @@ function getOwnAddress(): string | null {
   return privateKeyToAccount(privateKey as `0x${string}`).address.toLowerCase();
 }
 
+function getStaticGatewayPeer(): string | null {
+  const announceAddr = process.env.IPFS_GATEWAY_ANNOUNCE_ADDR?.trim();
+  const peerId = process.env.IPFS_GATEWAY_PEER_ID?.trim();
+  if (!announceAddr || !peerId) return null;
+
+  const normalized = announceAddr.replace(/\/+$/, '');
+  if (normalized.includes('/p2p/')) return normalized;
+  return `${normalized}/p2p/${peerId}`;
+}
+
 /**
  * Fetch bootstrap peer multiaddrs from the x402-gateway operators table.
  * Filters out the caller's own multiaddrs to avoid self-dial.
@@ -45,13 +55,14 @@ function getOwnAddress(): string | null {
  */
 export async function fetchBootstrapPeers(): Promise<string[]> {
   const gatewayUrl = getGatewayUrl();
+  const staticGatewayPeer = getStaticGatewayPeer();
   if (!gatewayUrl) {
     workerLogger.debug('No X402_GATEWAY_URL — skipping bootstrap peer discovery');
-    return [];
+    return staticGatewayPeer ? [staticGatewayPeer] : [];
   }
 
   const signer = getSigner();
-  if (!signer) return [];
+  if (!signer) return staticGatewayPeer ? [staticGatewayPeer] : [];
 
   const ownAddress = getOwnAddress();
 
@@ -91,9 +102,16 @@ export async function fetchBootstrapPeers(): Promise<string[]> {
       }
     }
 
-    workerLogger.info({ bootstrapPeerCount: peers.length }, 'Fetched bootstrap peers from operators table');
-    return peers;
+    if (staticGatewayPeer) peers.push(staticGatewayPeer);
+    const deduped = Array.from(new Set(peers));
+
+    workerLogger.info({
+      bootstrapPeerCount: deduped.length,
+      staticGatewayPeerInjected: Boolean(staticGatewayPeer),
+    }, 'Fetched bootstrap peers from operators table');
+    return deduped;
   } catch (err: any) {
+    if (staticGatewayPeer) return [staticGatewayPeer];
     workerLogger.warn(
       { error: err?.message || String(err) },
       'Failed to fetch bootstrap peers (non-fatal) — node will operate locally',

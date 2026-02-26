@@ -15,6 +15,8 @@ export interface JinnNodeConfig {
   privateKey: string;
   /** Staking check function */
   isStaked: StakingGaterConfig['isStaked'];
+  /** Peer IDs that bypass staking checks (infra peers like local gateway) */
+  trustedPeerIds?: string[];
   /** Bootstrap peer multiaddrs */
   bootstrapPeers?: string[];
   /** Addresses to advertise to peers (e.g. public IP in containers) */
@@ -66,8 +68,15 @@ export async function createJinnNode(config: JinnNodeConfig): Promise<Helia> {
     floodPublish: true,
   });
 
-  // Staking-based ConnectionGater
-  defaults.connectionGater = createStakingGater({ isStaked: config.isStaked });
+  // Staking-based ConnectionGater with optional trusted infrastructure peers.
+  const trustedPeerIds = [
+    ...(config.trustedPeerIds ?? []),
+    ...(process.env.IPFS_GATEWAY_PEER_ID ? [process.env.IPFS_GATEWAY_PEER_ID] : []),
+  ];
+  defaults.connectionGater = createStakingGater({
+    isStaked: config.isStaked,
+    trustedPeerIds,
+  });
 
   // Storage
   const storageType = config.storage?.type ?? 'memory';

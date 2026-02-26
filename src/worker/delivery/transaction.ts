@@ -34,6 +34,251 @@ const SAFE_ERROR_CODES: Record<string, string> = {
   GS031: 'Method can only be called from this Safe',
 };
 
+const AGENT_MECH_DELIVER_ABI = [
+  {
+    type: 'function',
+    name: 'deliverToMarketplace',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'requestIds', type: 'bytes32[]' },
+      { name: 'datas', type: 'bytes[]' },
+    ],
+    outputs: [{ name: 'deliveredRequests', type: 'bool[]' }],
+  },
+];
+
+const GNOSIS_SAFE_EXEC_ABI = [
+  {
+    type: 'function',
+    name: 'nonce',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'getTransactionHash',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'value', type: 'uint256' },
+      { name: 'data', type: 'bytes' },
+      { name: 'operation', type: 'uint8' },
+      { name: 'safeTxGas', type: 'uint256' },
+      { name: 'baseGas', type: 'uint256' },
+      { name: 'gasPrice', type: 'uint256' },
+      { name: 'gasToken', type: 'address' },
+      { name: 'refundReceiver', type: 'address' },
+      { name: '_nonce', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bytes32' }],
+  },
+  {
+    type: 'function',
+    name: 'execTransaction',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'value', type: 'uint256' },
+      { name: 'data', type: 'bytes' },
+      { name: 'operation', type: 'uint8' },
+      { name: 'safeTxGas', type: 'uint256' },
+      { name: 'baseGas', type: 'uint256' },
+      { name: 'gasPrice', type: 'uint256' },
+      { name: 'gasToken', type: 'address' },
+      { name: 'refundReceiver', type: 'address' },
+      { name: 'signatures', type: 'bytes' },
+    ],
+    outputs: [{ name: 'success', type: 'bool' }],
+  },
+];
+
+function normalizeBytes32Hex(value: string): `0x${string}` {
+  const clean = value.trim().toLowerCase().replace(/^0x/, '');
+  if (!/^[0-9a-f]{64}$/.test(clean)) {
+    throw new Error(`Expected 32-byte hex, got: ${value}`);
+  }
+  return `0x${clean}`;
+}
+
+function normalizeDigestHex(digestHex: string): `0x${string}` {
+  const value = digestHex.trim().toLowerCase();
+  if (/^f01551220[0-9a-f]{64}$/.test(value)) {
+    return normalizeBytes32Hex(value.slice('f01551220'.length));
+  }
+  return normalizeBytes32Hex(value);
+}
+
+function normalizeRequestIdHex(requestId: string): `0x${string}` {
+  const raw = requestId.trim();
+  const id = raw.startsWith('0x') ? BigInt(raw) : BigInt(raw);
+  const hex = id.toString(16).padStart(64, '0');
+  if (hex.length > 64) {
+    throw new Error(`requestId too large for bytes32: ${requestId}`);
+  }
+  return `0x${hex}`;
+}
+
+async function deliverViaSafeWithDigest(options: {
+  requestId: string;
+  digestHex: string;
+  targetMechAddress: string;
+  safeAddress: string;
+  privateKey: string;
+  rpcHttpUrl?: string;
+  wait?: boolean;
+}): Promise<any> {
+  const {
+    requestId,
+    digestHex,
+    targetMechAddress,
+    safeAddress,
+    privateKey,
+    rpcHttpUrl,
+    wait = true,
+  } = options;
+
+  const web3 = new Web3(rpcHttpUrl || getRequiredRpcUrl());
+  const chainId = Number(await web3.eth.getChainId());
+
+  const mechAddress = web3.utils.toChecksumAddress(targetMechAddress);
+  const safeAddressChecksum = web3.utils.toChecksumAddress(safeAddress);
+  const zeroAddress = web3.utils.toChecksumAddress('0x0000000000000000000000000000000000000000');
+
+  const agentMech = new (web3 as any).eth.Contract(AGENT_MECH_DELIVER_ABI as any, mechAddress);
+  const safe = new (web3 as any).eth.Contract(GNOSIS_SAFE_EXEC_ABI as any, safeAddressChecksum);
+
+  const requestIdBytes32 = normalizeRequestIdHex(requestId);
+  const digestBytes32 = normalizeDigestHex(digestHex);
+  const digestBytes = Buffer.from(digestBytes32.slice(2), 'hex');
+  const innerCallData = agentMech.methods.deliverToMarketplace([requestIdBytes32], [digestBytes]).encodeABI();
+
+  const safeNonce = Number(await safe.methods.nonce().call());
+  const paramsForHash = {
+    to: mechAddress,
+    value: 0,
+    data: innerCallData,
+    operation: 0, // CALL
+    safeTxGas: 0,
+    baseGas: 0,
+    gasPrice: 0,
+    gasToken: zeroAddress,
+    refundReceiver: zeroAddress,
+    _nonce: safeNonce,
+  };
+
+  const txHashToSign = String(await safe.methods.getTransactionHash(
+    paramsForHash.to,
+    paramsForHash.value,
+    paramsForHash.data,
+    paramsForHash.operation,
+    paramsForHash.safeTxGas,
+    paramsForHash.baseGas,
+    paramsForHash.gasPrice,
+    paramsForHash.gasToken,
+    paramsForHash.refundReceiver,
+    paramsForHash._nonce,
+  ).call());
+
+  const normalizedPk = privateKey.trim();
+  const account = web3.eth.accounts.privateKeyToAccount(normalizedPk);
+  const sender = web3.utils.toChecksumAddress(account.address);
+  const signedMsg = account.sign(txHashToSign);
+  const vAdjusted = Number(signedMsg.v) + 4;
+  const signature = Buffer.concat([
+    Buffer.from(String(signedMsg.r).slice(2), 'hex'),
+    Buffer.from(String(signedMsg.s).slice(2), 'hex'),
+    Buffer.from([vAdjusted]),
+  ]);
+
+  const execDataHex = safe.methods.execTransaction(
+    paramsForHash.to,
+    paramsForHash.value,
+    paramsForHash.data,
+    paramsForHash.operation,
+    paramsForHash.safeTxGas,
+    paramsForHash.baseGas,
+    paramsForHash.gasPrice,
+    paramsForHash.gasToken,
+    paramsForHash.refundReceiver,
+    `0x${signature.toString('hex')}`,
+  ).encodeABI();
+
+  const txPayload: any = {
+    to: safe.options.address,
+    from: sender,
+    value: 0,
+    data: execDataHex,
+    chainId,
+  };
+
+  txPayload.nonce = await web3.eth.getTransactionCount(sender, 'pending');
+  txPayload.gas = await web3.eth.estimateGas(txPayload);
+
+  const latestBlock = await web3.eth.getBlock('latest') as any;
+  const baseFee = latestBlock?.baseFeePerGas;
+  if (baseFee) {
+    try {
+      const priority = await web3.eth.getMaxPriorityFeePerGas();
+      txPayload.maxPriorityFeePerGas = priority;
+      txPayload.maxFeePerGas = BigInt(baseFee) * 2n + BigInt(priority);
+    } catch {
+      const priority = '1500000000'; // 1.5 gwei
+      txPayload.maxPriorityFeePerGas = priority;
+      txPayload.maxFeePerGas = BigInt(baseFee) * 2n + BigInt(priority);
+    }
+  } else {
+    txPayload.gasPrice = await web3.eth.getGasPrice();
+  }
+
+  const signedTx = await web3.eth.accounts.signTransaction(txPayload, normalizedPk);
+  if (!signedTx.rawTransaction) {
+    throw new Error('Failed to sign Safe transaction');
+  }
+
+  let txHash: string;
+  let sendError: any;
+  try {
+    const sendResult = await web3.eth.sendSignedTransaction(signedTx.rawTransaction);
+    txHash = String((sendResult as any).transactionHash);
+  } catch (err: any) {
+    sendError = err;
+    if (err?.receipt?.transactionHash) {
+      txHash = String(err.receipt.transactionHash);
+    } else if (err?.transactionHash) {
+      txHash = String(err.transactionHash);
+    } else {
+      throw err;
+    }
+  }
+
+  const result: any = {
+    tx_hash: txHash,
+    status: 'submitted',
+  };
+
+  if (wait) {
+    const receipt = await web3.eth.getTransactionReceipt(txHash);
+    if (receipt && receipt.status) {
+      result.status = 'confirmed';
+      result.block_number = Number(receipt.blockNumber);
+      result.gas_used = Number(receipt.gasUsed);
+    } else if (receipt) {
+      result.status = 'reverted';
+      result.block_number = Number(receipt.blockNumber);
+      result.gas_used = Number(receipt.gasUsed);
+    } else {
+      result.status = 'unknown';
+    }
+  }
+
+  if (sendError) {
+    workerLogger.warn({ txHash, error: sendError?.message }, 'sendSignedTransaction reported error but tx hash was recovered');
+  }
+
+  return result;
+}
+
 /**
  * Decode revert data from a failed Safe transaction.
  * Returns a human-readable string or null if decoding fails.
@@ -505,12 +750,15 @@ export async function deliverViaSafeTransaction(
 
   // Pre-upload delivery payload to private IPFS network (if available).
   // This ensures content is immediately available to other Jinn nodes via bitswap.
-  // deliverViaSafe will also upload to Autonolas as a transitional fallback.
+  // The digest from this upload is used for on-chain deliver() so the dataHash
+  // matches sha256(JSON payload) end-to-end.
+  let privateDeliveryDigestHex: string | null = null;
   const helia = getHeliaNodeOptional();
   if (helia) {
     try {
       const { ipfsUploadJson } = await import('../../ipfs/upload.js');
       const { digestHex } = await ipfsUploadJson(helia, resultContent);
+      privateDeliveryDigestHex = digestHex;
       workerLogger.info({ requestId: context.requestId, digestHex }, 'Delivery payload pre-uploaded to private IPFS');
     } catch (err: any) {
       workerLogger.warn({ requestId: context.requestId, error: err?.message }, 'Failed to pre-upload to private IPFS (non-fatal)');
@@ -584,9 +832,27 @@ export async function deliverViaSafeTransaction(
       }
 
       try {
-        workerLogger.info({ requestId: context.requestId, attempt }, '[DELIVERY_DEBUG] Calling deliverViaSafe');
-        delivery = await (deliverViaSafe as any)(payload);
-        workerLogger.info({ requestId: context.requestId, txHash: delivery?.tx_hash, status: delivery?.status }, '[DELIVERY_DEBUG] deliverViaSafe returned');
+        if (privateDeliveryDigestHex) {
+          workerLogger.info({
+            requestId: context.requestId,
+            attempt,
+            digestHex: privateDeliveryDigestHex,
+          }, '[DELIVERY_DEBUG] Calling deliverViaSafeWithDigest');
+          delivery = await deliverViaSafeWithDigest({
+            requestId: String(context.requestId),
+            digestHex: privateDeliveryDigestHex,
+            targetMechAddress,
+            safeAddress,
+            privateKey,
+            ...(rpcHttpUrl ? { rpcHttpUrl } : {}),
+            wait: true,
+          });
+          workerLogger.info({ requestId: context.requestId, txHash: delivery?.tx_hash, status: delivery?.status }, '[DELIVERY_DEBUG] deliverViaSafeWithDigest returned');
+        } else {
+          workerLogger.info({ requestId: context.requestId, attempt }, '[DELIVERY_DEBUG] Calling deliverViaSafe (legacy fallback)');
+          delivery = await (deliverViaSafe as any)(payload);
+          workerLogger.info({ requestId: context.requestId, txHash: delivery?.tx_hash, status: delivery?.status }, '[DELIVERY_DEBUG] deliverViaSafe returned');
+        }
         
         // Track the transaction hash immediately after submission
         if (delivery?.tx_hash) {
