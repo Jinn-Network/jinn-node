@@ -56,7 +56,7 @@ import { getActiveService, setActiveService } from './rotation/ActiveServiceCont
 import { resetCachedAddress as resetSigningProxyAddress, startSigningProxy } from '../agent/signing-proxy.js';
 import { maybeCallCheckpoint } from './staking/checkpoint.js';
 import { checkEpochGate } from './staking/epochGate.js';
-import { maybeSubmitHeartbeat } from './staking/heartbeat.js';
+import { maybeSubmitHeartbeat, maybeSubmitHeartbeatForService } from './staking/heartbeat.js';
 import { resolveServiceConfig, clearServiceConfigCache, type ResolvedServiceConfig } from './onchain/serviceResolver.js';
 import { checkAndRestakeServices } from './staking/restake.js';
 
@@ -1949,27 +1949,52 @@ async function main() {
         // Only the leader worker submits heartbeats to avoid Safe nonce collisions
         const workerId = process.env.WORKER_ID || '';
         const isHeartbeatLeader = !workerId || workerId.endsWith('-1') || workerId === 'default';
-        // Check epoch gate first — skip heartbeat if target already met
         cyclesSinceLastHeartbeat++;
-        if (isHeartbeatLeader && stakingContract && runtimeResolvedConfig && cyclesSinceLastHeartbeat >= WORKER_HEARTBEAT_CYCLES) {
+        if (isHeartbeatLeader && cyclesSinceLastHeartbeat >= WORKER_HEARTBEAT_CYCLES) {
           cyclesSinceLastHeartbeat = 0;
-          try {
-            const gate = await checkEpochGate(
-              stakingContract,
-              runtimeResolvedConfig.serviceId,
-              runtimeResolvedConfig.marketplace
-            );
-            if (!gate.targetMet) {
-              await maybeSubmitHeartbeat(
+
+          // Multi-service mode: submit heartbeats for ALL staked services
+          if (rotator) {
+            for (const service of rotator.getAllServices()) {
+              if (!service.stakingContractAddress || !service.serviceId || !service.mechContractAddress) continue;
+              try {
+                const resolved = await resolveServiceConfig(service.mechContractAddress, rpcUrl);
+                if (!resolved) continue;
+                const gate = await checkEpochGate(service.stakingContractAddress, service.serviceId, resolved.marketplace);
+                if (!gate.targetMet) {
+                  await maybeSubmitHeartbeatForService(
+                    service.stakingContractAddress,
+                    service.serviceId,
+                    resolved.marketplace,
+                    service,
+                  );
+                } else {
+                  workerLogger.debug({ serviceId: service.serviceId, requests: gate.requestCount, target: gate.target }, 'Epoch target met — skipping heartbeat');
+                }
+              } catch (e: any) {
+                workerLogger.warn({ serviceId: service.serviceId, error: serializeError(e) }, 'Staking heartbeat failed for service (non-fatal)');
+              }
+            }
+          } else if (stakingContract && runtimeResolvedConfig) {
+            // Single-service fallback
+            try {
+              const gate = await checkEpochGate(
                 stakingContract,
                 runtimeResolvedConfig.serviceId,
                 runtimeResolvedConfig.marketplace
               );
-            } else {
-              workerLogger.debug({ requests: gate.requestCount, target: gate.target }, 'Epoch target met — skipping heartbeat');
+              if (!gate.targetMet) {
+                await maybeSubmitHeartbeat(
+                  stakingContract,
+                  runtimeResolvedConfig.serviceId,
+                  runtimeResolvedConfig.marketplace
+                );
+              } else {
+                workerLogger.debug({ requests: gate.requestCount, target: gate.target }, 'Epoch target met — skipping heartbeat');
+              }
+            } catch (e: any) {
+              workerLogger.warn({ error: serializeError(e) }, 'Staking heartbeat failed (non-fatal)');
             }
-          } catch (e: any) {
-            workerLogger.warn({ error: serializeError(e) }, 'Staking heartbeat failed (non-fatal)');
           }
         }
       }
