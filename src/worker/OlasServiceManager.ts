@@ -4,9 +4,9 @@
  * This class is DEPRECATED and SHOULD NOT be used under any circumstances.
  * 
  * Use the olas-operate-middleware CLI directly instead:
- * - For staking: `cd olas-operate-middleware && poetry run operate quickstart`
- * - For claiming: `cd olas-operate-middleware && poetry run operate claim`
- * - For termination: `cd olas-operate-middleware && poetry run operate terminate`
+ * - For staking: `poetry run python -m operate.quickstart`
+ * - For claiming: `poetry run python -m operate.cli claim`
+ * - For termination: `poetry run python -m operate.cli terminate`
  * 
  * The operate CLI is the official interface and handles all service lifecycle operations correctly.
  * This wrapper layer adds complexity and potential for errors.

@@ -135,8 +135,7 @@ async function readServiceConfigsFromDisk(): Promise<Array<{
   stakingProgramId: string;
 }>> {
   const candidates = [
-    join(process.cwd(), 'olas-operate-middleware', '.operate', 'services'),
-    join(process.cwd(), '..', 'olas-operate-middleware', '.operate', 'services'),
+    join(process.cwd(), '.operate', 'services'),
   ];
 
   let servicesDir: string | null = null;

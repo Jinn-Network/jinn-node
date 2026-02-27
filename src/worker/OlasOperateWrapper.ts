@@ -211,29 +211,14 @@ export class OlasOperateWrapper {
       operateLogger.debug("Poetry middleware not available, trying fallback paths");
     }
 
-    // 4. Fallback: sibling directory (monorepo compatibility or local development)
-    const currentFile = fileURLToPath(import.meta.url);
-    const workerDir = dirname(currentFile);
-    const projectRoot = resolve(workerDir, '..');
+    // 4. Fallback: use jinn-node root (middleware should be installed via Poetry)
+    operateLogger.warn(
+      { jinnNodeRoot },
+      "Poetry middleware check failed — falling back to jinn-node root. " +
+      "Ensure olas-operate-middleware is installed: cd jinn-node && poetry install"
+    );
 
-    // First try jinn-node sibling (standalone mode)
-    let middlewarePath = join(projectRoot, 'olas-operate-middleware');
-
-    // If not found, try monorepo root sibling
-    const fs = await import('fs');
-    if (!fs.existsSync(middlewarePath)) {
-      const monorepoRoot = resolve(projectRoot, '..');
-      middlewarePath = join(monorepoRoot, 'olas-operate-middleware');
-    }
-
-    operateLogger.debug({
-      currentFile,
-      workerDir,
-      projectRoot,
-      middlewarePath
-    }, "Resolved middleware path via fallback");
-
-    return middlewarePath;
+    return jinnNodeRoot;
   }
 
   /**
@@ -658,7 +643,7 @@ export class OlasOperateWrapper {
     if (!pythonCheck.success) {
       if (pythonCheck.stderr.includes('ModuleNotFoundError')) {
         if (pythonCheck.stderr.includes("No module named 'autonomy'")) {
-          issues.push('AEA/Autonomy framework not installed. Run: cd olas-operate-middleware && poetry install');
+          issues.push('AEA/Autonomy framework not installed. Run: poetry install');
         } else if (pythonCheck.stderr.includes("No module named 'psutil'")) {
           issues.push('Basic Python dependencies missing. Install psutil and other requirements.');
         } else {

@@ -59,6 +59,7 @@ import { checkEpochGate } from './staking/epochGate.js';
 import { maybeSubmitHeartbeat, maybeSubmitHeartbeatForService } from './staking/heartbeat.js';
 import { resolveServiceConfig, clearServiceConfigCache, type ResolvedServiceConfig } from './onchain/serviceResolver.js';
 import { checkAndRestakeServices } from './staking/restake.js';
+import { ensureOperatorRegistered } from './register-operator.js';
 
 export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
 
@@ -1826,6 +1827,9 @@ async function main() {
 
   // Verify Control API is running before processing any jobs
   await checkControlApiHealth();
+
+  // Auto-register with credential bridge (idempotent, non-blocking)
+  await ensureOperatorRegistered();
 
   // Initialize multi-service rotation if enabled
   let rotator: ServiceRotator | null = null;
