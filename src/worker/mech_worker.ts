@@ -1879,7 +1879,9 @@ async function main() {
 
   if (SINGLE_SHOT) {
     await processOnce();
-    return;
+    // Force exit — Helia/libp2p keeps the event loop alive after processOnce()
+    // returns, preventing natural process termination in --single mode.
+    process.exit(0);
   }
 
   let runCount = 0;
