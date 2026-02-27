@@ -372,7 +372,7 @@ export async function maybeSubmitHeartbeatForService(
   }
 
   try {
-    const { deficit, current, target, epochSecondsRemaining, multisig } = await getRequestDeficit(stakingContract, serviceId, marketplaceAddress);
+    const { deficit, current, target, epochSecondsRemaining, multisig } = await getActivityDeficit(stakingContract, serviceId, marketplaceAddress);
 
     if (deficit <= 0) {
       log.info({ serviceId, current, target, deficit: 0 }, 'Request target met for this epoch — no heartbeat needed');

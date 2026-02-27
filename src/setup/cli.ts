@@ -422,7 +422,7 @@ async function main() {
     console.log(`Staking: ${disableStaking ? 'DISABLED' : 'ENABLED (Jinn Staking)'}`);
     if (!disableStaking) {
       console.log(`   Contract: ${stakingContract || SERVICE_CONSTANTS.DEFAULT_STAKING_PROGRAM_ID}`);
-      console.log(`   Required: ~100 OLAS (50 OLAS bond + 50 OLAS stake)`);
+      console.log(`   Required: ~10,000 OLAS (5,000 OLAS bond + 5,000 OLAS stake)`);
     }
     console.log(`Mech deployment: ${config.deployMech ? 'ENABLED' : 'DISABLED'}`);
     if (config.deployMech) {

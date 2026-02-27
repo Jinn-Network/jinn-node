@@ -26,7 +26,7 @@ export type SupportedChain = typeof SUPPORTED_CHAINS[number];
 // Service configuration constants
 export const SERVICE_CONSTANTS = {
   // Bond amount (wei as string for contract calls)
-  DEFAULT_SERVICE_BOND_WEI: "50000000000000000000", // 50 ETH in wei (Pearl template)
+  DEFAULT_SERVICE_BOND_WEI: "5000000000000000000000", // 5,000 OLAS bond (Jinn staking)
 
   // Fund requirements (wei as integers for middleware)
   DEFAULT_AGENT_FUNDING_WEI: 2000000000000000, // 0.002 ETH for gas

@@ -12,6 +12,7 @@ import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { ethers } from 'ethers';
 import { logger } from '../../logging/index.js';
+import { SERVICE_CONSTANTS } from '../config/ServiceConfig.js';
 
 const importLogger = logger.child({ component: 'SERVICE-IMPORTER' });
 
@@ -40,7 +41,7 @@ export interface ImportServiceParams {
   chain: string;
   operateBasePath: string;           // directory that will contain .operate/
   stakingContractAddress: string;
-  agentId?: number;                  // defaults to 43 (Jinn)
+  agentId?: number;                  // defaults to SERVICE_CONSTANTS.DEFAULT_AGENT_ID (103)
 }
 
 export interface ImportServiceResult {
@@ -71,7 +72,7 @@ export async function importServiceFromChain(
     chain,
     operateBasePath,
     stakingContractAddress,
-    agentId = 43,
+    agentId = SERVICE_CONSTANTS.DEFAULT_AGENT_ID,
   } = params;
 
   importLogger.info({ serviceId, chain, agentInstanceAddress }, 'Importing service from chain');

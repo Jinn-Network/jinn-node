@@ -30,6 +30,7 @@ import { join } from 'path';
 import { ethers } from 'ethers';
 import { logger } from '../../logging/index.js';
 import { getMasterPrivateKey, getMasterSafe } from '../../env/operate-profile.js';
+import { SERVICE_CONSTANTS } from '../config/ServiceConfig.js';
 import { importServiceFromChain, type ImportServiceResult } from './ServiceImporter.js';
 import { deployMechViaSafe, buildMechToConfigValue } from './StolasMechDeployer.js';
 import { maybeDistributeFunds, type FundTransfer } from '../funding/FundDistributor.js';
@@ -41,8 +42,6 @@ const stolasLogger = logger.child({ component: 'STOLAS-BOOTSTRAP' });
 
 const DISTRIBUTOR_PROXY = '0x40abf47B926181148000DbCC7c8DE76A3a61a66f';
 const JINN_STAKING      = '0x66A92CDa5B319DCCcAC6c1cECbb690CA3Fb59488';
-
-const JINN_AGENT_ID = 43;
 
 const DISTRIBUTOR_ABI = [
   'function mapStakingProxyConfigs(address) view returns (uint256)',
@@ -60,12 +59,12 @@ const SAFE_ABI = [
   'function execTransaction(address to, uint256 value, bytes calldata data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address payable refundReceiver, bytes memory signatures) public payable returns (bool success)',
 ];
 
-// configHash = keccak256(abi.encode([43], [(1, 5000e18)]))
+// configHash = keccak256(abi.encode([103], [(1, 5000e18)]))
 const CONFIG_HASH = (() => {
   const coder = ethers.AbiCoder.defaultAbiCoder();
   const encoded = coder.encode(
     ['uint32[]', 'tuple(uint32,uint96)[]'],
-    [[JINN_AGENT_ID], [[1, ethers.parseEther('5000')]]]
+    [[SERVICE_CONSTANTS.DEFAULT_AGENT_ID], [[1, ethers.parseEther('5000')]]]
   );
   return ethers.keccak256(encoded);
 })();
@@ -253,7 +252,7 @@ export async function stolasBootstrap(
   const stakeCallData = distIface.encodeFunctionData('stake', [
     JINN_STAKING,
     0,                              // serviceId = 0 → create new
-    JINN_AGENT_ID,
+    SERVICE_CONSTANTS.DEFAULT_AGENT_ID,
     CONFIG_HASH,
     agentWallet.address,            // agentInstance → becomes Safe owner
   ]);
@@ -261,7 +260,7 @@ export async function stolasBootstrap(
   stolasLogger.info({
     distributor: DISTRIBUTOR_PROXY,
     stakingProxy: JINN_STAKING,
-    agentId: JINN_AGENT_ID,
+    agentId: SERVICE_CONSTANTS.DEFAULT_AGENT_ID,
     configHash: CONFIG_HASH,
     masterSafe: masterSafeAddress,
     agentInstance: agentWallet.address,
@@ -362,7 +361,7 @@ export async function stolasBootstrap(
       chain,
       operateBasePath,
       stakingContractAddress: JINN_STAKING,
-      agentId: JINN_AGENT_ID,
+      agentId: SERVICE_CONSTANTS.DEFAULT_AGENT_ID,
     });
   } catch (err: any) {
     return {
