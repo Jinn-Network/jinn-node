@@ -1954,9 +1954,18 @@ async function main() {
           cyclesSinceLastHeartbeat = 0;
 
           // Multi-service mode: submit heartbeats for ALL staked services
+          // Deduplicate by Safe address — services sharing a Safe only need one heartbeat
+          // because mapRequestCounts is per-multisig, so one request counts for all.
           if (rotator) {
+            const handledSafes = new Set<string>();
             for (const service of rotator.getAllServices()) {
               if (!service.stakingContractAddress || !service.serviceId || !service.mechContractAddress) continue;
+              // Skip if we already submitted a heartbeat for this Safe
+              const safeKey = service.serviceSafeAddress?.toLowerCase();
+              if (safeKey && handledSafes.has(safeKey)) {
+                workerLogger.debug({ serviceId: service.serviceId, safe: safeKey }, 'Skipping heartbeat — Safe already handled this cycle');
+                continue;
+              }
               try {
                 const resolved = await resolveServiceConfig(service.mechContractAddress, rpcUrl);
                 if (!resolved) continue;
@@ -1968,6 +1977,7 @@ async function main() {
                     resolved.marketplace,
                     service,
                   );
+                  if (safeKey) handledSafes.add(safeKey);
                 } else {
                   workerLogger.debug({ serviceId: service.serviceId, requests: gate.requestCount, target: gate.target }, 'Epoch target met — skipping heartbeat');
                 }
