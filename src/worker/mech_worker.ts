@@ -73,6 +73,7 @@ type UnclaimedRequest = {
   delivered?: boolean;
   responseTimeout?: number; // absolute unix timestamp (seconds) after which any mech can deliver
   enabledTools?: string[];  // MCP tools required by this job (from Ponder)
+  jobName?: string;         // job name from Ponder (e.g. '__heartbeat__')
 };
 
 type JobDefinitionStatus = {
@@ -694,6 +695,7 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       delivered
       dependencies
       enabledTools
+      jobName
     }
   }
 }`;
@@ -838,7 +840,8 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       blockTimestamp: Number(r.blockTimestamp),
       delivered: Boolean(r?.delivered === true),
       dependencies: Array.isArray(r?.dependencies) ? r.dependencies.map((dep: any) => String(dep)) : undefined,
-      enabledTools: Array.isArray(r?.enabledTools) ? r.enabledTools : undefined
+      enabledTools: Array.isArray(r?.enabledTools) ? r.enabledTools : undefined,
+      jobName: r?.jobName ? String(r.jobName) : undefined
     })) as UnclaimedRequest[];
   } catch (e) {
     workerLogger.warn({ error: serializeError(e) }, 'Ponder GraphQL not reachable; returning empty set');
@@ -1391,6 +1394,7 @@ async function fetchSpecificRequest(requestId: string): Promise<UnclaimedRequest
       delivered
       dependencies
       enabledTools
+      jobName
     }
   }
 }`;
@@ -1411,7 +1415,8 @@ async function fetchSpecificRequest(requestId: string): Promise<UnclaimedRequest
       blockTimestamp: Number(r.blockTimestamp),
       delivered: Boolean(r?.delivered === true),
       dependencies: Array.isArray(r?.dependencies) ? r.dependencies.map((dep: any) => String(dep)) : undefined,
-      enabledTools: Array.isArray(r?.enabledTools) ? r.enabledTools : undefined
+      enabledTools: Array.isArray(r?.enabledTools) ? r.enabledTools : undefined,
+      jobName: r?.jobName ? String(r.jobName) : undefined
     };
   } catch (e: any) {
     workerLogger.warn({ error: serializeError(e) }, 'Error fetching specific request');
@@ -1653,40 +1658,34 @@ async function processOnce(): Promise<boolean> {
   if (!target) return false;
 
   // Check if this is a heartbeat request — deliver immediately without agent execution
-  if (target.ipfsHash) {
-    try {
-      const meta = await fetchIpfsMetadata(target.ipfsHash);
-      if (meta && (meta as any).heartbeat === true) {
-        workerLogger.info({ requestId: target.id }, 'Heartbeat request — auto-delivering');
-        const mechAddress = getMechAddress();
-        const safeAddress = getServiceSafeAddress();
-        const privateKey = getServicePrivateKey();
-        const rpcHttpUrl = getRequiredRpcUrl();
-        const chainConfig = getMechChainConfig();
+  // Uses jobName from Ponder index (reliable) instead of IPFS metadata fetch (can fail)
+  if (target.jobName === '__heartbeat__') {
+    workerLogger.info({ requestId: target.id }, 'Heartbeat request — auto-delivering');
+    const mechAddress = getMechAddress();
+    const safeAddress = getServiceSafeAddress();
+    const privateKey = getServicePrivateKey();
+    const rpcHttpUrl = getRequiredRpcUrl();
+    const chainConfig = getMechChainConfig();
 
-        if (mechAddress && safeAddress && privateKey) {
-          try {
-            await (deliverViaSafe as any)({
-              chainConfig,
-              requestId: target.id,
-              resultContent: { heartbeat: true, ts: Date.now() },
-              targetMechAddress: mechAddress,
-              safeAddress,
-              privateKey,
-              rpcHttpUrl,
-              wait: true,
-            });
-            workerLogger.info({ requestId: target.id }, 'Heartbeat delivered');
-          } catch (deliveryErr: any) {
-            workerLogger.warn({ requestId: target.id, error: deliveryErr.message }, 'Heartbeat delivery failed');
-          }
-        }
-        executedJobsThisSession.set(target.id, Date.now());
-        return true;
+    if (mechAddress && safeAddress && privateKey) {
+      try {
+        await (deliverViaSafe as any)({
+          chainConfig,
+          requestId: target.id,
+          resultContent: { heartbeat: true, ts: Date.now() },
+          targetMechAddress: mechAddress,
+          safeAddress,
+          privateKey,
+          rpcHttpUrl,
+          wait: true,
+        });
+        workerLogger.info({ requestId: target.id }, 'Heartbeat delivered');
+      } catch (deliveryErr: any) {
+        workerLogger.warn({ requestId: target.id, error: deliveryErr.message }, 'Heartbeat delivery failed');
       }
-    } catch {
-      // If metadata fetch fails, treat as normal job
     }
+    executedJobsThisSession.set(target.id, Date.now());
+    return true;
   }
 
   // Pre-execution guard: skip non-own-mech requests still within priority window.
@@ -1947,9 +1946,12 @@ async function main() {
         }
 
         // Submit heartbeat requests to meet staking liveness requirement
+        // Only the leader worker submits heartbeats to avoid Safe nonce collisions
+        const workerId = process.env.WORKER_ID || '';
+        const isHeartbeatLeader = !workerId || workerId.endsWith('-1') || workerId === 'default';
         // Check epoch gate first — skip heartbeat if target already met
         cyclesSinceLastHeartbeat++;
-        if (stakingContract && runtimeResolvedConfig && cyclesSinceLastHeartbeat >= WORKER_HEARTBEAT_CYCLES) {
+        if (isHeartbeatLeader && stakingContract && runtimeResolvedConfig && cyclesSinceLastHeartbeat >= WORKER_HEARTBEAT_CYCLES) {
           cyclesSinceLastHeartbeat = 0;
           try {
             const gate = await checkEpochGate(
