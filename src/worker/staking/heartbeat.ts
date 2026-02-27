@@ -195,6 +195,17 @@ async function submitHeartbeatWithCredentials(
 const HEARTBEAT_MIN_INTERVAL_SEC = parseInt(process.env.HEARTBEAT_MIN_INTERVAL_SEC || '60');
 
 const lastHeartbeatTimestampByService = new Map<number, number>();
+const lastHeartbeatTimestampBySigner = new Map<string, number>();
+
+function getSignerKeyForService(service: ServiceInfo): string | null {
+  if (service.agentEoaAddress) return service.agentEoaAddress.toLowerCase();
+  if (!service.agentPrivateKey) return null;
+  try {
+    return ethers.computeAddress(service.agentPrivateKey).toLowerCase();
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Maybe submit heartbeat requests to meet the staking liveness requirement.
@@ -282,6 +293,20 @@ export async function maybeSubmitHeartbeatForService(
     return;
   }
 
+  const signerKey = getSignerKeyForService(service);
+  if (signerKey) {
+    const lastBySigner = lastHeartbeatTimestampBySigner.get(signerKey) ?? 0;
+    if (now - lastBySigner < HEARTBEAT_MIN_INTERVAL_SEC) {
+      log.info({
+        serviceId,
+        signer: signerKey,
+        secondsSinceLast: now - lastBySigner,
+        minInterval: HEARTBEAT_MIN_INTERVAL_SEC,
+      }, 'Heartbeat throttled by signer');
+      return;
+    }
+  }
+
   try {
     const { deficit, current, target, epochSecondsRemaining, multisig } = await getRequestDeficit(stakingContract, serviceId, marketplaceAddress);
 
@@ -307,6 +332,9 @@ export async function maybeSubmitHeartbeatForService(
     await submitHeartbeatWithCredentials(multisig, service.mechContractAddress, service.agentPrivateKey, serviceId, marketplaceAddress);
 
     lastHeartbeatTimestampByService.set(serviceId, Math.floor(Date.now() / 1000));
+    if (signerKey) {
+      lastHeartbeatTimestampBySigner.set(signerKey, Math.floor(Date.now() / 1000));
+    }
   } catch (error: any) {
     log.warn({ error: error.message, serviceId }, 'Heartbeat check failed (non-fatal)');
   }
