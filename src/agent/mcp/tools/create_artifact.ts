@@ -3,7 +3,7 @@ import { pushJsonToIpfs } from '@jinn-network/mech-client-ts/dist/ipfs.js';
 import { buildRegistrationFile, formatCreatorId } from '../../../shared/adw/registration.js';
 import { signRegistrationFile } from '../../../shared/adw/signing.js';
 import type { ADWDocumentType, ArtifactProfile } from '../../../shared/adw/types.js';
-import { getServicePrivateKey } from '../../../env/operate-profile.js';
+import { getServicePrivateKey, getServiceSafeAddress } from '../../../env/operate-profile.js';
 import { createHash } from 'crypto';
 
 export const createArtifactParams = z.object({
@@ -99,7 +99,8 @@ export async function createArtifact(args: unknown) {
     const [, contentCid] = await pushJsonToIpfs(payload);
 
     // Step 2: Build ADW Registration File wrapping the content
-    const workerAddress = process.env.JINN_SERVICE_MECH_ADDRESS || '0x0000000000000000000000000000000000000000';
+    // Creator is the service address (Safe multisig) — the on-chain identity of the OLAS service
+    const workerAddress = getServiceSafeAddress() || '0x0000000000000000000000000000000000000000';
     const documentType: ADWDocumentType = 'adw:Artifact';
     const profile: ArtifactProfile = {
       topic,
