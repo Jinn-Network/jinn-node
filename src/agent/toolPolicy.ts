@@ -403,6 +403,9 @@ export const VALID_JOB_TOOLS: ReadonlySet<string> = new Set([
   ...TELEGRAM_TOOLS,
   ...FIREFLIES_TOOLS,
   ...RAILWAY_TOOLS,
+  // Dispatch schedule tools (venture orchestration)
+  'read_dispatch_schedule',
+  'update_dispatch_schedule',
   // Extension tools
   'inspect_workstream',
   'inspect_job_run',

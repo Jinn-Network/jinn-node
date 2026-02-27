@@ -8,17 +8,212 @@
 
 import { randomUUID } from 'node:crypto';
 import { workerLogger } from '../../logging/index.js';
-import { getTemplate } from '../../scripts/templates/crud.js';
+import { getTemplate, listTemplates } from '../../scripts/templates/crud.js';
 import { buildIpfsPayload } from '../../agent/shared/ipfs-payload-builder.js';
 import { extractToolPolicyFromBlueprint } from '../../shared/template-tools.js';
 import { extractSchemaEnvVars } from '../../shared/job-env.js';
 import { getMechAddress, getServicePrivateKey, getServiceSafeAddress, getMechChainConfig } from '../../env/operate-profile.js';
-import { getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
+import { getRequiredRpcUrl, getPonderGraphqlUrl } from '../../agent/mcp/tools/shared/env.js';
 import { getRandomStakedMech } from '../filters/stakingFilter.js';
 import { get_mech_config } from '@jinn-network/mech-client-ts/dist/config.js';
 import { dispatchViaSafe } from '../safe-dispatch.js';
+import { graphQLRequest } from '../../http/client.js';
 import type { Venture } from '../../data/ventures.js';
 import type { ScheduleEntry } from '../../data/types/scheduleEntry.js';
+
+// ---------------------------------------------------------------------------
+// Context provisioning — opt-in rich context injection into blueprint
+// ---------------------------------------------------------------------------
+
+type ContextProvisioningConfig = {
+  enabled: boolean;
+  includeDispatchSchedule: boolean;
+  includeTemplateCatalog: boolean;
+  includeRecentRequestIds: boolean;
+  includeVentureInvariants: boolean;
+  templateCatalogLimit: number;
+  recentRequestLimit: number;
+  injectIntoInvariants: string[];
+};
+
+const DEFAULT_CONTEXT_CONFIG: ContextProvisioningConfig = {
+  enabled: false,
+  includeDispatchSchedule: false,
+  includeTemplateCatalog: false,
+  includeRecentRequestIds: false,
+  includeVentureInvariants: false,
+  templateCatalogLimit: 20,
+  recentRequestLimit: 5,
+  injectIntoInvariants: [],
+};
+
+function parseContextProvisioningConfig(mergedInput: Record<string, any>): ContextProvisioningConfig {
+  const raw = mergedInput.contextProvisioning;
+  if (!raw || typeof raw !== 'object') return DEFAULT_CONTEXT_CONFIG;
+
+  const include = (key: string) => raw[key] === true;
+  const anyEnabled = include('includeDispatchSchedule') || include('includeTemplateCatalog')
+    || include('includeRecentRequestIds') || include('includeVentureInvariants');
+
+  return {
+    enabled: anyEnabled,
+    includeDispatchSchedule: include('includeDispatchSchedule'),
+    includeTemplateCatalog: include('includeTemplateCatalog'),
+    includeRecentRequestIds: include('includeRecentRequestIds'),
+    includeVentureInvariants: include('includeVentureInvariants'),
+    templateCatalogLimit: typeof raw.templateCatalogLimit === 'number' ? raw.templateCatalogLimit : 20,
+    recentRequestLimit: typeof raw.recentRequestLimit === 'number' ? raw.recentRequestLimit : 5,
+    injectIntoInvariants: Array.isArray(raw.injectIntoInvariants) ? raw.injectIntoInvariants : [],
+  };
+}
+
+type DispatchContextBundle = {
+  scheduleBlock: string;
+  templateBlock: string;
+  recentRequestIdsBlock: string;
+  ventureInvariantsBlock: string;
+};
+
+async function buildDispatchContextBundle(
+  venture: Venture,
+  config: ContextProvisioningConfig,
+): Promise<DispatchContextBundle> {
+  const bundle: DispatchContextBundle = {
+    scheduleBlock: '',
+    templateBlock: '',
+    recentRequestIdsBlock: '',
+    ventureInvariantsBlock: '',
+  };
+
+  if (config.includeDispatchSchedule) {
+    const schedule = venture.dispatch_schedule || [];
+    bundle.scheduleBlock = schedule.length > 0
+      ? schedule.map((e: any) =>
+        `  - [${e.id}] template=${e.templateId} cron="${e.cron}" enabled=${e.enabled !== false} label="${e.label || ''}"`)
+        .join('\n')
+      : '  (no schedule entries configured)';
+  }
+
+  if (config.includeTemplateCatalog) {
+    try {
+      const ventureTemplates = await listTemplates({
+        ventureId: venture.id,
+        status: 'published',
+        limit: config.templateCatalogLimit,
+      });
+      const globalTemplates = await listTemplates({
+        status: 'published',
+        limit: config.templateCatalogLimit,
+      });
+      const allTemplates = deduplicateById([...ventureTemplates, ...globalTemplates])
+        .slice(0, config.templateCatalogLimit);
+      bundle.templateBlock = allTemplates.length > 0
+        ? allTemplates.map((t: any) =>
+          `  - [${t.id}] "${t.name}" (${t.slug}) tools=${(t.enabled_tools || []).length}`)
+          .join('\n')
+        : '  (no published templates found)';
+    } catch (err) {
+      workerLogger.warn({ err }, 'Context provisioning: failed to fetch template catalog');
+      bundle.templateBlock = '  (template catalog unavailable)';
+    }
+  }
+
+  if (config.includeRecentRequestIds) {
+    try {
+      const ponderUrl = getPonderGraphqlUrl();
+      const data = await graphQLRequest<{
+        requests: { items: Array<{ id: string; jobName: string; delivered: boolean; blockTimestamp: string }> };
+      }>({
+        url: ponderUrl,
+        query: `query RecentVentureRequests($ventureId: String!) {
+          requests(
+            where: { ventureId: $ventureId }
+            limit: ${config.recentRequestLimit + 3}
+            orderBy: "blockTimestamp"
+            orderDirection: "desc"
+          ) {
+            items { id jobName delivered blockTimestamp }
+          }
+        }`,
+        variables: { ventureId: venture.id },
+      });
+      const ids = (data?.requests?.items || [])
+        .map(item => item.id)
+        .filter((id): id is string => typeof id === 'string' && id.startsWith('0x'))
+        .slice(0, config.recentRequestLimit);
+      bundle.recentRequestIdsBlock = ids.length > 0
+        ? ids.map(id => `  - ${id}`).join('\n')
+        : '  (no recent request IDs found)';
+    } catch (err) {
+      workerLogger.warn({ err }, 'Context provisioning: failed to fetch recent request IDs');
+      bundle.recentRequestIdsBlock = '  (recent request IDs unavailable)';
+    }
+  }
+
+  if (config.includeVentureInvariants) {
+    const ventureBlueprint = venture.blueprint as any;
+    const allInvariants = Array.isArray(ventureBlueprint?.invariants) ? ventureBlueprint.invariants : [];
+    bundle.ventureInvariantsBlock = allInvariants.length > 0
+      ? allInvariants.map((inv: any) => {
+        if (inv.type === 'BOOLEAN') {
+          return `  - [${inv.id}] (${inv.type}): ${inv.condition || ''}. Assessment: ${inv.assessment || ''}`;
+        }
+        const bounds = inv.min != null && inv.max != null
+          ? `${inv.min}–${inv.max}`
+          : inv.min != null ? `≥ ${inv.min}` : inv.max != null ? `≤ ${inv.max}` : '';
+        return `  - [${inv.id}] (${inv.type}): ${inv.metric || ''} ${bounds}. Assessment: ${inv.assessment || ''}`;
+      }).join('\n')
+      : '';
+  }
+
+  return bundle;
+}
+
+function applyContextInjectionToInvariants(
+  blueprint: any,
+  config: ContextProvisioningConfig,
+  bundle: DispatchContextBundle,
+  ventureName: string,
+  ventureId: string,
+): void {
+  const invariants = blueprint?.invariants;
+  if (!Array.isArray(invariants) || config.injectIntoInvariants.length === 0) return;
+
+  for (const inv of invariants) {
+    if (!config.injectIntoInvariants.includes(inv.id)) continue;
+
+    let contextBlock = '';
+
+    if (bundle.ventureInvariantsBlock && config.includeVentureInvariants) {
+      contextBlock += `\n\nVENTURE INVARIANTS for "${ventureName}" (${ventureId}):\n${bundle.ventureInvariantsBlock}\n\nYou MUST assess each of these venture invariants during ORIENT and include them in the invariantHealthMap.`;
+    }
+
+    if (bundle.scheduleBlock && config.includeDispatchSchedule) {
+      contextBlock += `\n\nDISPATCH SCHEDULE for venture "${ventureName}":\n${bundle.scheduleBlock}`;
+    }
+
+    if (bundle.templateBlock && config.includeTemplateCatalog) {
+      contextBlock += `\n\nAVAILABLE TEMPLATES:\n${bundle.templateBlock}`;
+    }
+
+    if (bundle.recentRequestIdsBlock && config.includeRecentRequestIds) {
+      contextBlock += `\n\nRECENT REQUEST IDS (use these with get_details):\n${bundle.recentRequestIdsBlock}`;
+    }
+
+    if (contextBlock) {
+      inv.condition = (inv.condition || '') + contextBlock;
+    }
+  }
+}
+
+function deduplicateById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter(item => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
 
 type DispatchFromTemplateOptions = {
   /**
@@ -71,6 +266,32 @@ export async function dispatchFromTemplate(
 
   // Substitute {{variables}} in blueprint with merged input
   const substitutedBlueprint = deepSubstitute(blueprintObj, mergedInput);
+
+  // 3b. Opt-in context provisioning — inject schedule/templates/requestIds/invariants
+  const contextConfig = parseContextProvisioningConfig(mergedInput);
+  if (contextConfig.enabled) {
+    workerLogger.info(
+      {
+        ventureId: venture.id,
+        templateId: template.id,
+        includeDispatchSchedule: contextConfig.includeDispatchSchedule,
+        includeTemplateCatalog: contextConfig.includeTemplateCatalog,
+        includeRecentRequestIds: contextConfig.includeRecentRequestIds,
+        includeVentureInvariants: contextConfig.includeVentureInvariants,
+        injectIntoInvariants: contextConfig.injectIntoInvariants,
+      },
+      'Venture dispatch: context provisioning enabled'
+    );
+    const dispatchContext = await buildDispatchContextBundle(venture, contextConfig);
+    applyContextInjectionToInvariants(
+      substitutedBlueprint,
+      contextConfig,
+      dispatchContext,
+      venture.name,
+      venture.id,
+    );
+  }
+
   const blueprintStr = JSON.stringify(substitutedBlueprint);
 
   // 4. Extract venture invariants (FLOOR/CEILING/RANGE) for context
