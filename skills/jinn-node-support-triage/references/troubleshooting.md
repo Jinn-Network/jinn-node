@@ -29,6 +29,15 @@
 | Credentialed tools fail | Wrong gateway URL or ACL missing | Verify `X402_GATEWAY_URL`, gateway health, ACL grants |
 | Git task failures | Missing credentials | Set `GITHUB_TOKEN`, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` |
 
+## stOLAS failures
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `Master Safe needs ETH for mech deployment` | Master Safe underfunded after stOLAS stake | Fund Master Safe with ≥0.01 ETH, run `npx tsx scripts/deploy-mech.ts` |
+| `Service created but mech deployment failed` | Agent EOA gas issue or RPC error | Fund Master Safe, run `npx tsx scripts/deploy-mech.ts --service-config-id=<id>` |
+| stOLAS `stake()` reverts | Distributor out of OLAS or staking proxy not configured | Check distributor OLAS balance and `mapStakingProxyConfigs` for staking contract |
+| `No staking slots available` | Staking contract is full | Wait for evictions or use a different staking contract |
+
 ## Railway failures
 
 | Symptom | Cause | Fix |

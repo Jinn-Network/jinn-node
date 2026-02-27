@@ -83,6 +83,17 @@ When setup exits for funding, treat as expected behavior:
 3. rerun `yarn setup`,
 4. repeat until complete.
 
+### 4b. Alternative: stOLAS setup (no OLAS required)
+
+If operator does not have 10,000 OLAS:
+
+```bash
+cd jinn-node
+yarn setup --stolas
+```
+
+Requires Master EOA + Master Safe to exist (run `yarn setup` first to create wallet). Only ETH needed for gas (~0.02 ETH on Master EOA + ~0.01 ETH in Master Safe).
+
 ### 5. Mnemonic capture protocol
 
 On first wallet creation, extract and show the mnemonic from setup output immediately.

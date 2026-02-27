@@ -245,22 +245,25 @@ After the human confirms funding, rerun `yarn setup`. It will detect the existin
 
 **`.operate directory not found` warnings** — Ignore these. They are first-run noise from the config resolver checking multiple possible locations. They do not indicate a problem.
 
-### Post-Setup: Set Max Delivery Rate
+### Post-Setup: Verify Delivery Rate
 
-After setup completes (mech is deployed and staked), you **MUST** set `maxDeliveryRate` to 99 on the mech contract. Without this, a baseMech (service 112) will deliver garbage responses to your requests after the priority window expires.
+After setup completes (mech is deployed and staked), verify your mech's `maxDeliveryRate` is set to 99. Without this, a baseMech (service 112) will deliver garbage responses to your requests after the priority window expires.
 
 ```bash
-# From the monorepo root (not jinn-node/)
-OPERATE_PROFILE_DIR=$(pwd)/.operate \
+cd jinn-node
+RPC_URL=<your-rpc-url> yarn tsx scripts/mech/assert-delivery-rates.ts
+```
+
+If any mech shows a rate other than 99, fix it:
+
+```bash
+cd jinn-node
 OPERATE_PASSWORD=<password> \
 RPC_URL=<your-rpc-url> \
-yarn tsx scripts/mech/set-max-delivery-rate.ts 99
+yarn tsx scripts/mech/fix-all-delivery-rates.ts 99
 ```
 
-Verify with:
-```bash
-yarn mech:check-rate
-```
+**Note:** stOLAS setup (`yarn setup --stolas`) sets this automatically. Standard setup may require manual correction.
 
 **Why 99?** The baseMech's threshold is 100. Requests with `deliveryRate < 100` are ignored by it. The mech factory defaults to `5000000000000` which is well above the threshold, causing the baseMech to scoop expired requests and deliver empty responses.
 
@@ -284,23 +287,9 @@ If the operator does not have 10,000 OLAS, they can use the **stOLAS** path. stO
 ### Prerequisites
 
 - Phases 1-2 completed (`.env` configured, dependencies installed)
-- **~0.02 ETH** on Base for the operator EOA (gas for `stake()` tx)
-- An operator private key (hex, 0x-prefixed) set as `OPERATOR_PRIVATE_KEY` in `.env`
-
-### Generate Operator Key
-
-If the operator doesn't have one, generate a fresh EOA:
-
-```bash
-node -e "const { Wallet } = require('ethers'); const w = Wallet.createRandom(); console.log('Address:', w.address); console.log('Private Key:', w.privateKey);"
-```
-
-Add to `.env`:
-```bash
-OPERATOR_PRIVATE_KEY=0x...  # The private key from above
-```
-
-Fund the address with ~0.02 ETH on Base.
+- Run `yarn setup` at least once to create the wallet (Master EOA + Master Safe). If setup exits for ETH funding, fund the Master EOA and rerun until the Master Safe is created.
+- **~0.02 ETH** on the Master EOA (gas for `stake()` transaction)
+- **~0.01 ETH** in the Master Safe (for agent funding + mech deployment gas)
 
 ### Run stOLAS Setup
 
@@ -310,20 +299,33 @@ yarn setup --stolas
 ```
 
 This will:
-1. Check stOLAS prerequisites (distributor configured, slots available)
-2. Call `stake()` on the ExternalStakingDistributor (permissionless)
-3. Create a new on-chain service + Safe automatically
-4. Import the service config into `.operate/`
+1. Load Master EOA + Master Safe from `.operate/`
+2. Generate a new agent EOA for this service
+3. Preflight check (distributor configured, staking slots available)
+4. Route `stake()` through Master Safe (creates service + Safe on-chain)
+5. Discover serviceId + Safe from chain events
+6. Store agent key in `.operate/keys/`
+7. Import service config to `.operate/services/`
+8. Check Master Safe has enough ETH for mech deployment
+9. Fund agent EOA from Master Safe (via FundDistributor)
+10. Deploy mech contract via service Safe
+11. Update config with mech address
+
+If step 8 fails (insufficient Master Safe ETH), setup returns with instructions to fund the Master Safe and run:
+```bash
+npx tsx scripts/deploy-mech.ts --service-config-id=<id>
+```
 
 ### What's Different from Standard Setup
 
 | | Standard | stOLAS |
 |--|---------|--------|
 | OLAS required | ~10,000 OLAS | 0 OLAS |
-| ETH required | ~0.015 ETH | ~0.02 ETH |
+| ETH required | ~0.015 ETH | ~0.03 ETH (Master EOA + Master Safe) |
 | Who provides capital | Operator | LemonTree depositors |
 | Reward split | 100% to operator | 5% operator, 10% protocol, 85% depositors |
 | Setup command | `yarn setup` | `yarn setup --stolas` |
+| maxDeliveryRate | Manual fix required | Automatically set to 99 |
 
 ### Post-Setup
 
@@ -397,12 +399,12 @@ cd jinn-node
 railway login
 railway link    # Link to your Railway project
 railway up      # Deploy
-railway logs -f # Watch logs
+railway logs --lines 100  # View recent logs
 ```
 
 ### Monitoring
 
-- **Logs**: Railway dashboard → Deployments → Logs, or `railway logs -f`
+- **Logs**: Railway dashboard → Deployments → Logs, or `railway logs --lines 100`
 - **Health**: The worker exposes `GET /health` — Railway monitors this automatically
 - **Restarts**: `railway.toml` configures automatic restart on failure (up to 10 retries)
 
@@ -460,6 +462,7 @@ All wallet commands require `OPERATE_PASSWORD` and `RPC_URL` in `.env` (unless n
 | `yarn wallet:withdraw --to <addr>` | Transfer funds from Safe to external address |
 | `yarn wallet:unstake` | Unstake service (72-hour cooldown applies) |
 | `yarn wallet:recover --to <addr>` | Terminate service + withdraw all — **confirm with human first** |
+| `yarn wallet:restake` | Restake an evicted service |
 
 **Destructive operations** (`recover`, `export-keys`): Always pause and get human confirmation before executing. Use `--dry-run` where available to preview first.
 
@@ -467,8 +470,33 @@ All wallet commands require `OPERATE_PASSWORD` and `RPC_URL` in `.env` (unless n
 - `withdraw`: `--to <addr>` (required), `--asset ETH|OLAS|all` (default: all), `--dry-run`
 - `recover`: `--to <addr>` (required), `--dry-run`, `--skip-terminate` (if already unstaked)
 - `unstake`: `--service-id <id>` (optional, reads from config), `--dry-run`
+- `restake`: `--service <config-id>` (optional), `--dry-run`
 
 **72-hour staking cooldown**: OLAS requires minimum 72 hours staked before unstake. Recovery will fail if cooldown has not elapsed.
+
+---
+
+## Service Management
+
+| Command | Purpose |
+|---------|---------|
+| `yarn service:list` | List all configured services in `.operate/` |
+| `yarn service:status` | Show health status for all services |
+| `yarn service:fleet` | Fleet health summary (JSON output) |
+| `yarn service:add` | Add another service (multi-service rotation) |
+| `yarn rewards:summary` | View pending staking rewards |
+| `yarn staking:migrate --source=X --target=Y` | Migrate between staking contracts |
+
+---
+
+## Optional Configuration
+
+These environment variables are optional and can be added to `.env`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EARNING_SCHEDULE` | (unset — always earning) | Time window for job claiming, e.g. `22:00-08:00`. Overnight windows work. |
+| `EARNING_MAX_JOBS` | (unset — unlimited) | Max jobs per earning window |
 
 ---
 

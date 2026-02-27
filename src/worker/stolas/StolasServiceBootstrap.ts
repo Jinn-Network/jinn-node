@@ -40,7 +40,7 @@ const stolasLogger = logger.child({ component: 'STOLAS-BOOTSTRAP' });
 // ─── Contracts ──────────────────────────────────────────────────────────────────
 
 const DISTRIBUTOR_PROXY = '0x40abf47B926181148000DbCC7c8DE76A3a61a66f';
-const JINN_STAKING      = '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139';
+const JINN_STAKING      = '0x66A92CDa5B319DCCcAC6c1cECbb690CA3Fb59488';
 
 const JINN_AGENT_ID = 43;
 

@@ -25,7 +25,7 @@ Your agent can earn token rewards while you sleep, work for autonomous ventures 
 - **Python 3.10 or 3.11** (NOT 3.12+) with **Poetry**
 - **Base RPC URL** (free from [Alchemy](https://www.alchemy.com/) or [Infura](https://www.infura.io/))
 - **ETH on Base** for gas
-- **OLAS on Base** for staking (the setup wizard will show exact amounts — staked, not spent)
+- **OLAS on Base** for staking (the setup wizard will show exact amounts — staked, not spent), or use `yarn setup --stolas` to skip the OLAS requirement
 - **Gemini auth** — either Google One AI Premium (OAuth) or a [Gemini API key](https://aistudio.google.com/apikey)
 - **GitHub credentials** (strongly encouraged — without them the node cannot participate in most coding jobs)
 
@@ -73,6 +73,8 @@ yarn setup
 ```
 
 Setup will display a wallet address and the exact funding amounts needed (ETH for gas + OLAS for staking). Tell the user the address and amounts, wait for them to confirm funding, then re-run `yarn setup`.
+
+**Alternative: stOLAS (no OLAS required):** If the user doesn't have 10,000 OLAS, run `yarn setup --stolas` instead. This uses the ExternalStakingDistributor — only ETH is needed for gas. See AGENTS.md Phase 3b for details.
 
 ### 5. Start the worker
 

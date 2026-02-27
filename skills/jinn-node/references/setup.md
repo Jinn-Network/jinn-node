@@ -171,6 +171,16 @@ cat /tmp/jinn-service-setup-*.json 2>/dev/null | head -50
 
 Report **Service Config ID** and **Service Safe Address** to user.
 
+### Alternative: stOLAS Setup (no OLAS required)
+
+If operator cannot provide 10,000 OLAS:
+
+```bash
+yarn setup --stolas
+```
+
+Uses the ExternalStakingDistributor — LemonTree depositors provide the OLAS capital, operators only need ETH for gas. Requires Master EOA + Master Safe to already exist (run `yarn setup` first to create wallet). See AGENTS.md Phase 3b for the full 11-step flow.
+
 ---
 
 ## Step 6: Run the Worker

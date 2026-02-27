@@ -47,6 +47,16 @@ yarn staking:claim-rewards
   - Ethereum mainnet gas for `claim-incentives`.
   - Base gas for `claim-rewards`.
 
+### 3. Migrate between staking contracts
+
+```bash
+cd jinn-node
+yarn staking:migrate --source=jinn --target=jinn_v2 --dry-run
+yarn staking:migrate --source=jinn --target=jinn_v2
+```
+
+Handles: unstake from source → top-up bond if target requires more → stake to target → verify.
+
 ## Failure handling
 
 If claim fails:
