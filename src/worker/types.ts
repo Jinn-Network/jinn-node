@@ -227,6 +227,7 @@ export interface UnclaimedRequest {
   delivered?: boolean;
   dependencies?: string[];  // request IDs that must be delivered first
   responseTimeout?: number; // absolute unix timestamp (seconds) after which any mech can deliver
+  ventureId?: string;       // venture that owns this request (from Ponder)
 }
 
 /**

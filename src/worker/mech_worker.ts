@@ -694,6 +694,7 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       mech
       sender
       workstreamId
+      ventureId
       ipfsHash
       blockTimestamp
       delivered
@@ -775,6 +776,7 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       mech
       sender
       workstreamId
+      ventureId
       ipfsHash
       blockTimestamp
       delivered
@@ -845,7 +847,8 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       delivered: Boolean(r?.delivered === true),
       dependencies: Array.isArray(r?.dependencies) ? r.dependencies.map((dep: any) => String(dep)) : undefined,
       enabledTools: Array.isArray(r?.enabledTools) ? r.enabledTools : undefined,
-      jobName: r?.jobName ? String(r.jobName) : undefined
+      jobName: r?.jobName ? String(r.jobName) : undefined,
+      ventureId: r?.ventureId ? String(r.ventureId) : undefined,
     })) as UnclaimedRequest[];
   } catch (e) {
     workerLogger.warn({ error: serializeError(e) }, 'Ponder GraphQL not reachable; returning empty set');

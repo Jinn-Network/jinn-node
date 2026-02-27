@@ -74,6 +74,9 @@ export async function fetchIpfsMetadata(ipfsHash?: string): Promise<IpfsMetadata
         }
       : undefined;
 
+    // Venture ID for venture lineage propagation
+    const ventureId = json?.ventureId ? String(json.ventureId) : undefined;
+
     // Template ID for tracking x402 template executions
     const templateId = json?.templateId ? String(json.templateId) : undefined;
     
@@ -98,6 +101,7 @@ export async function fetchIpfsMetadata(ipfsHash?: string): Promise<IpfsMetadata
       codeMetadata,
       model,
       dependencies,
+      ventureId,
       lineage,
       templateId,
       outputSpec,
