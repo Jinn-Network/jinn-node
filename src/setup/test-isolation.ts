@@ -56,9 +56,9 @@ async function resolveMiddlewarePath(): Promise<string> {
     scriptLogger.debug({ error }, 'Poetry middleware lookup failed');
   }
 
-  // 3. Fallback to sibling directory (monorepo compatibility)
-  const fallbackPath = path.resolve(__dirname, '..', '..', '..', 'olas-operate-middleware');
-  scriptLogger.info({ fallbackPath }, 'Using fallback middleware path');
+  // 3. Fallback to jinn-node root (middleware installed via Poetry)
+  const fallbackPath = path.resolve(__dirname, '..', '..');
+  scriptLogger.info({ fallbackPath }, 'Using jinn-node root as fallback middleware path');
   return fallbackPath;
 }
 

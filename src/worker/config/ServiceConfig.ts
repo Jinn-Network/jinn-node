@@ -27,26 +27,26 @@ export type SupportedChain = typeof SUPPORTED_CHAINS[number];
 export const SERVICE_CONSTANTS = {
   // Bond amount (wei as string for contract calls)
   DEFAULT_SERVICE_BOND_WEI: "50000000000000000000", // 50 ETH in wei (Pearl template)
-  
+
   // Fund requirements (wei as integers for middleware)
   DEFAULT_AGENT_FUNDING_WEI: 2000000000000000, // 0.002 ETH for gas
   DEFAULT_SAFE_FUNDING_WEI: 2000000000000000, // 0.002 ETH for gas
-  
+
   // OLAS token requirements (Base mainnet: 0x54330d28ca3357F294334BDC454a032e7f353416)
   DEFAULT_AGENT_OLAS_WEI: "50000000000000000000", // 50 OLAS (unused by default)
   DEFAULT_SAFE_OLAS_WEI: "50000000000000000000",   // 50 OLAS (unused by default)
   DEFAULT_OLAS_TOKEN_ADDRESS: "0x54330d28ca3357F294334BDC454a032e7f353416",
-  
-  // jinn-node service package (uploaded during agent 103 registration)
-  DEFAULT_SERVICE_HASH: "QmdU7zr6XiYKB2jxYN6Z6YxDACmcyKHGx9vT3EioryqyMq",
+
+  // jinn_node service package (uploaded during agent 103 registration, updated tx 0x15ae9547)
+  DEFAULT_SERVICE_HASH: "QmY3cVULHaiBavCWZEEgoVWmFJpo4gKWK42YFmyVESpp1r",
   DEFAULT_SERVICE_NFT: "bafybeiaakdeconw7j5z76fgghfdjmsr6tzejotxcwnvmp3nroaw3glgyve",
 
   // Staking configuration
   DEFAULT_STAKING_PROGRAM_ID: "0x66A92CDa5B319DCCcAC6c1cECbb690CA3Fb59488", // Jinn v2 staking (agent 103, DeliveryActivityChecker)
-  
+
   // Supported chain with working configuration
   DEFAULT_HOME_CHAIN: "base" as SupportedChain,
-  
+
   // RPC URLs for supported chains
   DEFAULT_RPC_URLS: {
     gnosis: "https://gnosis-rpc.publicnode.com",
@@ -57,8 +57,8 @@ export const SERVICE_CONSTANTS = {
     polygon: "https://polygon-rpc.com",
     arbitrum: "https://arb1.arbitrum.io/rpc",
   } as Record<SupportedChain, string>,
-  
-  // jinn-node agent (registered on Ethereum mainnet, tx 0x4a3d8d35...)
+
+  // jinn_node agent (registered on Ethereum mainnet, tx 0x4a3d8d35..., name fix tx 0x15ae9547...)
   DEFAULT_AGENT_ID: 103,
 
   // Default agent release metadata for the service package
@@ -66,11 +66,11 @@ export const SERVICE_CONSTANTS = {
     is_aea: true,
     repository: {
       owner: "Jinn-Network",
-      name: "jinn-node",
+      name: "jinn_node",
       version: "v1.0.0",
     },
   },
-  
+
   // Mech info directory
   MECH_INFO_DIR: ".mech-info"
 } as const;
@@ -118,11 +118,11 @@ export interface ServiceConfigTemplate {
  */
 export function createDefaultServiceConfig(overrides: Partial<ServiceConfigTemplate> = {}): ServiceConfigTemplate {
   const homeChain = overrides.home_chain || SERVICE_CONSTANTS.DEFAULT_HOME_CHAIN;
-  
+
   // Generate unique service name with timestamp to avoid conflicts
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const serviceName = `jinn-service-${timestamp}`;
-  
+
   return {
     name: overrides.name || serviceName,
     hash: SERVICE_CONSTANTS.DEFAULT_SERVICE_HASH,
@@ -158,9 +158,9 @@ export function createDefaultServiceConfig(overrides: Partial<ServiceConfigTempl
  * Validate that chain is supported by middleware
  * JINN-194: Added chain support validation
  */
-export function validateChainSupport(chain: string): { 
-  isSupported: boolean; 
-  error?: string; 
+export function validateChainSupport(chain: string): {
+  isSupported: boolean;
+  error?: string;
 } {
   if (!SUPPORTED_CHAINS.includes(chain as SupportedChain)) {
     return {
@@ -168,7 +168,7 @@ export function validateChainSupport(chain: string): {
       error: `Chain "${chain}" not supported. Supported chains: ${SUPPORTED_CHAINS.join(', ')}`
     };
   }
-  
+
   return { isSupported: true };
 }
 
@@ -176,17 +176,17 @@ export function validateChainSupport(chain: string): {
  * Validates a service configuration
  * JINN-194: Enhanced with comprehensive validation
  */
-export function validateServiceConfig(config: any): { 
-  isValid: boolean; 
-  errors: string[]; 
+export function validateServiceConfig(config: any): {
+  isValid: boolean;
+  errors: string[];
 } {
   const errors: string[] = [];
-  
+
   // Basic structure checks
   if (!config.name) errors.push('Missing service name');
   if (!config.home_chain) errors.push('Missing home_chain');
   if (!config.hash) errors.push('Missing service hash');
-  
+
   // Chain support check
   if (config.home_chain) {
     const chainValidation = validateChainSupport(config.home_chain);
@@ -194,23 +194,23 @@ export function validateServiceConfig(config: any): {
       errors.push(chainValidation.error!);
     }
   }
-  
+
   // Configuration exists for home chain
   if (config.home_chain && !config.configurations?.[config.home_chain]) {
     errors.push(`Missing configuration for home_chain "${config.home_chain}"`);
   }
-  
-  // IPFS hash format check
-  if (config.hash && !config.hash.startsWith('bafybei')) {
-    errors.push('Invalid IPFS hash format (must start with "bafybei")');
+
+  // IPFS hash format check (CIDv0 = "Qm" prefix, CIDv1 = "bafybei" prefix)
+  if (config.hash && !config.hash.startsWith('bafybei') && !config.hash.startsWith('Qm')) {
+    errors.push('Invalid IPFS hash format (must start with "bafybei" or "Qm")');
   }
-  
+
   // Agent ID type check
   const chainConfig = config.configurations?.[config.home_chain];
   if (chainConfig && typeof chainConfig.agent_id !== 'number') {
     errors.push('agent_id must be a number');
   }
-  
+
   // Fund requirements type check
   if (chainConfig?.fund_requirements) {
     for (const [token, amounts] of Object.entries<any>(chainConfig.fund_requirements)) {
@@ -219,7 +219,7 @@ export function validateServiceConfig(config: any): {
       }
     }
   }
-  
+
   return {
     isValid: errors.length === 0,
     errors
@@ -232,13 +232,13 @@ export function validateServiceConfig(config: any): {
  */
 export function validateServiceConfigOrThrow(config: any): void {
   const validation = validateServiceConfig(config);
-  
+
   if (!validation.isValid) {
     const errorMessage = [
       'Service configuration validation failed:',
       ...validation.errors.map((err, i) => `  ${i + 1}. ${err}`)
     ].join('\n');
-    
+
     throw new Error(errorMessage);
   }
 }
@@ -254,9 +254,9 @@ export async function validateServiceConfigFile(
     const fs = await import('fs/promises');
     const content = await fs.readFile(configPath, 'utf-8');
     const config = JSON.parse(content);
-    
+
     const validation = validateServiceConfig(config);
-    
+
     return {
       ...validation,
       config: validation.isValid ? config : undefined
@@ -282,6 +282,6 @@ export function extractServiceName(configPathOrConfig: string | any): string {
       return 'unknown-service';
     }
   }
-  
+
   return configPathOrConfig?.name || 'unknown-service';
 }

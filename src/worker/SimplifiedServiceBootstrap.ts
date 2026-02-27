@@ -101,7 +101,7 @@ export class SimplifiedServiceBootstrap {
 
   constructor(config: SimplifiedBootstrapConfig) {
     this.config = config;
-    
+
     const envAttended = typeof process.env.ATTENDED === 'string'
       ? process.env.ATTENDED.toLowerCase() === 'true'
       : undefined;
@@ -110,7 +110,7 @@ export class SimplifiedServiceBootstrap {
       ? process.env.JINN_REUSE_SERVICE_CONFIG.toLowerCase() !== 'false'
       : undefined;
     this.reuseExistingService = config.reuseExistingService ?? envReuse ?? true;
-    
+
     // Validate required config
     if (!config.operatePassword) {
       throw new Error('operatePassword is required (prevents password prompt)');
@@ -118,10 +118,10 @@ export class SimplifiedServiceBootstrap {
     if (!config.rpcUrl) {
       throw new Error('rpcUrl is required');
     }
-    
-    bootstrapLogger.info({ 
+
+    bootstrapLogger.info({
       chain: config.chain,
-      deployMech: config.deployMech || false 
+      deployMech: config.deployMech || false
     }, "SimplifiedServiceBootstrap initialized");
   }
 
@@ -231,16 +231,16 @@ export class SimplifiedServiceBootstrap {
     try {
       // Step 1: Create operate wrapper with configured ATTENDED mode
       await this.initializeWrapper();
-      
+
       // Step 2: Create service config
       const { serviceConfig, configPath } = await this.createServiceConfig();
-      
+
       // Step 3: Show user intro (what to expect)
       this.printIntro();
-      
+
       // Step 4: Run HTTP-based flow (daemon + API)
       return await this.runHttpFlow(serviceConfig, configPath);
-      
+
     } catch (error) {
       bootstrapLogger.error({ error }, "Bootstrap failed");
       return {
@@ -320,12 +320,12 @@ export class SimplifiedServiceBootstrap {
     if (effectiveRpcUrl && serviceConfig.configurations[this.config.chain]) {
       serviceConfig.configurations[this.config.chain].rpc = effectiveRpcUrl;
     }
-    
+
     if (serviceConfig.configurations[this.config.chain]) {
       const stakingProgram = this.config.stakingProgram || 'custom_staking';
       if (stakingProgram === 'custom_staking') {
         serviceConfig.configurations[this.config.chain].staking_program_id =
-          this.config.customStakingAddress || '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139';
+          this.config.customStakingAddress || SERVICE_CONSTANTS.DEFAULT_STAKING_PROGRAM_ID;
         serviceConfig.configurations[this.config.chain].use_staking = true;
       } else {
         serviceConfig.configurations[this.config.chain].staking_program_id = 'no_staking';
@@ -338,7 +338,7 @@ export class SimplifiedServiceBootstrap {
         use_staking: serviceConfig.configurations[this.config.chain].use_staking
       }, "Configured staking in service config");
     }
-    
+
     // Add mech configuration if requested
     if (this.config.deployMech) {
       const mechPrice = this.config.mechRequestPrice || DEFAULT_MECH_DELIVERY_RATE;
@@ -349,7 +349,7 @@ export class SimplifiedServiceBootstrap {
         mechPrice
       );
     }
-    
+
     // Write to temp file
     const configPath = join(tmpdir(), `jinn-simplified-bootstrap-${Date.now()}.json`);
     writeFileSync(configPath, JSON.stringify(serviceConfig, null, 2));

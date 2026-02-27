@@ -6,9 +6,9 @@
  *
  * The eligibility formula (confirmed in Pearl olas-operate-app):
  *   effectivePeriod = max(livenessPeriod, now - tsCheckpoint)
- *   requiredRequests = ceil(effectivePeriod * livenessRatio / 1e18) + SAFETY_MARGIN
- *   eligibleRequests = currentRequestCount - baselineAtCheckpoint
- *   isEligibleForRewards = eligibleRequests >= requiredRequests
+ *   requiredActivities = ceil(effectivePeriod * livenessRatio / 1e18) + SAFETY_MARGIN
+ *   eligibleActivities = currentActivityCount - baselineAtCheckpoint
+ *   isEligibleForRewards = eligibleActivities >= requiredActivities
  *
  * Data sources (all gas-free view calls):
  *   StakingContract.livenessPeriod()           — epoch length (immutable per contract)
@@ -16,7 +16,7 @@
  *   StakingContract.getServiceInfo(serviceId)  — baseline nonces at checkpoint
  *   StakingContract.activityChecker()          — activity checker address (immutable)
  *   ActivityChecker.livenessRatio()            — required rate in 1e18 (immutable)
- *   ActivityChecker.getMultisigNonces(multisig) — current [safeNonce, requestCount]
+ *   ActivityChecker.getMultisigNonces(multisig) — current [safeNonce, activityCount]
  */
 
 import { ethers } from 'ethers';
@@ -59,14 +59,14 @@ export interface ServiceActivityStatus {
   livenessPeriod: number;
   tsCheckpoint: number;
   livenessRatio: bigint;
-  currentRequestCount: bigint;
-  baselineRequestCount: bigint;
+  currentActivityCount: bigint;
+  baselineActivityCount: bigint;
 
   // Computed
-  requiredRequests: number;
-  eligibleRequests: number;
+  requiredActivities: number;
+  eligibleActivities: number;
   isEligibleForRewards: boolean;
-  requestsNeeded: number;
+  activitiesNeeded: number;
 
   // Meta
   fetchedAt: number;
@@ -222,19 +222,20 @@ export class ActivityMonitor {
         activityChecker.getMultisigNonces(multisig),
       ]);
 
-      // serviceInfo.nonces[1] = mech request count at last checkpoint
-      const baselineRequestCount = BigInt(serviceInfo.nonces[1] ?? 0n);
-      // currentNonces[1] = current mech request count
-      const currentRequestCount = BigInt(currentNonces[1] ?? 0n);
+      // serviceInfo.nonces[1] = activity count at last checkpoint
+      // (requests for v1 checker, deliveries for v2 checker)
+      const baselineActivityCount = BigInt(serviceInfo.nonces[1] ?? 0n);
+      // currentNonces[1] = current activity count from checker
+      const currentActivityCount = BigInt(currentNonces[1] ?? 0n);
 
       // Apply the Pearl eligibility formula
       const effectivePeriod = Math.max(contractData.livenessPeriod, now - tsCheckpoint);
-      const requiredRequests = Math.ceil(
+      const requiredActivities = Math.ceil(
         effectivePeriod * Number(contractData.livenessRatio) / 1e18
       ) + SAFETY_MARGIN;
-      const eligibleRequests = Number(currentRequestCount - baselineRequestCount);
-      const isEligibleForRewards = eligibleRequests >= requiredRequests;
-      const requestsNeeded = Math.max(0, requiredRequests - eligibleRequests);
+      const eligibleActivities = Number(currentActivityCount - baselineActivityCount);
+      const isEligibleForRewards = eligibleActivities >= requiredActivities;
+      const activitiesNeeded = Math.max(0, requiredActivities - eligibleActivities);
 
       const status: ServiceActivityStatus = {
         serviceConfigId,
@@ -244,21 +245,21 @@ export class ActivityMonitor {
         livenessPeriod: contractData.livenessPeriod,
         tsCheckpoint,
         livenessRatio: contractData.livenessRatio,
-        currentRequestCount,
-        baselineRequestCount,
-        requiredRequests,
-        eligibleRequests,
+        currentActivityCount,
+        baselineActivityCount,
+        requiredActivities,
+        eligibleActivities,
         isEligibleForRewards,
-        requestsNeeded,
+        activitiesNeeded,
         fetchedAt: Date.now(),
       };
 
       rotationLogger.debug({
         serviceId,
         eligible: isEligibleForRewards,
-        requestsNeeded,
-        required: requiredRequests,
-        current: eligibleRequests,
+        activitiesNeeded,
+        required: requiredActivities,
+        current: eligibleActivities,
       }, 'Activity check');
 
       return status;
@@ -277,12 +278,12 @@ export class ActivityMonitor {
         livenessPeriod: 0,
         tsCheckpoint: 0,
         livenessRatio: 0n,
-        currentRequestCount: 0n,
-        baselineRequestCount: 0n,
-        requiredRequests: 0,
-        eligibleRequests: 0,
+        currentActivityCount: 0n,
+        baselineActivityCount: 0n,
+        requiredActivities: 0,
+        eligibleActivities: 0,
         isEligibleForRewards: false,
-        requestsNeeded: -1,
+        activitiesNeeded: -1,
         fetchedAt: Date.now(),
         error: error?.message || String(error),
       };

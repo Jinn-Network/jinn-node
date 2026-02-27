@@ -38,7 +38,7 @@ export interface ProjectedEpochTargetInput {
   livenessPeriod: number;
   delayBufferSeconds: number;
   overrideTarget?: number;
-  safetyMarginRequests?: number;
+  safetyMarginActivities?: number;
   nowTimestamp?: number;
 }
 
@@ -49,7 +49,7 @@ export interface ProjectedEpochTargetResult {
   effectivePeriodSecondsWithoutBuffer: number;
   livenessRatio: bigint;
   usedOverride: boolean;
-  safetyMarginRequests: number;
+  safetyMarginActivities: number;
 }
 
 export async function computeProjectedEpochTarget(
@@ -63,7 +63,7 @@ export async function computeProjectedEpochTarget(
       effectivePeriodSecondsWithoutBuffer: 0,
       livenessRatio: 0n,
       usedOverride: true,
-      safetyMarginRequests: 0,
+      safetyMarginActivities: 0,
     };
   }
 
@@ -86,12 +86,12 @@ export async function computeProjectedEpochTarget(
     input.livenessPeriod,
     elapsedSinceCheckpoint + Math.max(0, input.delayBufferSeconds),
   );
-  const safetyMarginRequests = Math.max(0, input.safetyMarginRequests ?? 0);
+  const safetyMarginActivities = Math.max(0, input.safetyMarginActivities ?? 0);
 
   let targetBigInt = ceilDiv(BigInt(effectivePeriodSeconds) * livenessRatio, ONE_ETHER)
-    + BigInt(safetyMarginRequests);
+    + BigInt(safetyMarginActivities);
   if (effectivePeriodSeconds > 0 && targetBigInt === 0n) {
-    // For very short windows, still require at least one request.
+    // For very short windows, still require at least one activity.
     targetBigInt = 1n;
   }
 
@@ -106,6 +106,6 @@ export async function computeProjectedEpochTarget(
     effectivePeriodSecondsWithoutBuffer,
     livenessRatio,
     usedOverride: false,
-    safetyMarginRequests,
+    safetyMarginActivities,
   };
 }

@@ -59,6 +59,7 @@ import { checkEpochGate } from './staking/epochGate.js';
 import { maybeSubmitHeartbeat, maybeSubmitHeartbeatForService } from './staking/heartbeat.js';
 import { resolveServiceConfig, clearServiceConfigCache, type ResolvedServiceConfig } from './onchain/serviceResolver.js';
 import { checkAndRestakeServices } from './staking/restake.js';
+import { ensureOperatorRegistered } from './register-operator.js';
 
 export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
 
@@ -1451,10 +1452,10 @@ async function processOnce(): Promise<boolean> {
     if (gate.targetMet) {
       const resetIn = Math.max(0, gate.nextCheckpoint - Math.floor(Date.now() / 1000));
       workerLogger.info({
-        requests: gate.requestCount,
+        activities: gate.activityCount,
         target: gate.target,
         resetsInSeconds: resetIn,
-      }, `Staking target met (${gate.requestCount}/${gate.target}) — skipping job pickup`);
+      }, `Staking target met (${gate.activityCount}/${gate.target}) — skipping job pickup`);
       return false;
     }
   } else if (targetIdEnv) {
@@ -1827,6 +1828,9 @@ async function main() {
   // Verify Control API is running before processing any jobs
   await checkControlApiHealth();
 
+  // Auto-register with credential bridge (idempotent, non-blocking)
+  await ensureOperatorRegistered();
+
   // Initialize multi-service rotation if enabled
   let rotator: ServiceRotator | null = null;
   if (getWorkerMultiServiceEnabled()) {
@@ -1979,7 +1983,7 @@ async function main() {
                   );
                   if (safeKey) handledSafes.add(safeKey);
                 } else {
-                  workerLogger.debug({ serviceId: service.serviceId, requests: gate.requestCount, target: gate.target }, 'Epoch target met — skipping heartbeat');
+                  workerLogger.debug({ serviceId: service.serviceId, activities: gate.activityCount, target: gate.target }, 'Epoch target met — skipping heartbeat');
                 }
               } catch (e: any) {
                 workerLogger.warn({ serviceId: service.serviceId, error: serializeError(e) }, 'Staking heartbeat failed for service (non-fatal)');
@@ -2000,7 +2004,7 @@ async function main() {
                   runtimeResolvedConfig.marketplace
                 );
               } else {
-                workerLogger.debug({ requests: gate.requestCount, target: gate.target }, 'Epoch target met — skipping heartbeat');
+                workerLogger.debug({ activities: gate.activityCount, target: gate.target }, 'Epoch target met — skipping heartbeat');
               }
             } catch (e: any) {
               workerLogger.warn({ error: serializeError(e) }, 'Staking heartbeat failed (non-fatal)');

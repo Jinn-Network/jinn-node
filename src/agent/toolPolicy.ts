@@ -280,6 +280,22 @@ export function hasTelegramMessaging(enabledTools: string[]): boolean {
 }
 
 /**
+ * Content stream discovery and reading tools (custom MCP tools)
+ * Used to discover and read FEED:* content streams between templates
+ */
+export const CONTENT_STREAM_TOOLS = [
+  'search_content_streams',
+  'read_content_stream',
+] as const;
+
+/**
+ * Check if content streams are enabled in the tools list
+ */
+export function hasContentStreams(enabledTools: string[]): boolean {
+  return enabledTools.includes('content_streams');
+}
+
+/**
  * Fireflies meeting intelligence tools (via remote MCP server)
  * Content-focused subset only — raw transcripts with speaker attribution are excluded for privacy
  */
@@ -394,6 +410,7 @@ export const VALID_JOB_TOOLS: ReadonlySet<string> = new Set([
   'telegram_messaging',
   'railway_deployment',
   'fireflies_meetings',
+  'content_streams',
   'nano_banana', // Deprecated but accepted (silently stripped later)
   // Individual tools from meta-tool expansions
   ...BROWSER_AUTOMATION_TOOLS,
@@ -403,6 +420,7 @@ export const VALID_JOB_TOOLS: ReadonlySet<string> = new Set([
   ...TELEGRAM_TOOLS,
   ...FIREFLIES_TOOLS,
   ...RAILWAY_TOOLS,
+  ...CONTENT_STREAM_TOOLS,
   // Extension tools
   'inspect_workstream',
   'inspect_job_run',
@@ -516,6 +534,14 @@ export function computeToolPolicy(
     expandedTools = [
       ...expandedTools.filter(t => t !== 'fireflies_meetings'),
       ...FIREFLIES_TOOLS
+    ];
+  }
+
+  // Expand content_streams meta-tool to Content Stream MCP tools
+  if (expandedTools.includes('content_streams')) {
+    expandedTools = [
+      ...expandedTools.filter(t => t !== 'content_streams'),
+      ...CONTENT_STREAM_TOOLS
     ];
   }
 
