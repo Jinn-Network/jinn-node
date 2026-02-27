@@ -99,7 +99,8 @@ export async function createArtifact(args: unknown) {
     const [, contentCid] = await pushJsonToIpfs(payload);
 
     // Step 2: Build ADW Registration File wrapping the content
-    const workerAddress = process.env.JINN_SERVICE_MECH_ADDRESS || '0x0000000000000000000000000000000000000000';
+    // Creator is the mech address (OLAS service agent instance) — set per-job by the worker
+    const workerAddress = process.env.JINN_CTX_MECH_ADDRESS || process.env.JINN_SERVICE_MECH_ADDRESS || '0x0000000000000000000000000000000000000000';
     const documentType: ADWDocumentType = 'adw:Artifact';
     const profile: ArtifactProfile = {
       topic,
