@@ -145,11 +145,18 @@ export class ServiceRotator {
     let reason: string;
 
     if (needsWork.length > 0) {
-      // Pick the service with the most requests needed
-      needsWork.sort((a, b) => b.activitiesNeeded - a.activitiesNeeded);
-      const best = needsWork[0];
-      targetService = stakedServices.find(s => s.serviceConfigId === best.serviceConfigId)!;
-      reason = `service #${best.serviceId} needs ${best.activitiesNeeded} more activities`;
+      // Stay on current service if it still needs work — avoids thrashing between services
+      const currentStillNeeds = needsWork.find(s => s.serviceConfigId === this.currentServiceConfigId);
+      if (currentStillNeeds) {
+        targetService = stakedServices.find(s => s.serviceConfigId === currentStillNeeds.serviceConfigId)!;
+        reason = `staying on service #${currentStillNeeds.serviceId} (needs ${currentStillNeeds.activitiesNeeded} more)`;
+      } else {
+        // Current is satisfied — pick the one with the most deficit
+        needsWork.sort((a, b) => b.activitiesNeeded - a.activitiesNeeded);
+        const best = needsWork[0];
+        targetService = stakedServices.find(s => s.serviceConfigId === best.serviceConfigId)!;
+        reason = `current satisfied, switching to service #${best.serviceId} (needs ${best.activitiesNeeded} more)`;
+      }
     } else {
       // All services are eligible — stay on current or pick first
       const currentInStaked = stakedServices.find(s => s.serviceConfigId === this.currentServiceConfigId);

@@ -11,6 +11,7 @@ import { getActiveMechAddress } from '../rotation/ActiveServiceContext.js';
 import type { UnclaimedRequest, AgentExecutionResult, FinalStatus, IpfsMetadata, RecognitionPhaseResult, ReflectionResult } from '../types.js';
 import { buildDeliveryPayload } from './payload.js';
 import { checkDeliveryStatusViaPonder } from './ponderVerification.js';
+import { registerArtifactsOnChain } from './adwRegister.js';
 
 /**
  * Known Safe error codes for decoding revert reasons
@@ -88,7 +89,7 @@ export interface DeliveryTransactionContext {
   reflection?: ReflectionResult | null;
   workerTelemetry?: any;
   measurementCoverage?: any;
-  artifactsForDelivery?: Array<{ cid: string; topic: string; name?: string; type?: string; contentPreview?: string }>;
+  artifactsForDelivery?: Array<{ cid: string; topic: string; name?: string; type?: string; documentType?: string; contentPreview?: string }>;
 }
 
 /**
@@ -683,6 +684,11 @@ export async function deliverViaSafeTransaction(
       }
     }
     
+    // Best-effort ADW on-chain registration (non-blocking, never throws)
+    if (context.artifactsForDelivery && context.artifactsForDelivery.length > 0) {
+      registerArtifactsOnChain(context.artifactsForDelivery).catch(() => {});
+    }
+
     workerLogger.info({ requestId: context.requestId, txHash: delivery?.tx_hash }, '[DELIVERY_DEBUG] About to return from deliverViaSafeTransaction');
     return {
       tx_hash: delivery?.tx_hash,
