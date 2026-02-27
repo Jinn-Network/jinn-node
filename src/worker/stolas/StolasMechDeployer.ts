@@ -14,14 +14,62 @@
 
 import { ethers } from 'ethers';
 import { logger } from '../../logging/index.js';
-import {
-  MECH_MARKETPLACE_ABI,
-  MECH_FACTORY_ADDRESSES,
-  DEFAULT_MECH_MARKETPLACE_ADDRESSES,
-} from '../contracts/MechMarketplace.js';
 import { DEFAULT_MECH_DELIVERY_RATE } from '../config/MechConfig.js';
 
 const mechLogger = logger.child({ component: 'STOLAS-MECH-DEPLOYER' });
+
+// Keep deployer constants local so this module can compile independently of
+// worker/contracts/MechMarketplace.ts in minimal deployment contexts.
+const MECH_MARKETPLACE_ABI = [
+  {
+    inputs: [
+      { internalType: 'uint256', name: 'serviceId', type: 'uint256' },
+      { internalType: 'address', name: 'mechFactory', type: 'address' },
+      { internalType: 'bytes', name: 'payload', type: 'bytes' },
+    ],
+    name: 'create',
+    outputs: [{ internalType: 'address', name: 'mech', type: 'address' }],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, internalType: 'address', name: 'mech', type: 'address' },
+      { indexed: true, internalType: 'uint256', name: 'serviceId', type: 'uint256' },
+      { indexed: true, internalType: 'address', name: 'mechFactory', type: 'address' },
+    ],
+    name: 'CreateMech',
+    type: 'event',
+  },
+] as const;
+
+const MECH_FACTORY_ADDRESSES: Record<string, Record<string, Record<string, string>>> = {
+  gnosis: {
+    '0xad380C51cd5297FbAE43494dD5D407A2a3260b58': {
+      Native: '0x42f43be9E5E50df51b86C5c6427223ff565f40C6',
+      Token: '0x161b862568E900Dd9d8c64364F3B83a43792e50f',
+      Nevermined: '0xCB26B91B0E21ADb04FFB6e5f428f41858c64936A',
+    },
+    '0x735FAAb1c4Ec41128c367AFb5c3baC73509f70bB': {
+      Native: '0x8b299c20F87e3fcBfF0e1B86dC0acC06AB6993EF',
+      Token: '0x31ffDC795FDF36696B8eDF7583A3D115995a45FA',
+      Nevermined: '0x65fd74C29463afe08c879a3020323DD7DF02DA57',
+    },
+  },
+  base: {
+    '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020': {
+      Native: '0x2E008211f34b25A7d7c102403c6C2C3B665a1abe',
+      Token: '0x97371B1C0cDA1D04dFc43DFb50a04645b7Bc9BEe',
+      Nevermined: '0x847bBE8b474e0820215f818858e23F5f5591855A',
+    },
+  },
+};
+
+const DEFAULT_MECH_MARKETPLACE_ADDRESSES: Record<string, string> = {
+  gnosis: '0x735FAAb1c4Ec41128c367AFb5c3baC73509f70bB',
+  base: '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020',
+};
 
 // Safe ABI — same subset as StolasServiceBootstrap.ts and MechMarketplaceRequester.ts
 const SAFE_ABI = [
