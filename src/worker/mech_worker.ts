@@ -21,7 +21,6 @@ import { getInheritedEnv } from './status/autoDispatch.js';
 import { serializeError } from './logging/errors.js';
 import { safeParseToolResponse } from './tool_utils.js';
 import { processOnce as processJobOnce } from './orchestration/jobRunner.js';
-import { fetchIpfsMetadata } from './metadata/fetchIpfsMetadata.js';
 import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
 import { shouldStop } from './cycleControl.js';
 import { checkAndDispatchScheduledVentures } from './ventures/ventureWatcher.js';
@@ -88,6 +87,11 @@ const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
 const CONTROL_API_URL = getOptionalControlApiUrl();
 const SINGLE_SHOT = process.argv.includes('--single') || process.argv.includes('--single-job');
 const USE_CONTROL_API = getUseControlApi();
+
+function isHeartbeatLeaderWorker(): boolean {
+  const workerId = process.env.WORKER_ID || '';
+  return !workerId || workerId.endsWith('-1') || workerId === 'default';
+}
 
 // Track jobs executed in this session to prevent re-execution on delivery failure
 // This prevents infinite loops when delivery fails but Control API allows re-claiming
@@ -1596,6 +1600,25 @@ async function processOnce(): Promise<boolean> {
     }
   }
 
+  // Heartbeat coordination: only leader worker should claim heartbeat jobs.
+  // Non-leaders skip them before claim to avoid nonce collisions on delivery.
+  if (!isHeartbeatLeaderWorker()) {
+    const nonHeartbeat = candidates.filter(c => c.jobName !== '__heartbeat__');
+    if (nonHeartbeat.length !== candidates.length) {
+      workerLogger.info({
+        skippedHeartbeats: candidates.length - nonHeartbeat.length,
+      }, 'Skipping heartbeat requests on non-leader worker');
+    }
+    candidates = nonHeartbeat;
+  }
+
+  if (candidates.length === 0) {
+    consecutiveStuckCycles = 0;
+    lastStuckRequestIds = [];
+    workerLogger.info('No eligible requests after heartbeat-leader filter');
+    return false;
+  }
+
   const eligibleCandidates = candidates.filter(c => !executedJobsThisSession.has(c.id));
   if (eligibleCandidates.length === 0) {
     consecutiveStuckCycles += 1;
@@ -1947,8 +1970,7 @@ async function main() {
 
         // Submit heartbeat requests to meet staking liveness requirement
         // Only the leader worker submits heartbeats to avoid Safe nonce collisions
-        const workerId = process.env.WORKER_ID || '';
-        const isHeartbeatLeader = !workerId || workerId.endsWith('-1') || workerId === 'default';
+        const isHeartbeatLeader = isHeartbeatLeaderWorker();
         cyclesSinceLastHeartbeat++;
         if (isHeartbeatLeader && cyclesSinceLastHeartbeat >= WORKER_HEARTBEAT_CYCLES) {
           cyclesSinceLastHeartbeat = 0;
