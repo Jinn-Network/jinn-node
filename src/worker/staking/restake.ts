@@ -14,12 +14,13 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { workerLogger } from '../../logging/index.js';
 import { OlasOperateWrapper } from '../OlasOperateWrapper.js';
+import { SERVICE_CONSTANTS } from '../config/ServiceConfig.js';
 
 const log = workerLogger.child({ component: 'AUTO-RESTAKE' });
 
 const STAKING_ABI = [
   'function getStakingState(uint256 serviceId) view returns (uint8)',
-  'function getServiceInfo(uint256 serviceId) view returns (address multisig, address owner, uint256[] nonces, uint256 tsStart, uint256 minStakingDuration)',
+  'function getServiceInfo(uint256 serviceId) view returns (tuple(address multisig, address owner, uint256[] nonces, uint256 tsStart, uint256 reward, uint256 inactivity))',
   'function minStakingDuration() view returns (uint256)',
   'function availableRewards() view returns (uint256)',
   'function maxNumServices() view returns (uint256)',
@@ -76,7 +77,7 @@ export async function getServiceStakingInfo(
   try {
     const info = await staking.getServiceInfo(serviceId);
     const tsStart = Number(info.tsStart);
-    const minDuration = Number(info.minStakingDuration || await staking.minStakingDuration());
+    const minDuration = Number(await staking.minStakingDuration());
     const now = Math.floor(Date.now() / 1000);
     const elapsed = now - tsStart;
     const canUnstake = elapsed >= minDuration;
@@ -121,8 +122,8 @@ export async function getRewardsAvailable(
   }
 }
 
-// Default Jinn staking contract on Base
-const DEFAULT_STAKING_CONTRACT = '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139';
+// Default Jinn staking contract on Base (from ServiceConfig.ts single source of truth)
+const DEFAULT_STAKING_CONTRACT = SERVICE_CONSTANTS.DEFAULT_STAKING_PROGRAM_ID;
 
 /**
  * Read service configs from .operate/services on disk (no daemon needed).

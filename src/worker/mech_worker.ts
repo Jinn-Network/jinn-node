@@ -1446,10 +1446,10 @@ async function processOnce(): Promise<boolean> {
     if (gate.targetMet) {
       const resetIn = Math.max(0, gate.nextCheckpoint - Math.floor(Date.now() / 1000));
       workerLogger.info({
-        requests: gate.requestCount,
+        activities: gate.activityCount,
         target: gate.target,
         resetsInSeconds: resetIn,
-      }, `Staking target met (${gate.requestCount}/${gate.target}) — skipping job pickup`);
+      }, `Staking target met (${gate.activityCount}/${gate.target}) — skipping job pickup`);
       return false;
     }
   } else if (targetIdEnv) {
@@ -1964,7 +1964,7 @@ async function main() {
                 runtimeResolvedConfig.marketplace
               );
             } else {
-              workerLogger.debug({ requests: gate.requestCount, target: gate.target }, 'Epoch target met — skipping heartbeat');
+              workerLogger.debug({ activities: gate.activityCount, target: gate.target }, 'Epoch target met — skipping heartbeat');
             }
           } catch (e: any) {
             workerLogger.warn({ error: serializeError(e) }, 'Staking heartbeat failed (non-fatal)');

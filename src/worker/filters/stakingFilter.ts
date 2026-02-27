@@ -10,9 +10,10 @@ import { graphQLRequest } from '../../http/client.js';
 import { workerLogger } from '../../logging/index.js';
 import { getPonderGraphqlUrl } from '../../agent/mcp/tools/shared/env.js';
 import { getOptionalWorkerStakingContract } from '../../config/index.js';
+import { SERVICE_CONSTANTS } from '../config/ServiceConfig.js';
 
-/** Default Jinn staking contract on Base */
-const DEFAULT_JINN_STAKING_CONTRACT = '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139';
+/** Default Jinn staking contract on Base (from ServiceConfig.ts single source of truth) */
+const DEFAULT_JINN_STAKING_CONTRACT = SERVICE_CONSTANTS.DEFAULT_STAKING_PROGRAM_ID;
 
 // Cache configuration
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes

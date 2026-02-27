@@ -33,6 +33,7 @@ import { printHeader, printStep, printSuccess, printError } from './display.js';
 import { syncCredentials } from '../auth/index.js';
 import { hasAuthManagerCredentials, syncAndWriteGeminiCredentials } from '../worker/llm/authIntegration.js';
 import { DEFAULT_MECH_DELIVERY_RATE } from '../worker/config/MechConfig.js';
+import { SERVICE_CONSTANTS } from '../worker/config/ServiceConfig.js';
 
 const setupLogger = logger.child({ component: "SETUP-CLI" });
 
@@ -381,7 +382,7 @@ async function main() {
     mechRequestPrice: mechRequestPrice,
     // Staking enabled by default (use --no-staking to disable)
     stakingProgram: disableStaking ? 'no_staking' : 'custom_staking',
-    customStakingAddress: stakingContract || '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139', // Jinn Staking (Base)
+    customStakingAddress: stakingContract || SERVICE_CONSTANTS.DEFAULT_STAKING_PROGRAM_ID,
     // Isolated environment paths (if --isolated flag used)
     middlewarePath: isolatedEnv?.middlewareDir,
     workingDirectory: isolatedEnv?.tempDir,
@@ -411,7 +412,7 @@ async function main() {
     console.log(`Real funds will be used`);
     console.log(`Staking: ${disableStaking ? 'DISABLED' : 'ENABLED (Jinn Staking)'}`);
     if (!disableStaking) {
-      console.log(`   Contract: ${stakingContract || '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139'}`);
+      console.log(`   Contract: ${stakingContract || SERVICE_CONSTANTS.DEFAULT_STAKING_PROGRAM_ID}`);
       console.log(`   Required: ~100 OLAS (50 OLAS bond + 50 OLAS stake)`);
     }
     console.log(`Mech deployment: ${config.deployMech ? 'ENABLED' : 'DISABLED'}`);

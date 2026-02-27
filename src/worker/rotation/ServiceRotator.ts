@@ -8,7 +8,7 @@
  * Algorithm:
  * 1. Check activity for all staked services
  * 2. Filter to services NOT yet eligible (still need work)
- * 3. Pick the one with the most requestsNeeded (maximize utilization)
+ * 3. Pick the one with the most activitiesNeeded (maximize utilization)
  * 4. If ALL are eligible → stay on current service (extra work doesn't hurt)
  * 5. If NONE are staked → fall back to first service (single-service behavior)
  */
@@ -146,10 +146,10 @@ export class ServiceRotator {
 
     if (needsWork.length > 0) {
       // Pick the service with the most requests needed
-      needsWork.sort((a, b) => b.requestsNeeded - a.requestsNeeded);
+      needsWork.sort((a, b) => b.activitiesNeeded - a.activitiesNeeded);
       const best = needsWork[0];
       targetService = stakedServices.find(s => s.serviceConfigId === best.serviceConfigId)!;
-      reason = `service #${best.serviceId} needs ${best.requestsNeeded} more requests`;
+      reason = `service #${best.serviceId} needs ${best.activitiesNeeded} more activities`;
     } else {
       // All services are eligible — stay on current or pick first
       const currentInStaked = stakedServices.find(s => s.serviceConfigId === this.currentServiceConfigId);
@@ -161,8 +161,8 @@ export class ServiceRotator {
         statuses: allStatuses.map(s => ({
           id: s.serviceId,
           eligible: s.isEligibleForRewards,
-          requests: s.eligibleRequests,
-          required: s.requiredRequests,
+          activities: s.eligibleActivities,
+          required: s.requiredActivities,
         })),
       }, 'All services satisfied for epoch');
     }

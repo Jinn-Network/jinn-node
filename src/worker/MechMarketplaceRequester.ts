@@ -59,7 +59,6 @@ export interface MarketplaceRequestResult {
 // ABIs
 const MECH_MARKETPLACE_ABI = [
   'function request(bytes memory requestData, uint256 maxDeliveryRate, bytes32 paymentType, address priorityMech, uint256 responseTimeout, bytes memory paymentData) external payable returns (bytes32 requestId)',
-  'function mapRequestCounts(address requester) view returns (uint256)',
   'function minResponseTimeout() view returns (uint256)',
   'function maxResponseTimeout() view returns (uint256)',
   'event MarketplaceRequest(address indexed priorityMech, address indexed requester, uint256 numRequests, bytes32[] requestIds, bytes[] requestDatas)',

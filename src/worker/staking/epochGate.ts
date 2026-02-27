@@ -1,10 +1,13 @@
 /**
  * Staking Epoch Gate
  *
- * Checks whether the service has met its request target for the current
- * staking epoch. The staking contract's activity checker reads
- * mapRequestCounts(multisig) from the MechMarketplace contract to
- * determine liveness. We read the same on-chain value and compare
+ * Checks whether the service has met its activity target for the current
+ * staking epoch. The staking contract's activity checker exposes
+ * getMultisigNonces(multisig) which returns [safeNonce, activityCount].
+ * For v1 (WhitelistedRequesterActivityChecker) activityCount = mapRequestCounts.
+ * For v2 (DeliveryActivityChecker) activityCount = mapDeliveryCounts.
+ *
+ * We read the same on-chain value via the activity checker and compare
  * against nonces[1] from getServiceInfo — the authoritative epoch-start
  * baseline recorded by the staking contract at checkpoint time.
  *
@@ -19,11 +22,11 @@ import { computeProjectedEpochTarget, readNonNegativeIntEnv, readPositiveIntEnv 
 
 const log = workerLogger.child({ component: 'EPOCH_GATE' });
 
-const DEFAULT_TARGET_REQUESTS = 61;
+const DEFAULT_TARGET_ACTIVITIES = 61;
 const DEFAULT_CHECKPOINT_DELAY_BUFFER_SEC = 0;
-const DEFAULT_SAFETY_MARGIN_REQUESTS = 1;
+const DEFAULT_SAFETY_MARGIN_ACTIVITIES = 1;
 const EPOCH_CACHE_TTL_MS = 5 * 60_000; // 5 min — checkpoint only changes daily
-const REQUEST_CACHE_TTL_MS = 2 * 60_000; // 2 min — requests change frequently
+const ACTIVITY_CACHE_TTL_MS = 2 * 60_000; // 2 min — activity counts change frequently
 
 const STAKING_ABI = [
   'function livenessPeriod() view returns (uint256)',
@@ -33,13 +36,14 @@ const STAKING_ABI = [
   'function getServiceInfo(uint256 serviceId) view returns (tuple(address multisig, address owner, uint256[] nonces, uint256 tsStart, uint256 reward, uint256 inactivity))',
 ];
 
-const MARKETPLACE_ABI = [
-  'function mapRequestCounts(address) view returns (uint256)',
+const ACTIVITY_CHECKER_ABI = [
+  'function livenessRatio() view returns (uint256)',
+  'function getMultisigNonces(address multisig) view returns (uint256[] memory)',
 ];
 
 export interface EpochGateResult {
   targetMet: boolean;
-  requestCount: number;
+  activityCount: number;
   target: number;
   nextCheckpoint: number; // unix timestamp of epoch reset
   /** The on-chain staking multisig — authoritative source */
@@ -83,18 +87,19 @@ async function getEpochBounds(
 }
 
 /**
- * Read epoch request count using the on-chain nonces[1] from getServiceInfo
- * as the authoritative baseline. This is restart-proof — the baseline comes
- * from the staking contract, not from in-memory state.
+ * Read epoch activity count using the activity checker's getMultisigNonces().
+ * nonces[1] from the checker = current activity count (requests for v1, deliveries for v2).
+ * Baseline comes from getServiceInfo().nonces[1] — the authoritative epoch-start value.
+ * This is restart-proof — the baseline comes from the staking contract, not in-memory state.
  */
-async function getEpochRequestCount(
-  stakingContract: ethers.Contract,
-  marketplace: ethers.Contract,
+async function getEpochActivityCount(
+  activityChecker: ethers.Contract,
   multisig: string,
-  baselineRequestCount: number,
+  baselineActivityCount: number,
 ): Promise<number> {
-  const currentCount = await marketplace.mapRequestCounts(multisig).then(Number);
-  return currentCount - baselineRequestCount;
+  const currentNonces = await activityChecker.getMultisigNonces(multisig);
+  const currentCount = Number(currentNonces[1]);
+  return currentCount - baselineActivityCount;
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -106,14 +111,14 @@ export async function checkEpochGate(
 ): Promise<EpochGateResult> {
   const overrideTarget = readPositiveIntEnv('WORKER_STAKING_TARGET');
   const delayBufferSeconds = readPositiveIntEnv('WORKER_STAKING_CHECKPOINT_DELAY_SEC') ?? DEFAULT_CHECKPOINT_DELAY_BUFFER_SEC;
-  const safetyMarginRequests = readNonNegativeIntEnv('WORKER_STAKING_SAFETY_MARGIN') ?? DEFAULT_SAFETY_MARGIN_REQUESTS;
-  const fallbackTarget = overrideTarget ?? DEFAULT_TARGET_REQUESTS;
+  const safetyMarginActivities = readNonNegativeIntEnv('WORKER_STAKING_SAFETY_MARGIN') ?? DEFAULT_SAFETY_MARGIN_ACTIVITIES;
+  const fallbackTarget = overrideTarget ?? DEFAULT_TARGET_ACTIVITIES;
 
   const gateCacheKey = getGateCacheKey(stakingContractAddress, serviceId, marketplaceAddress);
 
   // Return cached result if fresh enough
   const cachedGate = cachedGateByService.get(gateCacheKey);
-  if (cachedGate && Date.now() - cachedGate.fetchedAt < REQUEST_CACHE_TTL_MS) {
+  if (cachedGate && Date.now() - cachedGate.fetchedAt < ACTIVITY_CACHE_TTL_MS) {
     return cachedGate.result;
   }
 
@@ -121,7 +126,6 @@ export async function checkEpochGate(
     const rpcUrl = getRequiredRpcUrl();
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const stakingContract = new ethers.Contract(stakingContractAddress, STAKING_ABI, provider);
-    const marketplace = new ethers.Contract(marketplaceAddress, MARKETPLACE_ABI, provider);
 
     const [{ tsCheckpoint, nextCheckpoint }, serviceInfo, activityCheckerAddress, livenessPeriod] = await Promise.all([
       getEpochBounds(stakingContract, stakingContractAddress),
@@ -130,11 +134,14 @@ export async function checkEpochGate(
       stakingContract.livenessPeriod().then(Number),
     ]);
 
+    const activityChecker = new ethers.Contract(activityCheckerAddress, ACTIVITY_CHECKER_ABI, provider);
+
     // Use the staking contract's multisig — authoritative source
     const multisig: string = serviceInfo.multisig;
-    // nonces[1] is the request count baseline recorded at epoch checkpoint
-    const baselineRequestCount = Number(serviceInfo.nonces[1]);
-    const requestCount = await getEpochRequestCount(stakingContract, marketplace, multisig, baselineRequestCount);
+    // nonces[1] is the activity count baseline recorded at epoch checkpoint
+    // (requests for v1 checker, deliveries for v2 checker)
+    const baselineActivityCount = Number(serviceInfo.nonces[1]);
+    const activityCount = await getEpochActivityCount(activityChecker, multisig, baselineActivityCount);
     const targetData = await computeProjectedEpochTarget({
       provider,
       activityCheckerAddress,
@@ -142,23 +149,23 @@ export async function checkEpochGate(
       livenessPeriod,
       delayBufferSeconds,
       overrideTarget,
-      safetyMarginRequests,
+      safetyMarginActivities,
     });
     const target = targetData.target;
 
     const result: EpochGateResult = {
-      targetMet: requestCount >= target,
-      requestCount,
+      targetMet: activityCount >= target,
+      activityCount,
       target,
       nextCheckpoint,
       multisig,
     };
 
     log.debug({
-      requestCount,
+      activityCount,
       target,
       targetMet: result.targetMet,
-      baselineRequestCount,
+      baselineActivityCount,
       multisig,
       tsCheckpoint,
       nextCheckpoint,
@@ -168,7 +175,7 @@ export async function checkEpochGate(
       baselineTimestamp: targetData.baselineTimestamp,
       livenessRatio: targetData.livenessRatio.toString(),
       delayBufferSeconds,
-      safetyMarginRequests: targetData.safetyMarginRequests,
+      safetyMarginActivities: targetData.safetyMarginActivities,
       targetFromOverride: targetData.usedOverride,
       epochStart: new Date(tsCheckpoint * 1000).toISOString(),
       epochEnd: new Date(nextCheckpoint * 1000).toISOString(),
@@ -179,6 +186,6 @@ export async function checkEpochGate(
   } catch (error: any) {
     log.warn({ error: error.message }, 'Epoch gate check failed — allowing job pickup');
     // Fail open: if we can't check, don't block work
-    return { targetMet: false, requestCount: 0, target: fallbackTarget, nextCheckpoint: 0, multisig: '' };
+    return { targetMet: false, activityCount: 0, target: fallbackTarget, nextCheckpoint: 0, multisig: '' };
   }
 }
