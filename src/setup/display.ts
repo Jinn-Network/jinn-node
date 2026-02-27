@@ -192,3 +192,84 @@ export function printPollingStatus(secondsElapsed: number): void {
 export function clearPollingStatus(): void {
   process.stdout.write('\r' + ' '.repeat(60) + '\r');
 }
+
+/**
+ * Print stOLAS intro banner
+ */
+export function printStolasIntro(): void {
+  const line = '═'.repeat(BOX_WIDTH - 2);
+
+  console.log('');
+  console.log('╔' + line + '╗');
+  console.log('║  stOLAS Setup — No OLAS Required' + ' '.repeat(BOX_WIDTH - 35) + '║');
+  console.log('╠' + line + '╣');
+  console.log('║' + ' '.repeat(BOX_WIDTH - 2) + '║');
+  console.log('║  Staking is funded by LemonTree depositors.'.padEnd(BOX_WIDTH - 1) + '║');
+  console.log('║  You only need ETH for gas (~0.01 ETH).'.padEnd(BOX_WIDTH - 1) + '║');
+  console.log('║' + ' '.repeat(BOX_WIDTH - 2) + '║');
+  console.log('║  Flow: stake() -> discover service -> import config'.padEnd(BOX_WIDTH - 1) + '║');
+  console.log('║' + ' '.repeat(BOX_WIDTH - 2) + '║');
+  console.log('╚' + line + '╝');
+  console.log('');
+}
+
+/**
+ * Print stOLAS success summary
+ */
+export function printStolasSuccess(result: {
+  serviceId: number;
+  serviceConfigId: string;
+  multisig: string;
+  operatorAddress: string;
+  masterEoaAddress?: string;
+  masterSafeAddress?: string;
+  mechAddress?: string;
+  mechDeployError?: string;
+}): void {
+  const line = '═'.repeat(BOX_WIDTH - 2);
+
+  console.log('');
+  console.log('╔' + line + '╗');
+  console.log('║  stOLAS SETUP COMPLETE' + ' '.repeat(BOX_WIDTH - 25) + '║');
+  console.log('╠' + line + '╣');
+  console.log('║' + ' '.repeat(BOX_WIDTH - 2) + '║');
+  console.log(`║  Service ID:  ${result.serviceId}`.padEnd(BOX_WIDTH - 1) + '║');
+  console.log(`║  Config ID:   ${result.serviceConfigId}`.padEnd(BOX_WIDTH - 1) + '║');
+  console.log(`║  Service Safe: ${result.multisig}`.padEnd(BOX_WIDTH - 1) + '║');
+  console.log(`║  Agent EOA:   ${result.operatorAddress}`.padEnd(BOX_WIDTH - 1) + '║');
+  if (result.masterSafeAddress) {
+    console.log(`║  Master Safe: ${result.masterSafeAddress}`.padEnd(BOX_WIDTH - 1) + '║');
+  }
+  if (result.mechAddress) {
+    console.log(`║  Mech:        ${result.mechAddress}`.padEnd(BOX_WIDTH - 1) + '║');
+  } else {
+    console.log('║  Mech:        pending deployment'.padEnd(BOX_WIDTH - 1) + '║');
+  }
+  console.log('║' + ' '.repeat(BOX_WIDTH - 2) + '║');
+  console.log('║  OLAS staked: 0 (funded by LemonTree)'.padEnd(BOX_WIDTH - 1) + '║');
+  console.log('║  Owner: Master Safe (consistent with existing services)'.padEnd(BOX_WIDTH - 1) + '║');
+  console.log('║' + ' '.repeat(BOX_WIDTH - 2) + '║');
+  if (result.mechDeployError) {
+    console.log('║  Mech deployment deferred:'.padEnd(BOX_WIDTH - 1) + '║');
+    // Word wrap the error message
+    const maxLen = BOX_WIDTH - 8;
+    const words = result.mechDeployError.split(' ');
+    let currentLine = '';
+    for (const word of words) {
+      if ((currentLine + ' ' + word).trim().length > maxLen) {
+        console.log(`║    ${currentLine.padEnd(BOX_WIDTH - 6)}║`);
+        currentLine = word;
+      } else {
+        currentLine = (currentLine + ' ' + word).trim();
+      }
+    }
+    if (currentLine) {
+      console.log(`║    ${currentLine.padEnd(BOX_WIDTH - 6)}║`);
+    }
+    console.log('║' + ' '.repeat(BOX_WIDTH - 2) + '║');
+  }
+  console.log('║  Next: Run the worker with `yarn worker`'.padEnd(BOX_WIDTH - 1) + '║');
+  console.log('║' + ' '.repeat(BOX_WIDTH - 2) + '║');
+  console.log('╚' + line + '╝');
+  console.log('');
+}

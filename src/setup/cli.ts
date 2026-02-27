@@ -19,6 +19,7 @@ import { existsSync, copyFileSync } from 'fs';
 import { homedir } from 'os';
 import { join, resolve } from 'path';
 import { SimplifiedServiceBootstrap, type SimplifiedBootstrapConfig } from '../worker/SimplifiedServiceBootstrap.js';
+import { stolasBootstrap, stolasPreflightCheck } from '../worker/stolas/StolasServiceBootstrap.js';
 import { logger } from '../logging/index.js';
 import {
   getRequiredRpcUrl,
@@ -29,7 +30,7 @@ import {
 } from '../agent/mcp/tools/shared/env.js';
 import { createIsolatedMiddlewareEnvironment, type IsolatedEnvironment } from './test-isolation.js';
 import { runPreflight } from './preflight.js';
-import { printHeader, printStep, printSuccess, printError } from './display.js';
+import { printHeader, printStep, printSuccess, printError, printStolasIntro, printStolasSuccess } from './display.js';
 import { syncCredentials } from '../auth/index.js';
 import { hasAuthManagerCredentials, syncAndWriteGeminiCredentials } from '../worker/llm/authIntegration.js';
 import { DEFAULT_MECH_DELIVERY_RATE } from '../worker/config/MechConfig.js';
@@ -185,6 +186,7 @@ interface CLIArgs {
   testnet?: boolean;
   noMech?: boolean;
   noStaking?: boolean;
+  stolas?: boolean;
   stakingContract?: string;
   help?: boolean;
   unattended?: boolean;
@@ -205,6 +207,8 @@ function parseArgs(): CLIArgs {
       args.noMech = true;
     } else if (arg === '--no-staking') {
       args.noStaking = true;
+    } else if (arg === '--stolas') {
+      args.stolas = true;
     } else if (arg.startsWith('--staking-contract=')) {
       args.stakingContract = arg.split('=')[1];
     } else if (arg === '--unattended') {
@@ -238,6 +242,8 @@ OPTIONS:
 
   --no-mech           Disable mech deployment (mech enabled by default)
   --no-staking        Disable staking (staking enabled by default)
+  --stolas            Use stOLAS (ExternalStakingDistributor) — no OLAS needed
+                      Funded by LemonTree depositors. Requires only ETH for gas.
   --staking-contract  Custom staking contract address (default: Jinn Staking on Base)
   --unattended        Run middleware in unattended mode (default)
   --isolated          Run in isolated temp directory (fresh .operate, no production state)
@@ -264,6 +270,9 @@ EXAMPLES:
 
   # Deploy in isolated mode (fresh .operate in temp dir)
   npx jinn-setup --testnet --isolated
+
+  # Deploy via stOLAS (no OLAS required, funded by LemonTree)
+  npx jinn-setup --stolas
 
   # Deploy without mech
   npx jinn-setup --chain=base --no-mech
@@ -412,7 +421,7 @@ async function main() {
     console.log(`Staking: ${disableStaking ? 'DISABLED' : 'ENABLED (Jinn Staking)'}`);
     if (!disableStaking) {
       console.log(`   Contract: ${stakingContract || '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139'}`);
-      console.log(`   Required: ~100 OLAS (50 OLAS bond + 50 OLAS stake)`);
+      console.log(`   Required: ~10,000 OLAS (5,000 security deposit + 5,000 agent bond)`);
     }
     console.log(`Mech deployment: ${config.deployMech ? 'ENABLED' : 'DISABLED'}`);
     if (config.deployMech) {
@@ -426,6 +435,76 @@ async function main() {
     }
   }
 
+  // ── stOLAS flow ──────────────────────────────────────────────────────────
+  if (args.stolas) {
+    setupLogger.info({
+      chain,
+      mode: args.testnet ? 'testnet' : 'mainnet',
+      isolated: args.isolated || false,
+      rpcUrl: rpcUrl.substring(0, 30) + '...',
+    }, 'Starting stOLAS bootstrap');
+
+    printStolasIntro();
+
+    // Preflight check
+    printStep('active', 'Checking stOLAS prerequisites...');
+    const preflight = await stolasPreflightCheck(rpcUrl);
+    if (!preflight.ok) {
+      printStep('error', 'stOLAS preflight failed');
+      printError(preflight.error || 'Unknown preflight error');
+      process.exit(1);
+    }
+    printStep('done', 'stOLAS preflight passed', `${preflight.slotsRemaining} slots remaining`);
+
+    const basePath = isolatedEnv?.tempDir || process.cwd();
+
+    printStep('active', 'Loading Master Safe + generating agent key...');
+    printStep('active', 'Routing stake() through Master Safe...');
+    const result = await stolasBootstrap({
+      rpcUrl,
+      chain,
+      operateBasePath: basePath,
+      operatePassword,
+    });
+
+    if (result.success) {
+      if (result.mechAddress) {
+        printStep('done', 'Mech deployed', result.mechAddress);
+      } else if (result.mechDeployError) {
+        printStep('error', 'Mech deployment deferred — fund Master Safe and run deploy-mech');
+      }
+
+      const resultPath = `/tmp/jinn-stolas-setup-${Date.now()}.json`;
+      const fs = await import('fs/promises');
+      await fs.writeFile(resultPath, JSON.stringify(result, null, 2));
+
+      printStolasSuccess({
+        serviceId: result.serviceId!,
+        serviceConfigId: result.serviceConfigId!,
+        multisig: result.multisig!,
+        operatorAddress: result.agentInstanceAddress!,
+        masterEoaAddress: result.masterEoaAddress,
+        masterSafeAddress: result.masterSafeAddress,
+        mechAddress: result.mechAddress,
+        mechDeployError: result.mechDeployError,
+      });
+      console.log(`  Setup details saved to: ${resultPath}\n`);
+
+      if (isolatedEnv) {
+        console.log(' Cleaning up isolated environment...');
+        await isolatedEnv.cleanup();
+      }
+      process.exit(0);
+    } else {
+      printError(result.error || 'Unknown error');
+      if (isolatedEnv) {
+        await isolatedEnv.cleanup();
+      }
+      process.exit(1);
+    }
+  }
+
+  // ── Standard flow ─────────────────────────────────────────────────────────
   setupLogger.info({
     chain,
     withMech: config.deployMech,

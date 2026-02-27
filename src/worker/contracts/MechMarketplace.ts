@@ -7,14 +7,14 @@
  * Part of JINN-196: Deploy mech contract for service #149 through middleware
  */
 
-import { Contract, Interface, JsonRpcProvider, Wallet, parseUnits, zeroPadValue, toBeHex } from 'ethers';
+import { AbiCoder, Contract, Interface, JsonRpcProvider, Wallet, parseUnits, zeroPadValue, toBeHex } from 'ethers';
 import { logger } from '../../logging/index.js';
 
 const mechLogger = logger.child({ component: 'MECH-MARKETPLACE' });
 
 // MechMarketplace ABI (from middleware code)
 export const MECH_MARKETPLACE_ABI = [
-  // create function
+  // create function — third param is dynamic `bytes`, NOT bytes32
   {
     "inputs": [
       {
@@ -28,9 +28,9 @@ export const MECH_MARKETPLACE_ABI = [
         "type": "address"
       },
       {
-        "internalType": "bytes32",
-        "name": "data",
-        "type": "bytes32"
+        "internalType": "bytes",
+        "name": "payload",
+        "type": "bytes"
       }
     ],
     "name": "create",
@@ -59,6 +59,12 @@ export const MECH_MARKETPLACE_ABI = [
         "internalType": "uint256",
         "name": "serviceId",
         "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "mechFactory",
+        "type": "address"
       }
     ],
     "name": "CreateMech",
@@ -187,13 +193,13 @@ export class MechMarketplace {
     const mechFactory = this.getMechFactory(params.mechType);
     const iface = new Interface(MECH_MARKETPLACE_ABI);
 
-    // Convert request price to bytes32 (big-endian)
-    const requestPriceBytes32 = zeroPadValue(toBeHex(params.requestPrice), 32);
+    // Encode request price as ABI-encoded uint256 bytes payload
+    const payload = AbiCoder.defaultAbiCoder().encode(['uint256'], [params.requestPrice]);
 
     return iface.encodeFunctionData('create', [
       params.serviceId,
       mechFactory,
-      requestPriceBytes32
+      payload
     ]);
   }
 
@@ -230,7 +236,7 @@ export class MechMarketplace {
 
       // Get mech factory address
       const mechFactory = this.getMechFactory(params.mechType);
-      const requestPriceBytes32 = zeroPadValue(toBeHex(params.requestPrice), 32);
+      const payload = AbiCoder.defaultAbiCoder().encode(['uint256'], [params.requestPrice]);
 
       mechLogger.info({
         serviceId: params.serviceId,
@@ -242,7 +248,7 @@ export class MechMarketplace {
       const tx = await contract.create(
         params.serviceId,
         mechFactory,
-        requestPriceBytes32
+        payload
       );
 
       mechLogger.info({ txHash: tx.hash }, 'Transaction submitted, waiting for confirmation');
