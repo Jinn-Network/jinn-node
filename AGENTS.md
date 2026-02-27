@@ -269,9 +269,65 @@ yarn mech:check-rate
 The full setup on Base mainnet typically requires:
 - **~0.005 ETH** on the Master EOA (for gas to create the Safe)
 - **~0.01 ETH** in the Master Safe (for operational gas)
-- **~100 OLAS** in the Master Safe (50 OLAS bond + 50 OLAS stake for the Jinn staking contract)
+- **~10,000 OLAS** in the Master Safe (5,000 OLAS security deposit + 5,000 OLAS agent bond for the Jinn staking contract)
 
 OLAS can be purchased on Uniswap (Base) or bridged from Ethereum mainnet.
+
+**Alternative: stOLAS setup (no OLAS required)** — See [Phase 3b: stOLAS Setup](#phase-3b-stolas-setup-no-olas-required).
+
+---
+
+## Phase 3b: stOLAS Setup (No OLAS Required)
+
+If the operator does not have 10,000 OLAS, they can use the **stOLAS** path. stOLAS uses the ExternalStakingDistributor — LemonTree depositors provide the OLAS capital, and operators only need ETH for gas.
+
+### Prerequisites
+
+- Phases 1-2 completed (`.env` configured, dependencies installed)
+- **~0.02 ETH** on Base for the operator EOA (gas for `stake()` tx)
+- An operator private key (hex, 0x-prefixed) set as `OPERATOR_PRIVATE_KEY` in `.env`
+
+### Generate Operator Key
+
+If the operator doesn't have one, generate a fresh EOA:
+
+```bash
+node -e "const { Wallet } = require('ethers'); const w = Wallet.createRandom(); console.log('Address:', w.address); console.log('Private Key:', w.privateKey);"
+```
+
+Add to `.env`:
+```bash
+OPERATOR_PRIVATE_KEY=0x...  # The private key from above
+```
+
+Fund the address with ~0.02 ETH on Base.
+
+### Run stOLAS Setup
+
+```bash
+cd jinn-node
+yarn setup --stolas
+```
+
+This will:
+1. Check stOLAS prerequisites (distributor configured, slots available)
+2. Call `stake()` on the ExternalStakingDistributor (permissionless)
+3. Create a new on-chain service + Safe automatically
+4. Import the service config into `.operate/`
+
+### What's Different from Standard Setup
+
+| | Standard | stOLAS |
+|--|---------|--------|
+| OLAS required | ~10,000 OLAS | 0 OLAS |
+| ETH required | ~0.015 ETH | ~0.02 ETH |
+| Who provides capital | Operator | LemonTree depositors |
+| Reward split | 100% to operator | 5% operator, 10% protocol, 85% depositors |
+| Setup command | `yarn setup` | `yarn setup --stolas` |
+
+### Post-Setup
+
+After stOLAS setup completes, continue with [Phase 4: Run the Worker](#phase-4-run-the-worker) as usual. The worker doesn't know or care how the service was staked.
 
 ---
 
