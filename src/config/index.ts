@@ -674,7 +674,8 @@ export function getPonderGraphqlUrl(): string {
   const explicit = getConfig().PONDER_GRAPHQL_URL;
   if (explicit) return explicit;
 
-  // Default to production Ponder endpoint
+  // Default to Railway production endpoint (Railway Ponder is the primary dependency)
+  // Only use localhost if explicitly testing Ponder changes
   return 'https://indexer.jinn.network/graphql';
 }
 

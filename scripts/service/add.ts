@@ -43,6 +43,7 @@ function parseArgs(): {
   unattended: boolean;
   mechMarketplace?: string;
   mechPrice?: string;
+  count: number;
 } {
   const args = process.argv.slice(2);
   let chain: SupportedChain | undefined;
@@ -52,9 +53,16 @@ function parseArgs(): {
   let unattended = false;
   let mechMarketplace: string | undefined;
   let mechPrice: string | undefined;
+  let count = 1;
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i].startsWith('--chain=')) {
+    if (args[i].startsWith('--count=')) {
+      count = parseInt(args[i].slice('--count='.length), 10);
+      if (isNaN(count) || count < 1) {
+        printError('--count must be a positive integer');
+        process.exit(1);
+      }
+    } else if (args[i].startsWith('--chain=')) {
       const candidate = args[i].slice('--chain='.length);
       if (isSupportedChain(candidate)) {
         chain = candidate;
@@ -79,7 +87,7 @@ function parseArgs(): {
     }
   }
 
-  return { chain, stakingContract, dryRun, noMech, unattended, mechMarketplace, mechPrice };
+  return { chain, stakingContract, dryRun, noMech, unattended, mechMarketplace, mechPrice, count };
 }
 
 async function main() {
@@ -91,9 +99,10 @@ async function main() {
     unattended,
     mechMarketplace,
     mechPrice,
+    count,
   } = parseArgs();
 
-  printHeader('Add OLAS Service');
+  printHeader(count > 1 ? `Add OLAS Services (batch: ${count})` : 'Add OLAS Service');
 
   // --- Preflight checks ---
   const password = process.env.OPERATE_PASSWORD;
@@ -237,6 +246,18 @@ async function main() {
       printStep('done', 'Balance check skipped');
     }
 
+    // --- Batch loop ---
+    const batchResults: Array<{ index: number; configId?: string; safe?: string; error?: string }> = [];
+
+    for (let batchIdx = 0; batchIdx < count; batchIdx++) {
+      if (count > 1) {
+        console.log(`\n  \u2500\u2500 Service ${batchIdx + 1} of ${count} \u2500\u2500\n`);
+      }
+
+      let batchConfigId: string | undefined;
+      let batchSafe: string | undefined;
+
+    try {
     // --- Create service config ---
     printStep('active', 'Creating service configuration...');
     const serviceName = `jinn-service-${Date.now()}`;
@@ -379,19 +400,62 @@ async function main() {
     process.removeListener('SIGTERM', cleanupPartial);
 
     // --- Show result ---
-    const totalServices = existingServices.length + 1;
+    const totalServices = existingServices.length + batchIdx + 1;
     printSuccess({
       serviceConfigId,
       serviceSafeAddress: serviceSafe,
     });
 
-    console.log(`  Total services: ${totalServices}`);
-    console.log('');
-    if (totalServices >= 2) {
-      console.log('  To enable multi-service rotation:');
-      console.log('    WORKER_MULTI_SERVICE=true');
+    if (count === 1) {
+      console.log(`  Total services: ${totalServices}`);
       console.log('');
+      if (totalServices >= 2) {
+        console.log('  To enable multi-service rotation:');
+        console.log('    WORKER_MULTI_SERVICE=true');
+        console.log('');
+      }
     }
+
+    batchConfigId = serviceConfigId;
+    batchSafe = serviceSafe;
+
+    } catch (batchError) {
+      const msg = batchError instanceof Error ? batchError.message : String(batchError);
+      printError(`Service ${batchIdx + 1} failed: ${msg}`);
+      batchResults.push({ index: batchIdx + 1, error: msg });
+      if (count === 1) process.exit(1);
+      continue;
+    }
+
+    batchResults.push({ index: batchIdx + 1, configId: batchConfigId, safe: batchSafe });
+
+    // Brief pause between services in batch mode
+    if (count > 1 && batchIdx < count - 1) {
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    } // end batch loop
+
+    // Batch summary
+    if (count > 1) {
+      const succeeded = batchResults.filter(r => !r.error);
+      const failed = batchResults.filter(r => r.error);
+      console.log(`\n  \u2500\u2500 Batch Summary \u2500\u2500\n`);
+      console.log(`  ${succeeded.length}/${count} services provisioned successfully`);
+      for (const r of succeeded) {
+        console.log(`  [+] Service ${r.index}: ${r.configId}`);
+      }
+      for (const r of failed) {
+        console.log(`  [-] Service ${r.index}: FAILED — ${r.error}`);
+      }
+      const totalServices = existingServices.length + succeeded.length;
+      console.log(`\n  Total services: ${totalServices}`);
+      if (totalServices >= 2) {
+        console.log('  To enable multi-service rotation: WORKER_MULTI_SERVICE=true');
+      }
+      console.log('');
+      if (failed.length > 0) process.exit(1);
+    }
+
   } finally {
     await wrapper.stopServer();
   }

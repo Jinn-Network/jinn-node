@@ -21,7 +21,6 @@ import { getInheritedEnv } from './status/autoDispatch.js';
 import { serializeError } from './logging/errors.js';
 import { safeParseToolResponse } from './tool_utils.js';
 import { processOnce as processJobOnce } from './orchestration/jobRunner.js';
-import { fetchIpfsMetadata } from './metadata/fetchIpfsMetadata.js';
 import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
 import { shouldStop } from './cycleControl.js';
 import { checkAndDispatchScheduledVentures } from './ventures/ventureWatcher.js';
@@ -37,7 +36,8 @@ import {
   getRequiredRpcUrl as getConfigRpcUrl,
   type WorkerMechFilterMode,
 } from '../config/index.js';
-import { recordIdleCycle, recordExecutionTime } from './healthcheck.js';
+import { recordIdleCycle, recordExecutionTime, updateFleetState } from './healthcheck.js';
+import { maybeDistributeFunds } from './funding/FundDistributor.js';
 import { getMechAddressesForStakingContract } from './filters/stakingFilter.js';
 import {
   getWorkerCredentialInfo,
@@ -51,14 +51,14 @@ import {
   resetCredentialInfoCache,
 } from './filters/credentialFilter.js';
 import { ServiceRotator } from './rotation/ServiceRotator.js';
-import { setActiveService } from './rotation/ActiveServiceContext.js';
-import { resetCachedAddress as resetSigningProxyAddress, setProxyHeliaNode } from '../agent/signing-proxy.js';
+import { getActiveService, setActiveService } from './rotation/ActiveServiceContext.js';
+import { resetCachedAddress as resetSigningProxyAddress, startSigningProxy, setProxyHeliaNode } from '../agent/signing-proxy.js';
 import { initHeliaNode, stopHeliaNode, getHeliaNodeOptional, maybeRunGcCycle } from '../ipfs/lifecycle.js';
 import { isOperatorStaked } from '../ipfs/staking.js';
 import { fetchBootstrapPeers, registerMultiaddrs } from '../ipfs/bootstrap.js';
 import { maybeCallCheckpoint } from './staking/checkpoint.js';
 import { checkEpochGate } from './staking/epochGate.js';
-import { maybeSubmitHeartbeat } from './staking/heartbeat.js';
+import { maybeSubmitHeartbeat, maybeSubmitHeartbeatForService } from './staking/heartbeat.js';
 import { resolveServiceConfig, clearServiceConfigCache, type ResolvedServiceConfig } from './onchain/serviceResolver.js';
 import { checkAndRestakeServices } from './staking/restake.js';
 import { multiaddr } from '@multiformats/multiaddr';
@@ -76,6 +76,7 @@ type UnclaimedRequest = {
   delivered?: boolean;
   responseTimeout?: number; // absolute unix timestamp (seconds) after which any mech can deliver
   enabledTools?: string[];  // MCP tools required by this job (from Ponder)
+  jobName?: string;         // job name from Ponder (e.g. '__heartbeat__')
 };
 
 type JobDefinitionStatus = {
@@ -90,6 +91,11 @@ const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
 const CONTROL_API_URL = getOptionalControlApiUrl();
 const SINGLE_SHOT = process.argv.includes('--single') || process.argv.includes('--single-job');
 const USE_CONTROL_API = getUseControlApi();
+
+function isHeartbeatLeaderWorker(): boolean {
+  const workerId = process.env.WORKER_ID || '';
+  return !workerId || workerId.endsWith('-1') || workerId === 'default';
+}
 
 // Track jobs executed in this session to prevent re-execution on delivery failure
 // This prevents infinite loops when delivery fails but Control API allows re-claiming
@@ -221,6 +227,27 @@ if (process.env.WORKER_STOP_FILE && existsSync(process.env.WORKER_STOP_FILE)) {
 // On-chain resolved service config (populated at startup)
 let resolvedConfig: ResolvedServiceConfig | null = null;
 
+/**
+ * Resolve the currently active service config.
+ * In multi-service mode this follows ActiveServiceContext (rotated service mech),
+ * then falls back to startup-resolved config for single-service mode.
+ */
+async function getRuntimeResolvedConfig(): Promise<ResolvedServiceConfig | null> {
+  const active = getActiveService();
+  if (active?.mechAddress) {
+    try {
+      return await resolveServiceConfig(active.mechAddress, getRequiredRpcUrl());
+    } catch (e: any) {
+      workerLogger.warn(
+        { error: serializeError(e), activeMech: active.mechAddress, serviceId: active.serviceId },
+        'Failed to resolve active service config from on-chain state'
+      );
+    }
+  }
+
+  return resolvedConfig;
+}
+
 // Auto-reposting configuration
 const ENABLE_AUTO_REPOST = getEnableAutoRepost();
 const MIN_TIME_BETWEEN_REPOSTS = 5 * 60 * 1000; // 5 minutes
@@ -310,6 +337,10 @@ const WORKER_HEARTBEAT_CYCLES = parseInt(process.env.WORKER_HEARTBEAT_CYCLES || 
 const ENABLE_VENTURE_WATCHER = process.env.ENABLE_VENTURE_WATCHER === '1';
 const WORKER_VENTURE_WATCHER_CYCLES = parseInt(process.env.WORKER_VENTURE_WATCHER_CYCLES || '3');
 
+// Fund distribution: check service Safe/agent EOA balances and top up from Master Safe.
+// At 30s base poll, 120 cycles = ~60 min. Only active when WORKER_MULTI_SERVICE=true.
+const WORKER_FUND_CHECK_CYCLES = parseInt(process.env.WORKER_FUND_CHECK_CYCLES || '120');
+
 // Periodic cleanup of global maps to prevent unbounded growth over weeks of uptime
 const MAP_CLEANUP_INTERVAL_CYCLES = 50;
 const EXECUTED_JOBS_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -334,12 +365,14 @@ function cleanupGlobalMaps(): void {
   }
 
   if (cleaned > 0) {
-    workerLogger.debug({ cleaned, sizes: {
-      executedJobs: executedJobsThisSession.size,
-      reposts: recentReposts.size,
-      redispatch: dependencyRedispatchAttempts.size,
-      cancel: dependencyCancelAttempts.size,
-    }}, 'Cleaned up stale global map entries');
+    workerLogger.debug({
+      cleaned, sizes: {
+        executedJobs: executedJobsThisSession.size,
+        reposts: recentReposts.size,
+        redispatch: dependencyRedispatchAttempts.size,
+        cancel: dependencyCancelAttempts.size,
+      }
+    }, 'Cleaned up stale global map entries');
   }
 }
 
@@ -670,6 +703,7 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       delivered
       dependencies
       enabledTools
+      jobName
     }
   }
 }`;
@@ -814,7 +848,8 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       blockTimestamp: Number(r.blockTimestamp),
       delivered: Boolean(r?.delivered === true),
       dependencies: Array.isArray(r?.dependencies) ? r.dependencies.map((dep: any) => String(dep)) : undefined,
-      enabledTools: Array.isArray(r?.enabledTools) ? r.enabledTools : undefined
+      enabledTools: Array.isArray(r?.enabledTools) ? r.enabledTools : undefined,
+      jobName: r?.jobName ? String(r.jobName) : undefined
     })) as UnclaimedRequest[];
   } catch (e) {
     workerLogger.warn({ error: serializeError(e) }, 'Ponder GraphQL not reachable; returning empty set');
@@ -1367,6 +1402,7 @@ async function fetchSpecificRequest(requestId: string): Promise<UnclaimedRequest
       delivered
       dependencies
       enabledTools
+      jobName
     }
   }
 }`;
@@ -1387,7 +1423,8 @@ async function fetchSpecificRequest(requestId: string): Promise<UnclaimedRequest
       blockTimestamp: Number(r.blockTimestamp),
       delivered: Boolean(r?.delivered === true),
       dependencies: Array.isArray(r?.dependencies) ? r.dependencies.map((dep: any) => String(dep)) : undefined,
-      enabledTools: Array.isArray(r?.enabledTools) ? r.enabledTools : undefined
+      enabledTools: Array.isArray(r?.enabledTools) ? r.enabledTools : undefined,
+      jobName: r?.jobName ? String(r.jobName) : undefined
     };
   } catch (e: any) {
     workerLogger.warn({ error: serializeError(e) }, 'Error fetching specific request');
@@ -1409,11 +1446,16 @@ async function processOnce(): Promise<boolean> {
     return false;
   }
 
+  // Optional: target a specific request id if provided (for deterministic tests).
+  // A targeted recovery run should bypass epoch pickup gating.
+  const targetIdEnv = (getOptionalMechTargetRequestId() || '').trim();
+
   // Staking target gate: stop claiming if request target met for this epoch
   // Use resolved config (on-chain derived) with env var override
-  const stakingContract = getOptionalWorkerStakingContract() || resolvedConfig?.stakingContract || null;
-  if (stakingContract && resolvedConfig) {
-    const gate = await checkEpochGate(stakingContract, resolvedConfig.serviceId, resolvedConfig.marketplace);
+  const runtimeResolvedConfig = await getRuntimeResolvedConfig();
+  const stakingContract = getOptionalWorkerStakingContract() || runtimeResolvedConfig?.stakingContract || null;
+  if (!targetIdEnv && stakingContract && runtimeResolvedConfig) {
+    const gate = await checkEpochGate(stakingContract, runtimeResolvedConfig.serviceId, runtimeResolvedConfig.marketplace);
     if (gate.targetMet) {
       const resetIn = Math.max(0, gate.nextCheckpoint - Math.floor(Date.now() / 1000));
       workerLogger.info({
@@ -1423,10 +1465,10 @@ async function processOnce(): Promise<boolean> {
       }, `Staking target met (${gate.requestCount}/${gate.target}) — skipping job pickup`);
       return false;
     }
+  } else if (targetIdEnv) {
+    workerLogger.info({ target: targetIdEnv }, 'Bypassing staking target gate for targeted request');
   }
 
-  // Optional: target a specific request id if provided (for deterministic tests)
-  const targetIdEnv = (getOptionalMechTargetRequestId() || '').trim();
   let candidates: UnclaimedRequest[];
 
   if (targetIdEnv) {
@@ -1562,6 +1604,25 @@ async function processOnce(): Promise<boolean> {
     }
   }
 
+  // Heartbeat coordination: only leader worker should claim heartbeat jobs.
+  // Non-leaders skip them before claim to avoid nonce collisions on delivery.
+  if (!isHeartbeatLeaderWorker()) {
+    const nonHeartbeat = candidates.filter(c => c.jobName !== '__heartbeat__');
+    if (nonHeartbeat.length !== candidates.length) {
+      workerLogger.info({
+        skippedHeartbeats: candidates.length - nonHeartbeat.length,
+      }, 'Skipping heartbeat requests on non-leader worker');
+    }
+    candidates = nonHeartbeat;
+  }
+
+  if (candidates.length === 0) {
+    consecutiveStuckCycles = 0;
+    lastStuckRequestIds = [];
+    workerLogger.info('No eligible requests after heartbeat-leader filter');
+    return false;
+  }
+
   const eligibleCandidates = candidates.filter(c => !executedJobsThisSession.has(c.id));
   if (eligibleCandidates.length === 0) {
     consecutiveStuckCycles += 1;
@@ -1624,40 +1685,34 @@ async function processOnce(): Promise<boolean> {
   if (!target) return false;
 
   // Check if this is a heartbeat request — deliver immediately without agent execution
-  if (target.ipfsHash) {
-    try {
-      const meta = await fetchIpfsMetadata(target.ipfsHash, getHeliaNodeOptional() ?? undefined);
-      if (meta && (meta as any).heartbeat === true) {
-        workerLogger.info({ requestId: target.id }, 'Heartbeat request — auto-delivering');
-        const mechAddress = getMechAddress();
-        const safeAddress = getServiceSafeAddress();
-        const privateKey = getServicePrivateKey();
-        const rpcHttpUrl = getRequiredRpcUrl();
-        const chainConfig = getMechChainConfig();
+  // Uses jobName from Ponder index (reliable) instead of IPFS metadata fetch (can fail)
+  if (target.jobName === '__heartbeat__') {
+    workerLogger.info({ requestId: target.id }, 'Heartbeat request — auto-delivering');
+    const mechAddress = getMechAddress();
+    const safeAddress = getServiceSafeAddress();
+    const privateKey = getServicePrivateKey();
+    const rpcHttpUrl = getRequiredRpcUrl();
+    const chainConfig = getMechChainConfig();
 
-        if (mechAddress && safeAddress && privateKey) {
-          try {
-            await (deliverViaSafe as any)({
-              chainConfig,
-              requestId: target.id,
-              resultContent: { heartbeat: true, ts: Date.now() },
-              targetMechAddress: mechAddress,
-              safeAddress,
-              privateKey,
-              rpcHttpUrl,
-              wait: true,
-            });
-            workerLogger.info({ requestId: target.id }, 'Heartbeat delivered');
-          } catch (deliveryErr: any) {
-            workerLogger.warn({ requestId: target.id, error: deliveryErr.message }, 'Heartbeat delivery failed');
-          }
-        }
-        executedJobsThisSession.set(target.id, Date.now());
-        return true;
+    if (mechAddress && safeAddress && privateKey) {
+      try {
+        await (deliverViaSafe as any)({
+          chainConfig,
+          requestId: target.id,
+          resultContent: { heartbeat: true, ts: Date.now() },
+          targetMechAddress: mechAddress,
+          safeAddress,
+          privateKey,
+          rpcHttpUrl,
+          wait: true,
+        });
+        workerLogger.info({ requestId: target.id }, 'Heartbeat delivered');
+      } catch (deliveryErr: any) {
+        workerLogger.warn({ requestId: target.id, error: deliveryErr.message }, 'Heartbeat delivery failed');
       }
-    } catch {
-      // If metadata fetch fails, treat as normal job
     }
+    executedJobsThisSession.set(target.id, Date.now());
+    return true;
   }
 
   // Pre-execution guard: skip non-own-mech requests still within priority window.
@@ -1741,6 +1796,14 @@ const WORKER_REPOST_CHECK_CYCLES = parseInt(process.env.WORKER_REPOST_CHECK_CYCL
 
 async function main() {
   workerLogger.info('Mech worker starting');
+
+  // Start worker-level signing proxy — available for all dispatch paths
+  // (parent dispatch, loop/timeout recovery, dependency redispatch, repost, etc.)
+  // The proxy runs on 127.0.0.1 with a random port and bearer token.
+  let signingProxy = await startSigningProxy();
+  process.env.AGENT_SIGNING_PROXY_URL = signingProxy.url;
+  process.env.AGENT_SIGNING_PROXY_TOKEN = signingProxy.secret;
+  workerLogger.info({ url: signingProxy.url }, 'Worker-level signing proxy started');
 
   // Resolve on-chain service config from mech address
   // This derives serviceId, safe, marketplace, and staking contract from chain state
@@ -1896,6 +1959,7 @@ async function main() {
   let cyclesSinceLastCheckpoint = 0;
   let cyclesSinceLastHeartbeat = 0;
   let cyclesSinceLastVentureCheck = 0;
+  let cyclesSinceLastFundCheck = 0;
 
   for (; ;) {
     const cycleStart = Date.now();
@@ -1948,7 +2012,8 @@ async function main() {
 
       // Call staking checkpoint if epoch is overdue (permissionless, any EOA can trigger)
       {
-        const stakingContract = getOptionalWorkerStakingContract() || resolvedConfig?.stakingContract || null;
+        const runtimeResolvedConfig = await getRuntimeResolvedConfig();
+        const stakingContract = getOptionalWorkerStakingContract() || runtimeResolvedConfig?.stakingContract || null;
         cyclesSinceLastCheckpoint++;
         if (stakingContract && cyclesSinceLastCheckpoint >= WORKER_CHECKPOINT_CYCLES) {
           cyclesSinceLastCheckpoint = 0;
@@ -1960,19 +2025,64 @@ async function main() {
         }
 
         // Submit heartbeat requests to meet staking liveness requirement
-        // Check epoch gate first — skip heartbeat if target already met
+        // Only the leader worker submits heartbeats to avoid Safe nonce collisions
+        const isHeartbeatLeader = isHeartbeatLeaderWorker();
         cyclesSinceLastHeartbeat++;
-        if (stakingContract && resolvedConfig && cyclesSinceLastHeartbeat >= WORKER_HEARTBEAT_CYCLES) {
+        if (isHeartbeatLeader && cyclesSinceLastHeartbeat >= WORKER_HEARTBEAT_CYCLES) {
           cyclesSinceLastHeartbeat = 0;
-          try {
-            const gate = await checkEpochGate(stakingContract, resolvedConfig.serviceId, resolvedConfig.marketplace);
-            if (!gate.targetMet) {
-              await maybeSubmitHeartbeat(stakingContract, resolvedConfig.serviceId, resolvedConfig.marketplace);
-            } else {
-              workerLogger.debug({ requests: gate.requestCount, target: gate.target }, 'Epoch target met — skipping heartbeat');
+
+          // Multi-service mode: submit heartbeats for ALL staked services
+          // Deduplicate by Safe address — services sharing a Safe only need one heartbeat
+          // because mapRequestCounts is per-multisig, so one request counts for all.
+          if (rotator) {
+            const handledSafes = new Set<string>();
+            for (const service of rotator.getAllServices()) {
+              if (!service.stakingContractAddress || !service.serviceId || !service.mechContractAddress) continue;
+              // Skip if we already submitted a heartbeat for this Safe
+              const safeKey = service.serviceSafeAddress?.toLowerCase();
+              if (safeKey && handledSafes.has(safeKey)) {
+                workerLogger.debug({ serviceId: service.serviceId, safe: safeKey }, 'Skipping heartbeat — Safe already handled this cycle');
+                continue;
+              }
+              try {
+                const resolved = await resolveServiceConfig(service.mechContractAddress, rpcUrl);
+                if (!resolved) continue;
+                const gate = await checkEpochGate(service.stakingContractAddress, service.serviceId, resolved.marketplace);
+                if (!gate.targetMet) {
+                  await maybeSubmitHeartbeatForService(
+                    service.stakingContractAddress,
+                    service.serviceId,
+                    resolved.marketplace,
+                    service,
+                  );
+                  if (safeKey) handledSafes.add(safeKey);
+                } else {
+                  workerLogger.debug({ serviceId: service.serviceId, requests: gate.requestCount, target: gate.target }, 'Epoch target met — skipping heartbeat');
+                }
+              } catch (e: any) {
+                workerLogger.warn({ serviceId: service.serviceId, error: serializeError(e) }, 'Staking heartbeat failed for service (non-fatal)');
+              }
             }
-          } catch (e: any) {
-            workerLogger.warn({ error: serializeError(e) }, 'Staking heartbeat failed (non-fatal)');
+          } else if (stakingContract && runtimeResolvedConfig) {
+            // Single-service fallback
+            try {
+              const gate = await checkEpochGate(
+                stakingContract,
+                runtimeResolvedConfig.serviceId,
+                runtimeResolvedConfig.marketplace
+              );
+              if (!gate.targetMet) {
+                await maybeSubmitHeartbeat(
+                  stakingContract,
+                  runtimeResolvedConfig.serviceId,
+                  runtimeResolvedConfig.marketplace
+                );
+              } else {
+                workerLogger.debug({ requests: gate.requestCount, target: gate.target }, 'Epoch target met — skipping heartbeat');
+              }
+            } catch (e: any) {
+              workerLogger.warn({ error: serializeError(e) }, 'Staking heartbeat failed (non-fatal)');
+            }
           }
         }
       }
@@ -1986,6 +2096,19 @@ async function main() {
             await checkAndDispatchScheduledVentures();
           } catch (e: any) {
             workerLogger.warn({ error: serializeError(e) }, 'Venture watcher check failed (non-fatal)');
+          }
+        }
+      }
+
+      // Fund distribution: top up service Safes/agents from Master Safe
+      if (rotator) {
+        cyclesSinceLastFundCheck++;
+        if (cyclesSinceLastFundCheck >= WORKER_FUND_CHECK_CYCLES) {
+          cyclesSinceLastFundCheck = 0;
+          try {
+            await maybeDistributeFunds(rotator.getAllServices(), rpcUrl);
+          } catch (e: any) {
+            workerLogger.warn({ error: serializeError(e) }, 'Fund distribution failed (non-fatal)');
           }
         }
       }
@@ -2050,6 +2173,14 @@ async function main() {
             resetControlApiSigner();
             resetSigningProxyAddress();
             resetCredentialInfoCache();
+
+            // Restart signing proxy with the new service's key
+            await signingProxy.close();
+            signingProxy = await startSigningProxy();
+            process.env.AGENT_SIGNING_PROXY_URL = signingProxy.url;
+            process.env.AGENT_SIGNING_PROXY_TOKEN = signingProxy.secret;
+            workerLogger.info({ url: signingProxy.url }, 'Signing proxy restarted for new service');
+
             workerLogger.info({
               activeService: decision.service.serviceConfigId,
               serviceId: decision.service.serviceId,
@@ -2057,6 +2188,8 @@ async function main() {
               rotationState: rotator.getState(),
             }, 'Rotated to new service');
           }
+          // Update healthcheck fleet state
+          updateFleetState(rotator.getState());
         } catch (rotErr: any) {
           workerLogger.warn({ error: rotErr?.message || String(rotErr) }, 'Service rotation check failed');
         }
@@ -2075,6 +2208,11 @@ async function main() {
     }
     await new Promise(r => setTimeout(r, currentPollIntervalMs));
   }
+
+  // Clean up signing proxy on worker exit
+  await signingProxy.close().catch(() => { });
+  delete process.env.AGENT_SIGNING_PROXY_URL;
+  delete process.env.AGENT_SIGNING_PROXY_TOKEN;
 }
 
 main().catch((err) => {

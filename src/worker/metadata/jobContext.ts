@@ -59,7 +59,7 @@ export function setJobContext(params: {
   }
 
   if (ventureId) {
-    process.env.JINN_VENTURE_ID = ventureId;
+    process.env.JINN_CTX_VENTURE_ID = ventureId;
   }
 
   if (parentRequestId) {
@@ -123,7 +123,7 @@ export function clearJobContext(): void {
   delete process.env.JINN_CTX_BASE_BRANCH;
   delete process.env.JINN_CTX_MECH_ADDRESS;
   delete process.env.JINN_CTX_WORKSTREAM_ID;
-  delete process.env.JINN_VENTURE_ID;
+  delete process.env.JINN_CTX_VENTURE_ID;
   delete process.env.JINN_CTX_PARENT_REQUEST_ID;
   delete process.env.JINN_CTX_BRANCH_NAME;
   delete process.env.JINN_CTX_COMPLETED_CHILDREN;
@@ -162,7 +162,7 @@ export function snapshotJobContext(): {
     baseBranch: process.env.JINN_CTX_BASE_BRANCH,
     mechAddress: process.env.JINN_CTX_MECH_ADDRESS,
     workstreamId: process.env.JINN_CTX_WORKSTREAM_ID,
-    ventureId: process.env.JINN_VENTURE_ID,
+    ventureId: process.env.JINN_CTX_VENTURE_ID,
     parentRequestId: process.env.JINN_CTX_PARENT_REQUEST_ID,
     branchName: process.env.JINN_CTX_BRANCH_NAME,
     completedChildRequestIds: process.env.JINN_CTX_COMPLETED_CHILDREN

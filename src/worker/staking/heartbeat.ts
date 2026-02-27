@@ -22,6 +22,7 @@ import { getServicePrivateKey, getServiceSafeAddress, getMechAddress } from '../
 // NOTE: getServiceSafeAddress is only used for the warning log comparing worker vs staking multisig
 import { submitMarketplaceRequest } from '../MechMarketplaceRequester.js';
 import { computeProjectedEpochTarget, readNonNegativeIntEnv, readPositiveIntEnv } from './target.js';
+import type { ServiceInfo } from '../ServiceConfigReader.js';
 
 const log = workerLogger.child({ component: 'HEARTBEAT' });
 
@@ -41,8 +42,8 @@ const MARKETPLACE_ABI = [
   'function mapRequestCounts(address) view returns (uint256)',
 ];
 
-// Cached staking multisig — resolved once from on-chain getServiceInfo()
-let resolvedMultisig: string | null = null;
+// Cached staking multisig per service — resolved from on-chain getServiceInfo()
+const resolvedMultisigByService = new Map<number, string>();
 
 /**
  * Calculate how many more requests we need to submit this epoch.
@@ -79,12 +80,13 @@ async function getRequestDeficit(
 
   // Use the staking multisig from on-chain (may differ from worker Safe)
   const multisig: string = serviceInfo.multisig;
-  if (!resolvedMultisig) {
+  const cachedMultisig = resolvedMultisigByService.get(serviceId);
+  if (!cachedMultisig) {
     const workerSafe = getServiceSafeAddress();
     if (workerSafe?.toLowerCase() !== multisig.toLowerCase()) {
       log.warn({ workerSafe, stakingMultisig: multisig }, 'Worker Safe differs from staking multisig — using staking multisig for heartbeats');
     }
-    resolvedMultisig = multisig;
+    resolvedMultisigByService.set(serviceId, multisig);
   }
 
   // Baseline from on-chain nonces[1] — authoritative epoch-start request count
@@ -132,7 +134,7 @@ async function getRequestDeficit(
 
 /**
  * Submit a single heartbeat request to the marketplace.
- * Returns true if successful.
+ * Uses the active service context for credentials (single-service mode).
  */
 async function submitHeartbeat(
   multisig: string,
@@ -141,12 +143,25 @@ async function submitHeartbeat(
   marketplaceAddress: string,
 ): Promise<boolean> {
   const privateKey = getServicePrivateKey();
-  const rpcUrl = getRequiredRpcUrl();
-
   if (!privateKey) {
     log.warn('No service private key — cannot submit heartbeat');
     return false;
   }
+  return submitHeartbeatWithCredentials(multisig, mechAddress, privateKey, serviceId, marketplaceAddress);
+}
+
+/**
+ * Submit a single heartbeat request with explicit credentials.
+ * Used by multi-service mode to submit for any service without swapping context.
+ */
+async function submitHeartbeatWithCredentials(
+  multisig: string,
+  mechAddress: string,
+  privateKey: string,
+  serviceId: number,
+  marketplaceAddress: string,
+): Promise<boolean> {
+  const rpcUrl = getRequiredRpcUrl();
 
   const prompt = JSON.stringify({
     heartbeat: true,
@@ -168,9 +183,9 @@ async function submitHeartbeat(
   });
 
   if (result.success) {
-    log.info({ txHash: result.transactionHash, gasUsed: result.gasUsed }, 'Heartbeat request submitted');
+    log.info({ txHash: result.transactionHash, gasUsed: result.gasUsed, serviceId }, 'Heartbeat request submitted');
   } else {
-    log.warn({ error: result.error }, 'Heartbeat request failed');
+    log.warn({ error: result.error, serviceId }, 'Heartbeat request failed');
   }
 
   return result.success;
@@ -179,7 +194,18 @@ async function submitHeartbeat(
 // Minimum seconds between heartbeat submissions to avoid gas waste
 const HEARTBEAT_MIN_INTERVAL_SEC = parseInt(process.env.HEARTBEAT_MIN_INTERVAL_SEC || '60');
 
-let lastHeartbeatTimestamp = 0;
+const lastHeartbeatTimestampByService = new Map<number, number>();
+const lastHeartbeatTimestampBySigner = new Map<string, number>();
+
+function getSignerKeyForService(service: ServiceInfo): string | null {
+  if (service.agentEoaAddress) return service.agentEoaAddress.toLowerCase();
+  if (!service.agentPrivateKey) return null;
+  try {
+    return ethers.computeAddress(service.agentPrivateKey).toLowerCase();
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Maybe submit heartbeat requests to meet the staking liveness requirement.
@@ -203,8 +229,9 @@ export async function maybeSubmitHeartbeat(
 
   // Throttle: don't submit more often than HEARTBEAT_MIN_INTERVAL_SEC
   const now = Math.floor(Date.now() / 1000);
+  const lastHeartbeatTimestamp = lastHeartbeatTimestampByService.get(serviceId) ?? 0;
   if (now - lastHeartbeatTimestamp < HEARTBEAT_MIN_INTERVAL_SEC) {
-    log.info({ secondsSinceLast: now - lastHeartbeatTimestamp, minInterval: HEARTBEAT_MIN_INTERVAL_SEC }, 'Heartbeat throttled');
+    log.info({ serviceId, secondsSinceLast: now - lastHeartbeatTimestamp, minInterval: HEARTBEAT_MIN_INTERVAL_SEC }, 'Heartbeat throttled');
     return;
   }
 
@@ -234,8 +261,81 @@ export async function maybeSubmitHeartbeat(
 
     await submitHeartbeat(multisig, mechAddress, serviceId, marketplaceAddress);
 
-    lastHeartbeatTimestamp = Math.floor(Date.now() / 1000);
+    lastHeartbeatTimestampByService.set(serviceId, Math.floor(Date.now() / 1000));
   } catch (error: any) {
     log.warn({ error: error.message }, 'Heartbeat check failed (non-fatal)');
+  }
+}
+
+/**
+ * Submit heartbeat for a specific service using explicit credentials.
+ * Used in multi-service mode to submit heartbeats for ALL staked services,
+ * not just the currently active one.
+ */
+export async function maybeSubmitHeartbeatForService(
+  stakingContract: string,
+  serviceId: number,
+  marketplaceAddress: string,
+  service: ServiceInfo,
+): Promise<void> {
+  if (!service.mechContractAddress || !service.agentPrivateKey) {
+    log.warn({ serviceId, serviceConfigId: service.serviceConfigId }, 'Missing mech or key — skipping heartbeat for service');
+    return;
+  }
+
+  log.info({ stakingContract, serviceId, serviceConfigId: service.serviceConfigId }, 'Heartbeat check starting');
+
+  // Throttle per service
+  const now = Math.floor(Date.now() / 1000);
+  const lastHeartbeatTimestamp = lastHeartbeatTimestampByService.get(serviceId) ?? 0;
+  if (now - lastHeartbeatTimestamp < HEARTBEAT_MIN_INTERVAL_SEC) {
+    log.info({ serviceId, secondsSinceLast: now - lastHeartbeatTimestamp, minInterval: HEARTBEAT_MIN_INTERVAL_SEC }, 'Heartbeat throttled');
+    return;
+  }
+
+  const signerKey = getSignerKeyForService(service);
+  if (signerKey) {
+    const lastBySigner = lastHeartbeatTimestampBySigner.get(signerKey) ?? 0;
+    if (now - lastBySigner < HEARTBEAT_MIN_INTERVAL_SEC) {
+      log.info({
+        serviceId,
+        signer: signerKey,
+        secondsSinceLast: now - lastBySigner,
+        minInterval: HEARTBEAT_MIN_INTERVAL_SEC,
+      }, 'Heartbeat throttled by signer');
+      return;
+    }
+  }
+
+  try {
+    const { deficit, current, target, epochSecondsRemaining, multisig } = await getRequestDeficit(stakingContract, serviceId, marketplaceAddress);
+
+    if (deficit <= 0) {
+      log.info({ serviceId, current, target, deficit: 0 }, 'Request target met for this epoch — no heartbeat needed');
+      return;
+    }
+
+    if (epochSecondsRemaining < 300) {
+      log.info({ serviceId, epochSecondsRemaining, deficit }, 'Epoch ending soon — skipping heartbeat');
+      return;
+    }
+
+    log.info({
+      deficit,
+      currentRequestCount: current,
+      target,
+      epochSecondsRemaining,
+      multisig,
+      serviceId,
+    }, `Request deficit: ${deficit} — submitting 1 heartbeat`);
+
+    await submitHeartbeatWithCredentials(multisig, service.mechContractAddress, service.agentPrivateKey, serviceId, marketplaceAddress);
+
+    lastHeartbeatTimestampByService.set(serviceId, Math.floor(Date.now() / 1000));
+    if (signerKey) {
+      lastHeartbeatTimestampBySigner.set(signerKey, Math.floor(Date.now() / 1000));
+    }
+  } catch (error: any) {
+    log.warn({ error: error.message, serviceId }, 'Heartbeat check failed (non-fatal)');
   }
 }

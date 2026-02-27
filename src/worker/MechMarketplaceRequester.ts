@@ -5,6 +5,10 @@
  * Based on the proven pattern from scripts/submit-marketplace-request-165.ts.
  * 
  * JINN-209: Safe-based mech marketplace request/deliver flow
+ *
+ * Used by:
+ * - heartbeat.ts: submits heartbeat requests with `prompt` string
+ * - safe-dispatch.ts: submits dispatch requests with pre-built `requestData`
  */
 
 import { ethers } from 'ethers';
@@ -15,12 +19,8 @@ import { pushMetadataToIpfs } from '@jinn-network/mech-client-ts/dist/ipfs.js';
 
 const requestLogger = logger.child({ component: 'MECH-MARKETPLACE-REQUESTER' });
 
-/**
- * Sleep helper for rate limiting
- */
-async function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+// Native payment type hash (keccak256 of native payment identifier)
+const NATIVE_PAYMENT_TYPE = '0xba699a34be8fe0e7725e93dcbce1701b0211a8ca61330aaeb8a05bf2ec7abed1';
 
 export interface MarketplaceRequestParams {
   // Service configuration
@@ -29,8 +29,9 @@ export interface MarketplaceRequestParams {
   mechContractAddress: string;
   mechMarketplaceAddress: string;
 
-  // Request parameters
-  prompt: string;
+  // Request parameters — provide either prompt (IPFS upload) or requestData (pre-built hex)
+  prompt?: string;
+  requestData?: string; // Pre-built request data hex — skips IPFS upload when provided
   requestPriceWei?: string; // Optional, defaults to mech's maxDeliveryRate
 
   // Optional extra attributes to include in IPFS payload (e.g. workstreamId, jobName)
@@ -39,12 +40,17 @@ export interface MarketplaceRequestParams {
   // Network configuration
   rpcUrl: string;
   chainId?: number;
+
+  // Optional dispatch parameters
+  responseTimeout?: number; // Seconds — clamped to contract [min, max] bounds
+  validateNativePayment?: boolean; // When true, throw if mech payment type is not native
 }
 
 export interface MarketplaceRequestResult {
   success: boolean;
   transactionHash?: string;
   requestId?: string;
+  requestIds?: string[]; // All request IDs parsed from MarketplaceRequest event
   gasUsed?: string;
   blockNumber?: number;
   error?: string;
@@ -56,6 +62,7 @@ const MECH_MARKETPLACE_ABI = [
   'function mapRequestCounts(address requester) view returns (uint256)',
   'function minResponseTimeout() view returns (uint256)',
   'function maxResponseTimeout() view returns (uint256)',
+  'event MarketplaceRequest(address indexed priorityMech, address indexed requester, uint256 numRequests, bytes32[] requestIds, bytes[] requestDatas)',
 ];
 
 const MECH_ABI = [
@@ -74,6 +81,41 @@ const SAFE_ABI = [
  * 
  * Uses the same Safe transaction pattern as deliverViaSafe in mech-client-ts
  */
+/**
+ * Parse MarketplaceRequest event from a transaction receipt to extract request IDs.
+ */
+function extractRequestIds(receipt: ethers.TransactionReceipt): string[] {
+  const iface = new ethers.Interface(MECH_MARKETPLACE_ABI);
+  const requestIds: string[] = [];
+
+  for (const eventLog of receipt.logs) {
+    try {
+      const parsed = iface.parseLog({ topics: eventLog.topics as string[], data: eventLog.data });
+      if (parsed?.name === 'MarketplaceRequest') {
+        const ids = parsed.args.requestIds || parsed.args[3];
+        if (Array.isArray(ids)) {
+          for (const id of ids) {
+            requestIds.push(String(id));
+          }
+        }
+      }
+    } catch {
+      // Not a MarketplaceRequest event — skip
+    }
+  }
+
+  return requestIds;
+}
+
+/**
+ * Submit a marketplace request via Safe.
+ *
+ * Supports two modes:
+ * - **Prompt mode** (heartbeat): provide `prompt` — uploads to IPFS via pushMetadataToIpfs
+ * - **RequestData mode** (dispatch): provide `requestData` — uses pre-built hex directly
+ *
+ * Uses the same Safe transaction pattern as deliverViaSafe in mech-client-ts.
+ */
 export async function submitMarketplaceRequest(
   params: MarketplaceRequestParams
 ): Promise<MarketplaceRequestResult> {
@@ -86,59 +128,76 @@ export async function submitMarketplaceRequest(
     requestPriceWei,
     rpcUrl,
   } = params;
-  
+
+  if (!params.prompt && !params.requestData) {
+    return { success: false, error: 'Either prompt or requestData must be provided' };
+  }
+
   try {
     requestLogger.info({
       serviceSafeAddress,
       mechContractAddress,
       mechMarketplaceAddress,
-      prompt: prompt.slice(0, 100),
+      mode: params.requestData ? 'requestData' : 'prompt',
     }, 'Submitting marketplace request via Safe');
-    
+
     // 1. Setup provider and wallet
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const agentWallet = new ethers.Wallet(agentEoaPrivateKey, provider);
-    
-    requestLogger.debug({ agentAddress: agentWallet.address }, 'Agent wallet loaded');
-    
-    // 2. Check balances
-    await sleep(200); // Rate limit: 5 req/s max
+
+    // 2. Check Safe balance
     const serviceSafeBalance = await provider.getBalance(serviceSafeAddress);
     requestLogger.debug({
       serviceSafeAddress,
       balance: ethers.formatEther(serviceSafeBalance),
     }, 'Service Safe balance');
-    
-    // 3. Upload prompt to IPFS via Autonolas registry
-    requestLogger.info({ promptLength: prompt.length }, 'Uploading prompt to IPFS');
-    const [digestHex, ipfsHash] = await pushMetadataToIpfs(prompt, 'openai-gpt-4', {
-      requestTimestamp: Date.now(),
-      mechAddress: mechContractAddress,
-      ...params.ipfsExtraAttributes,
-    });
-    // digestHex already includes 0x prefix from pushMetadataToIpfs
-    const requestData = digestHex;
-    requestLogger.info({ 
-      requestData, 
-      ipfsHash,
-      ipfsUrl: `https://gateway.autonolas.tech/ipfs/${ipfsHash}`
-    }, 'Prompt uploaded to IPFS');
-    
+
+    // 3. Build request data — either from prompt (IPFS upload) or pre-built hex
+    let requestData: string;
+    if (params.requestData) {
+      requestData = params.requestData;
+      requestLogger.debug('Using pre-built requestData (skipping IPFS upload)');
+    } else {
+      requestLogger.info({ promptLength: prompt!.length }, 'Uploading prompt to IPFS');
+      const [digestHex, ipfsHash] = await pushMetadataToIpfs(prompt!, 'openai-gpt-4', {
+        requestTimestamp: Date.now(),
+        mechAddress: mechContractAddress,
+        ...params.ipfsExtraAttributes,
+      });
+      requestData = digestHex;
+      requestLogger.info({
+        requestData,
+        ipfsHash,
+        ipfsUrl: `https://gateway.autonolas.tech/ipfs/${ipfsHash}`
+      }, 'Prompt uploaded to IPFS');
+    }
+
     // 4. Query mech for payment type and max delivery rate
-    await sleep(200); // Rate limit: 5 req/s max
     const mech = new ethers.Contract(mechContractAddress, MECH_ABI, provider);
-    const mechPaymentType = await mech.paymentType();
-    await sleep(200); // Rate limit: 5 req/s max
-    const mechMaxDeliveryRate = await mech.maxDeliveryRate();
-    
+    const [mechPaymentType, mechMaxDeliveryRate] = await Promise.all([
+      mech.paymentType(),
+      mech.maxDeliveryRate(),
+    ]);
+
+    // Validate native payment type if requested
+    if (params.validateNativePayment) {
+      const paymentTypeHex = String(mechPaymentType).toLowerCase();
+      if (paymentTypeHex !== NATIVE_PAYMENT_TYPE) {
+        return {
+          success: false,
+          error: `Unsupported payment type: ${paymentTypeHex}. Only native (${NATIVE_PAYMENT_TYPE}) is supported.`,
+        };
+      }
+    }
+
     requestLogger.debug({
       mechPaymentType,
       mechMaxDeliveryRate: ethers.formatEther(mechMaxDeliveryRate),
     }, 'Mech parameters');
-    
+
     // Use provided price or mech's max delivery rate
     const finalPrice = requestPriceWei ? BigInt(requestPriceWei) : mechMaxDeliveryRate;
-    
+
     // Check if Safe has sufficient balance
     if (serviceSafeBalance < finalPrice) {
       return {
@@ -146,99 +205,78 @@ export async function submitMarketplaceRequest(
         error: `Insufficient balance in Safe. Available: ${ethers.formatEther(serviceSafeBalance)} ETH, Needed: ${ethers.formatEther(finalPrice)} ETH`,
       };
     }
-    
-    // 5. Query marketplace for timeout bounds
-    await sleep(200); // Rate limit: 5 req/s max
+
+    // 5. Query marketplace for timeout bounds and clamp
     const marketplace = new ethers.Contract(mechMarketplaceAddress, MECH_MARKETPLACE_ABI, provider);
-    const minTimeout = await marketplace.minResponseTimeout();
-    await sleep(200); // Rate limit: 5 req/s max
-    const maxTimeout = await marketplace.maxResponseTimeout();
-    
-    requestLogger.debug({
-      minTimeout: Number(minTimeout),
-      maxTimeout: Number(maxTimeout),
-    }, 'Marketplace timeout bounds');
-    
+    const [minTimeout, maxTimeout] = await Promise.all([
+      marketplace.minResponseTimeout(),
+      marketplace.maxResponseTimeout(),
+    ]);
+
+    const minT = Number(minTimeout);
+    const maxT = Number(maxTimeout);
+    // Use caller's timeout if provided, otherwise use maxTimeout (existing behavior)
+    const requestedTimeout = params.responseTimeout ?? maxT;
+    const clampedTimeout = Math.max(minT, Math.min(maxT, requestedTimeout));
+
+    if (clampedTimeout !== requestedTimeout) {
+      requestLogger.debug({ requested: requestedTimeout, clamped: clampedTimeout, min: minT, max: maxT },
+        'Response timeout clamped to contract bounds');
+    }
+
     // 6. Encode marketplace request call
     const marketplaceCallData = marketplace.interface.encodeFunctionData('request', [
       requestData,           // bytes (single request data)
       mechMaxDeliveryRate,   // uint256 (use mech's rate)
       mechPaymentType,       // bytes32
       mechContractAddress,   // address (priority mech)
-      maxTimeout,            // uint256 (use maximum allowed)
+      clampedTimeout,        // uint256
       '0x',                  // bytes (payment data)
     ]);
-    
-    // 7. Build Safe transaction
-    await sleep(200); // Rate limit: 5 req/s max
+
+    // 7. Build and sign Safe transaction
     const safe = new ethers.Contract(serviceSafeAddress, SAFE_ABI, agentWallet);
     const safeNonce = await safe.nonce();
-    
     requestLogger.debug({ safeNonce: Number(safeNonce) }, 'Safe nonce');
-    
-    const txParams = {
-      to: mechMarketplaceAddress,
-      value: finalPrice,
-      data: marketplaceCallData,
-      operation: 0, // CALL
-      safeTxGas: 0,
-      baseGas: 0,
-      gasPrice: 0,
-      gasToken: ethers.ZeroAddress,
-      refundReceiver: ethers.ZeroAddress,
-      nonce: safeNonce,
-    };
-    
-    // Get transaction hash to sign
-    await sleep(200); // Rate limit: 5 req/s max
+
     const txHash = await safe.getTransactionHash(
-      txParams.to,
-      txParams.value,
-      txParams.data,
-      txParams.operation,
-      txParams.safeTxGas,
-      txParams.baseGas,
-      txParams.gasPrice,
-      txParams.gasToken,
-      txParams.refundReceiver,
-      txParams.nonce
+      mechMarketplaceAddress,
+      finalPrice,
+      marketplaceCallData,
+      0,                        // operation (CALL)
+      0,                        // safeTxGas
+      0,                        // baseGas
+      0,                        // gasPrice
+      ethers.ZeroAddress,       // gasToken
+      ethers.ZeroAddress,       // refundReceiver
+      safeNonce,
     );
-    
-    requestLogger.debug({ txHash }, 'Transaction hash to sign');
-    
-    // 8. Sign transaction (eth_sign format for Safe)
+
+    // Sign (eth_sign format — v + 4 for Safe)
     const signature = await agentWallet.signMessage(ethers.getBytes(txHash));
-    
-    // Adjust v for eth_sign format (Safe expects v + 4)
     const sigBytes = ethers.getBytes(signature);
     const r = ethers.hexlify(sigBytes.slice(0, 32));
     const s = ethers.hexlify(sigBytes.slice(32, 64));
-    const v = sigBytes[64] + 4; // Add 4 for eth_sign marker
-    
+    const v = sigBytes[64] + 4;
     const adjustedSignature = ethers.concat([r, s, new Uint8Array([v])]);
-    
-    requestLogger.debug({ signature: ethers.hexlify(adjustedSignature) }, 'Signature prepared');
-    
-    // 9. Execute Safe transaction
-    await sleep(200); // Rate limit: 5 req/s max
+
+    // 8. Execute Safe transaction
     const tx = await safe.execTransaction(
-      txParams.to,
-      txParams.value,
-      txParams.data,
-      txParams.operation,
-      txParams.safeTxGas,
-      txParams.baseGas,
-      txParams.gasPrice,
-      txParams.gasToken,
-      txParams.refundReceiver,
-      adjustedSignature
+      mechMarketplaceAddress,
+      finalPrice,
+      marketplaceCallData,
+      0,                        // operation
+      0,                        // safeTxGas
+      0,                        // baseGas
+      0,                        // gasPrice
+      ethers.ZeroAddress,       // gasToken
+      ethers.ZeroAddress,       // refundReceiver
+      adjustedSignature,
     );
-    
+
     requestLogger.info({ transactionHash: tx.hash }, 'Transaction sent, waiting for confirmation');
-    
-    // 10. Wait for confirmation
     const receipt = await tx.wait();
-    
+
     if (!receipt || receipt.status !== 1) {
       return {
         success: false,
@@ -246,31 +284,31 @@ export async function submitMarketplaceRequest(
         transactionHash: tx.hash,
       };
     }
-    
-    // 11. Verify request count increased
-    await sleep(2000); // Wait for state update
-    const newRequestCount = await marketplace.mapRequestCounts(serviceSafeAddress);
-    
+
+    // 9. Parse request IDs from MarketplaceRequest event
+    const requestIds = extractRequestIds(receipt);
+
     requestLogger.info({
       transactionHash: receipt.hash,
       gasUsed: receipt.gasUsed.toString(),
       blockNumber: receipt.blockNumber,
-      requestCount: Number(newRequestCount),
+      requestIds,
     }, 'Marketplace request submitted successfully');
-    
+
     return {
       success: true,
       transactionHash: receipt.hash,
+      requestIds,
       gasUsed: receipt.gasUsed.toString(),
       blockNumber: receipt.blockNumber,
     };
-    
+
   } catch (error) {
     requestLogger.error({
       error: error instanceof Error ? error.message : String(error),
       serviceSafeAddress,
     }, 'Failed to submit marketplace request');
-    
+
     return {
       success: false,
       error: error instanceof Error ? error.message : String(error),
@@ -290,7 +328,7 @@ export async function loadAgentPrivateKey(
     const keyContent = await fs.readFile(keyPath, 'utf-8');
     const keyData = JSON.parse(keyContent);
     const privateKey = keyData.private_key;
-    
+
     if (!privateKey || typeof privateKey !== 'string') {
       requestLogger.error({
         agentEoaAddress,
@@ -299,7 +337,7 @@ export async function loadAgentPrivateKey(
       }, 'Private key not found or invalid format');
       return null;
     }
-    
+
     return privateKey;
   } catch (error) {
     requestLogger.error({

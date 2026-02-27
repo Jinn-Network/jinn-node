@@ -43,7 +43,8 @@ export function computeMeasurementCoverage(params: {
   // Extract invariant_id from each successful measurement
   const measuredMap = new Map<string, boolean>();
   for (const call of measurementCalls) {
-    const invariantId = call.result?.invariant_id || call.args?.invariant_id;
+    // Prefer call args as source of truth; tool result can be stale/mis-associated in edge telemetry cases.
+    const invariantId = call.args?.invariant_id || call.result?.invariant_id;
     if (invariantId && typeof invariantId === 'string') {
       const passed = call.result?.passed ?? true;
       measuredMap.set(invariantId, passed);

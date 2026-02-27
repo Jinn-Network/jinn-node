@@ -14,7 +14,8 @@ import { validateModelAllowed, normalizeGeminiModel, DEFAULT_WORKER_MODEL } from
 import { assertValidJinnJobEnvMap } from '../../../shared/job-env.js';
 
 const dispatchExistingJobParamsBase = z.object({
-  jobId: z.string().uuid().optional(),
+  // Job definition IDs are string identifiers (not always UUIDs).
+  jobId: z.string().min(1).optional(),
   jobName: z.string().min(1).optional(),
   // Optional overrides for tools/blueprint if caller wants to tweak minor fields
   // If not provided, we use the values from the job definition as-is
