@@ -33,21 +33,6 @@ const __dirname = dirname(__filename);
 let _cachedDecryptedPrivateKey: string | null = null;
 let _cachedKeystoreSourceHash: string | null = null;
 
-/**
- * Check if all critical service config env vars are set
- * When true, we don't need .operate directory and should suppress warnings
- */
-function hasAllServiceEnvVars(): boolean {
-  const mechAddr = process.env.JINN_SERVICE_MECH_ADDRESS;
-  const safeAddr = process.env.JINN_SERVICE_SAFE_ADDRESS;
-
-  // Both must be valid for us to skip .operate
-  return Boolean(
-    mechAddr && /^0x[a-fA-F0-9]{40}$/i.test(mechAddr) &&
-    safeAddr && /^0x[a-fA-F0-9]{40}$/i.test(safeAddr)
-  );
-}
-
 function findRepoRoot(startDir: string): string | null {
   let current = startDir;
   const { root } = parse(current);
@@ -86,10 +71,7 @@ function resolveOperateHome(): string | null {
   }
 
   if (!repoRoot) {
-    // Only warn if env vars don't provide the needed config
-    if (!hasAllServiceEnvVars()) {
-      configLogger.warn('Unable to locate repository root for operate profile discovery');
-    }
+    configLogger.warn('Unable to locate repository root for operate profile discovery');
     return null;
   }
 
@@ -106,12 +88,10 @@ function resolveOperateHome(): string | null {
   }
 
   // Neither location exists
-  if (!hasAllServiceEnvVars()) {
-    configLogger.warn(
-      { standaloneCandidate, submoduleCandidate },
-      '.operate directory not found in standalone or submodule location'
-    );
-  }
+  configLogger.warn(
+    { standaloneCandidate, submoduleCandidate },
+    '.operate directory not found in standalone or submodule location'
+  );
   return null;
 }
 
@@ -142,10 +122,7 @@ function getOperateDir(): string | null {
     return operateHome;
   }
 
-  // Only warn if env vars don't provide the needed config
-  if (!hasAllServiceEnvVars()) {
-    configLogger.warn({ operateHome }, '.operate directory not found at expected location');
-  }
+  configLogger.warn({ operateHome }, '.operate directory not found at expected location');
   return null;
 }
 
@@ -166,10 +143,7 @@ function readServiceConfig(): ServiceConfig | null {
 
     const servicesDir = join(operateDir, 'services');
     if (!existsSync(servicesDir)) {
-      // Only warn if env vars don't provide the needed config
-      if (!hasAllServiceEnvVars()) {
-        configLogger.warn({ operateDir }, 'No services directory found');
-      }
+      configLogger.warn({ operateDir }, 'No services directory found');
       return null;
     }
 
@@ -230,10 +204,7 @@ function readServiceConfig(): ServiceConfig | null {
     }
 
     if (candidates.length === 0) {
-      // Only warn if env vars don't provide the needed config
-      if (!hasAllServiceEnvVars()) {
-        configLogger.warn({ servicesDir }, 'No service directories with config.json found');
-      }
+      configLogger.warn({ servicesDir }, 'No service directories with config.json found');
       return null;
     }
 
@@ -262,8 +233,7 @@ function readServiceConfig(): ServiceConfig | null {
  *
  * Priority:
  * 1. ActiveServiceContext (multi-service rotation)
- * 2. JINN_SERVICE_MECH_ADDRESS environment variable (single-service deployment)
- * 3. .operate service config MECH_TO_CONFIG
+ * 2. .operate service config MECH_TO_CONFIG
  *
  * @returns Mech contract address or null if not found
  */
@@ -272,13 +242,6 @@ export function getMechAddress(): string | null {
   const activeMech = getActiveMechAddress();
   if (activeMech) {
     return activeMech;
-  }
-
-  // Fall back to environment variable (single-service Railway deployment)
-  const envMech = process.env.JINN_SERVICE_MECH_ADDRESS;
-  if (envMech && /^0x[a-fA-F0-9]{40}$/i.test(envMech)) {
-    configLogger.info(` Using mech address from JINN_SERVICE_MECH_ADDRESS: ${envMech}`);
-    return envMech;
   }
 
   // Fall back to service config
@@ -318,9 +281,8 @@ export function getMechAddress(): string | null {
  *
  * Priority:
  * 1. ActiveServiceContext (multi-service rotation)
- * 2. JINN_SERVICE_SAFE_ADDRESS environment variable (single-service deployment)
- * 3. chain_configs.<chain>.chain_data.multisig (primary location)
- * 4. safe_address at root (backwards compatibility)
+ * 2. chain_configs.<chain>.chain_data.multisig (primary location)
+ * 3. safe_address at root (backwards compatibility)
  *
  * @returns Safe address or null if not found
  */
@@ -329,13 +291,6 @@ export function getServiceSafeAddress(): string | null {
   const activeSafe = getActiveSafeAddress();
   if (activeSafe) {
     return activeSafe;
-  }
-
-  // Fall back to environment variable (single-service Railway deployment)
-  const envSafe = process.env.JINN_SERVICE_SAFE_ADDRESS;
-  if (envSafe && /^0x[a-fA-F0-9]{40}$/i.test(envSafe)) {
-    configLogger.info(` Using safe address from JINN_SERVICE_SAFE_ADDRESS: ${envSafe}`);
-    return envSafe;
   }
 
   // Fall back to service config
@@ -379,7 +334,7 @@ export function getServiceSafeAddress(): string | null {
  *
  * Priority:
  * 1. ActiveServiceContext (multi-service rotation)
- * 2. Read from .operate/keys/[agent_address]:
+ * 2. .operate/keys/[agent_address]:
  *    - If private_key is 0x-prefixed hex: return directly (old format)
  *    - If private_key is JSON object: decrypt using OPERATE_PASSWORD (new format)
  *
@@ -392,12 +347,6 @@ export function getServicePrivateKey(): string | null {
   const activeKey = getActivePrivateKey();
   if (activeKey) {
     return activeKey;
-  }
-
-  // Check explicit env var (Railway deployments without .operate directory)
-  const envKey = process.env.JINN_SERVICE_PRIVATE_KEY;
-  if (envKey) {
-    return envKey;
   }
 
   // Fall back to service config to get agent address
