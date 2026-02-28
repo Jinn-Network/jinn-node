@@ -4,7 +4,7 @@
 
 import { workerLogger } from '../../logging/index.js';
 import { graphQLRequest } from '../../http/client.js';
-import { getPonderGraphqlUrl, getOptionalIpfsGatewayUrl } from '../../agent/mcp/tools/shared/env.js';
+import { getPonderGraphqlUrl, getIpfsGatewayUrl } from '../../agent/mcp/tools/shared/env.js';
 import { Agent } from '../../agent/agent.js';
 import type { RecognitionPhaseResult } from '../recognition_helpers.js';
 import {
@@ -57,7 +57,7 @@ export async function runRecognitionPhase(
   try {
     // Extract objective for AI summarization
     const objective = sections['Objective'] || metadata?.additionalContext?.objective || 'Complete assigned work';
-    
+
     progressCheckpoint = await buildProgressCheckpoint(
       requestId,
       {
@@ -67,7 +67,7 @@ export async function runRecognitionPhase(
       objective,
       metadata?.jobName
     );
-    
+
     if (progressCheckpoint) {
       workerLogger.info({
         requestId,
@@ -150,7 +150,7 @@ export async function runRecognitionPhase(
         }
 
         const situationArtifact = artifacts[0];
-        const gatewayBase = (getOptionalIpfsGatewayUrl() || 'https://gateway.autonolas.tech/ipfs/').replace(/\/+$/, '');
+        const gatewayBase = getIpfsGatewayUrl().replace(/\/+$/, '');
         const ipfsUrl = `${gatewayBase}/${situationArtifact.cid}`;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10_000);
@@ -252,11 +252,11 @@ export async function runRecognitionPhase(
     // Add review-first reminder if completed children exist
     let enhancedMarkdown = markdown;
     const childRequestIds = initialSituation?.context?.childRequestIds || [];
-    const hasCompletedChildren = metadata?.additionalContext?.hierarchy?.some((job: any) => 
+    const hasCompletedChildren = metadata?.additionalContext?.hierarchy?.some((job: any) =>
       job.level > 0 && job.status === 'completed'
     ) || false;
-    const hasWorkProtocolMessage = metadata?.additionalContext?.message && 
-      (typeof metadata.additionalContext.message === 'string' 
+    const hasWorkProtocolMessage = metadata?.additionalContext?.message &&
+      (typeof metadata.additionalContext.message === 'string'
         ? metadata.additionalContext.message.includes('Child job COMPLETED') || metadata.additionalContext.message.includes('Child job completed')
         : metadata.additionalContext.message.content?.includes('Child job COMPLETED') || metadata.additionalContext.message.content?.includes('Child job completed'));
 

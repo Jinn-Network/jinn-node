@@ -19,7 +19,7 @@ import { WorkerTelemetryService } from '../worker_telemetry.js';
 import { serializeError } from '../logging/errors.js';
 import { snapshotEnvironment, restoreEnvironment } from './env.js';
 import { fetchIpfsMetadata } from '../metadata/fetchIpfsMetadata.js';
-import { getHeliaNodeOptional } from '../../ipfs/lifecycle.js';
+import { getHeliaNode } from '../../ipfs/lifecycle.js';
 import { ensureRepoCloned } from '../git/repoManager.js';
 import { ensureGitignore, ensureBeadsInit, commitRepoSetup } from '../git/repoSetup.js';
 import { checkoutJobBranch, syncWithBranch } from '../git/branch.js';
@@ -76,7 +76,7 @@ export async function processOnce(
     // Initialize: fetch metadata and set up repo
     telemetry.startPhase('initialization');
     try {
-      metadata = await fetchIpfsMetadata(target.ipfsHash!, getHeliaNodeOptional() ?? undefined);
+      metadata = await fetchIpfsMetadata(target.ipfsHash!, getHeliaNode());
       if (!metadata) {
         metadata = {};
       }
@@ -373,7 +373,7 @@ export async function processOnce(
     });
     try {
       let executionAttempt = 0;
-      for (;;) {
+      for (; ;) {
         await waitForGeminiQuota({
           reason: executionAttempt === 0 ? 'pre_execution' : 'execution_retry',
           requestId: target.id,

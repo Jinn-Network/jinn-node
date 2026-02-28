@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { workerLogger } from '../logging/index.js';
 import { getMasterSafe, getServiceSafeAddress } from '../env/operate-profile.js';
-import { getHeliaNodeOptional } from '../ipfs/lifecycle.js';
+import { getHeliaNode } from '../ipfs/lifecycle.js';
 
 const DEFAULT_HEALTHCHECK_PORT = 8080;
 // Railway sets PORT env var for the exposed service port
@@ -179,14 +179,17 @@ export function startHealthcheckServer(): void {
         })(),
         // Private IPFS network status
         ipfs: (() => {
-          const helia = getHeliaNodeOptional();
-          if (!helia) return { running: false };
-          return {
-            running: true,
-            peerId: helia.libp2p.peerId.toString(),
-            peers: helia.libp2p.getPeers().length,
-            connections: helia.libp2p.getConnections().length,
-          };
+          try {
+            const helia = getHeliaNode();
+            return {
+              running: true,
+              peerId: helia.libp2p.peerId.toString(),
+              peers: helia.libp2p.getPeers().length,
+              connections: helia.libp2p.getConnections().length,
+            };
+          } catch {
+            return { running: false };
+          }
         })(),
       };
 

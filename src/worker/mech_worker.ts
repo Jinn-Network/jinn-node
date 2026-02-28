@@ -53,7 +53,7 @@ import {
 import { ServiceRotator } from './rotation/ServiceRotator.js';
 import { getActiveService, setActiveService } from './rotation/ActiveServiceContext.js';
 import { resetCachedAddress as resetSigningProxyAddress, startSigningProxy, setProxyHeliaNode } from '../agent/signing-proxy.js';
-import { initHeliaNode, stopHeliaNode, getHeliaNodeOptional, maybeRunGcCycle } from '../ipfs/lifecycle.js';
+import { initHeliaNode, stopHeliaNode, getHeliaNode, maybeRunGcCycle } from '../ipfs/lifecycle.js';
 import { isOperatorStaked } from '../ipfs/staking.js';
 import { fetchBootstrapPeers, registerMultiaddrs } from '../ipfs/bootstrap.js';
 import { maybeCallCheckpoint } from './staking/checkpoint.js';
@@ -1899,7 +1899,8 @@ async function main() {
       }
       await registerMultiaddrs(helia);
     } catch (err: any) {
-      workerLogger.warn({ error: err?.message || String(err) }, 'Failed to start IPFS node (non-fatal) — IPFS features will use HTTP fallback');
+      workerLogger.error({ error: err?.message || String(err) }, 'Failed to start IPFS node — worker cannot operate without private IPFS network');
+      throw new Error(`IPFS initialization failed: ${err?.message || String(err)}`);
     }
   }
 

@@ -131,7 +131,8 @@ export interface FailedToolCall {
 
 // --- IPFS Helpers ---
 
-const IPFS_GATEWAY_URL = process.env.IPFS_GATEWAY_URL || 'https://gateway.autonolas.tech/ipfs/';
+import { getIpfsGatewayUrl } from '../config/index.js';
+const IPFS_GATEWAY_URL = getIpfsGatewayUrl();
 
 export async function fetchIpfsContent(cid: string, requestIdForDelivery?: string): Promise<any> {
   let url = `${IPFS_GATEWAY_URL}${cid}`;

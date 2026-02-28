@@ -16,6 +16,7 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { logger } from '../logging/index.js';
 import { pushMetadataToIpfs } from '@jinn-network/mech-client-ts/dist/ipfs.js';
+import { getIpfsGatewayUrl } from '../config/index.js';
 
 const requestLogger = logger.child({ component: 'MECH-MARKETPLACE-REQUESTER' });
 
@@ -168,7 +169,7 @@ export async function submitMarketplaceRequest(
       requestLogger.info({
         requestData,
         ipfsHash,
-        ipfsUrl: `https://gateway.autonolas.tech/ipfs/${ipfsHash}`
+        ipfsUrl: `${getIpfsGatewayUrl()}${ipfsHash}`
       }, 'Prompt uploaded to IPFS');
     }
 

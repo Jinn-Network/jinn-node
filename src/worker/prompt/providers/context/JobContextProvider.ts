@@ -18,7 +18,7 @@ import type {
 } from '../../types.js';
 import { workerLogger } from '../../../../logging/index.js';
 import { serializeError } from '../../../logging/errors.js';
-import { getOptionalIpfsGatewayUrl } from '../../../../config/index.js';
+import { getIpfsGatewayUrl } from '../../../../config/index.js';
 import { getPonderGraphqlUrl } from '../../../../agent/mcp/tools/shared/env.js';
 import { graphQLRequest } from '../../../../http/client.js';
 import { fetchAllChildren, type ChildJobData } from './fetchChildren.js';
@@ -266,7 +266,7 @@ async function fetchDeliveryPayload(
   deliveryHash: string,
   requestId: string
 ): Promise<{ structuredSummary?: string; output?: string } | null> {
-  const gatewayBase = (getOptionalIpfsGatewayUrl() || 'https://gateway.autonolas.tech/ipfs/').replace(/\/+$/, '');
+  const gatewayBase = getIpfsGatewayUrl().replace(/\/+$/, '');
 
   const dirCid = reconstructDeliveryCid(deliveryHash);
   if (!dirCid) {
