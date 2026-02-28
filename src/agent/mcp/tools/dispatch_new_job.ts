@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { graphQLRequest } from '../../../http/client.js';
 import { randomUUID } from 'node:crypto';
 import { getCurrentJobContext } from './shared/context.js';
-import { getPonderGraphqlUrl } from './shared/env.js';
+import { getPonderGraphqlUrl, getIpfsGatewayUrl } from './shared/env.js';
 import { dispatchToMarketplace } from '../../shared/dispatch-core.js';
 import { validateInvariantsStrict } from '../../../worker/prompt/invariant-validator.js';
 import { buildAnnotatedTools, normalizeToolArray, extractModelPolicyFromBlueprint } from '../../../shared/template-tools.js';
@@ -604,7 +604,7 @@ export async function dispatchNewJob(args: unknown) {
               });
               const ipfsHash = lookupResult?.request?.ipfsHash;
               if (ipfsHash) {
-                ipfsGatewayUrl = `https://gateway.autonolas.tech/ipfs/${ipfsHash}`;
+                ipfsGatewayUrl = `${getIpfsGatewayUrl()}${ipfsHash}`;
                 break;
               }
             } catch {

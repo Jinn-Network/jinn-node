@@ -52,7 +52,6 @@ export {
   getRequiredSupabaseServiceRoleKey,
 
   // IPFS
-  getOptionalIpfsGatewayUrl,
   getIpfsGatewayUrl,
   getOptionalIpfsFetchTimeoutMs,
   getIpfsFetchTimeoutMs,

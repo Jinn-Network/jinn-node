@@ -44,7 +44,8 @@ import { mcpLogger } from '../../../../logging/index.js';
 
 // --- MCP-adapted IPFS fetch ---
 
-const IPFS_GATEWAY_URL = process.env.IPFS_GATEWAY_URL || 'https://gateway.autonolas.tech/ipfs/';
+import { getIpfsGatewayUrl } from '../../../../config/index.js';
+
 const DEFAULT_TIMEOUT_MS = 7000;
 
 /**
@@ -55,6 +56,7 @@ export async function fetchIpfsContentMcp(
   requestIdForDelivery?: string,
   timeoutMs: number = DEFAULT_TIMEOUT_MS
 ): Promise<any> {
+  const IPFS_GATEWAY_URL = getIpfsGatewayUrl();
   let url = `${IPFS_GATEWAY_URL}${cid}`;
 
   // Delivery directory reconstruction for f01551220 CIDs

@@ -18,7 +18,8 @@ export const inspectSituationSchema = {
 };
 
 const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
-const IPFS_GATEWAY_BASE = (process.env.IPFS_GATEWAY_URL || 'https://gateway.autonolas.tech/ipfs/').replace(/\/+$/, '/');
+import { getIpfsGatewayUrl } from '../../../config/index.js';
+const IPFS_GATEWAY_BASE = getIpfsGatewayUrl().replace(/\/+$/, '/');
 
 function getDatabaseUrl(): string | null {
   const candidates = [

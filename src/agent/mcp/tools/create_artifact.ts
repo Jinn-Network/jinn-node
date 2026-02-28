@@ -5,6 +5,7 @@ import { signRegistrationFile } from '../../../shared/adw/signing.js';
 import type { ADWDocumentType, ArtifactProfile } from '../../../shared/adw/types.js';
 import { getServicePrivateKey, getServiceSafeAddress } from '../../../env/operate-profile.js';
 import { createHash } from 'crypto';
+import { getIpfsGatewayUrl } from '../../../config/index.js';
 
 export const createArtifactParams = z.object({
   name: z.string().min(1),
@@ -118,7 +119,7 @@ export async function createArtifact(args: unknown) {
       storage: [{
         provider: 'ipfs',
         uri: `ipfs://${contentCid}`,
-        gateway: 'https://gateway.autonolas.tech/ipfs/',
+        gateway: getIpfsGatewayUrl(),
       }],
       profile,
     });

@@ -255,6 +255,25 @@ async function umamiApiCall<T>(
   throw lastError!;
 }
 
+/**
+ * Classify blog tool errors for diagnostic accuracy in E2E logs.
+ * - CREDENTIAL_ERROR: bridge connectivity or auth issues
+ * - UMAMI_API_ERROR: Umami API returned an HTTP error
+ * - EXECUTION_ERROR: unexpected/unknown failures
+ */
+function classifyBlogError(message: string): string {
+  if (
+    message.includes('Credential bridge') ||
+    message.includes('STATIC_PROVIDER_ERROR') ||
+    message.includes('fetch failed') ||
+    message.includes('ECONNREFUSED') ||
+    message.includes('X402_GATEWAY_URL') ||
+    message.includes('Signing proxy')
+  ) return 'CREDENTIAL_ERROR';
+  if (message.includes('Umami API error')) return 'UMAMI_API_ERROR';
+  return 'EXECUTION_ERROR';
+}
+
 function getTimeRange(days: number): { startAt: Date; endAt: Date } {
   const endAt = new Date();
   const startAt = new Date();
@@ -362,9 +381,7 @@ export async function blogGetStats(args: unknown) {
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    const code = message.includes('Credential bridge') || message.includes('STATIC_PROVIDER_ERROR')
-      ? 'CREDENTIAL_ERROR'
-      : 'EXECUTION_ERROR';
+    const code = classifyBlogError(message);
     return {
       content: [{
         type: 'text' as const,
@@ -426,7 +443,7 @@ export async function blogGetTopPages(args: unknown) {
         type: 'text' as const,
         text: JSON.stringify({
           data: null,
-          meta: { ok: false, code: 'EXECUTION_ERROR', message },
+          meta: { ok: false, code: classifyBlogError(message), message },
         }),
       }],
     };
@@ -482,7 +499,7 @@ export async function blogGetReferrers(args: unknown) {
         type: 'text' as const,
         text: JSON.stringify({
           data: null,
-          meta: { ok: false, code: 'EXECUTION_ERROR', message },
+          meta: { ok: false, code: classifyBlogError(message), message },
         }),
       }],
     };
@@ -539,7 +556,7 @@ export async function blogGetMetrics(args: unknown) {
         type: 'text' as const,
         text: JSON.stringify({
           data: null,
-          meta: { ok: false, code: 'EXECUTION_ERROR', message },
+          meta: { ok: false, code: classifyBlogError(message), message },
         }),
       }],
     };
@@ -590,7 +607,7 @@ export async function blogGetPageviews(args: unknown) {
         type: 'text' as const,
         text: JSON.stringify({
           data: null,
-          meta: { ok: false, code: 'EXECUTION_ERROR', message },
+          meta: { ok: false, code: classifyBlogError(message), message },
         }),
       }],
     };
@@ -658,7 +675,7 @@ export async function blogGetPerformanceSummary(args: unknown) {
         type: 'text' as const,
         text: JSON.stringify({
           data: null,
-          meta: { ok: false, code: 'EXECUTION_ERROR', message },
+          meta: { ok: false, code: classifyBlogError(message), message },
         }),
       }],
     };
