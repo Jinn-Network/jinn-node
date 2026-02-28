@@ -11,8 +11,8 @@
  *   mech.mechMarketplace()                → marketplace address
  *
  * This eliminates the need for WORKER_SERVICE_ID, WORKER_STAKING_CONTRACT,
- * JINN_SERVICE_SAFE_ADDRESS, and MECH_MARKETPLACE_ADDRESS_BASE env vars.
- * Those env vars still work as explicit overrides when set.
+ * and MECH_MARKETPLACE_ADDRESS_BASE env vars. All service config is derived
+ * from the mech address (read from .operate profile) + RPC URL.
  */
 
 import { ethers } from 'ethers';

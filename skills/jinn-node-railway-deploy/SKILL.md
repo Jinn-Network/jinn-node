@@ -95,7 +95,7 @@ This means `.env` should contain only infrastructure URLs, staking config, and g
 ## Runtime contract reminders
 
 - Railway deployment is `.operate`-first (`/home/jinn/.operate`).
-- `JINN_SERVICE_MECH_ADDRESS` and `JINN_SERVICE_SAFE_ADDRESS` are fallback overrides, not primary operator flow.
+- Mech and Safe addresses are read exclusively from `.operate/services/*/config.json` (no env var fallbacks).
 - Use `jinn-node/railway.toml` (standalone), not monorepo deploy configs.
 - **Healthcheck port:** Railway auto-sets `PORT`. The worker reads `HEALTHCHECK_PORT` > `PORT` > `8080`. Do not set `PORT` manually.
 - **Do NOT use `railway logs -f`** — in CLI 4.16+, `-f` is `--filter`, not "follow". Use `railway logs --lines N`.
