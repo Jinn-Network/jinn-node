@@ -22,8 +22,10 @@ RAILWAY_TOML="$JINN_NODE_DIR/railway.toml"
 PROJECT_NAME=""
 SERVICE_NAME="jinn-worker"
 SKIP_IMPORT=false
+SKIP_ENV=false
 DEPLOY_ONLY=false
 DRY_RUN=false
+ENVIRONMENT="production"
 TOML_BACKED_UP=false
 
 # =============================================================================
@@ -61,7 +63,9 @@ Usage:
 Options:
   --project <name>     Railway project (creates if not found)
   --service <name>     Service name (creates if not found, default: jinn-worker)
+  --environment <name> Railway environment (default: production)
   --skip-import        Skip .operate/.gemini SSH import (for re-deploys)
+  --skip-env           Skip pushing .env variables (for external env management)
   --deploy-only        Deploy only (skip volume/env/import bootstrap)
   --dry-run            Preview commands without executing
   --help, -h           Show this help
@@ -79,6 +83,9 @@ Examples:
   # Deploy only (no env/volume/import mutations)
   bash scripts/deploy-railway.sh --project jinn-worker --service canary-worker --deploy-only
 
+  # Staging deploy (env vars managed externally, uses staging environment)
+  bash scripts/deploy-railway.sh --project jinn-shared --service staging-worker --environment staging --skip-env
+
   # Preview what would happen
   bash scripts/deploy-railway.sh --project jinn-worker --dry-run
 USAGE
@@ -93,7 +100,9 @@ parse_args() {
       --project)   PROJECT_NAME="$2"; shift 2 ;;
       --service)   SERVICE_NAME="$2"; shift 2 ;;
       --skip-import) SKIP_IMPORT=true; shift ;;
+      --skip-env)  SKIP_ENV=true; shift ;;
       --deploy-only) DEPLOY_ONLY=true; shift ;;
+      --environment) ENVIRONMENT="$2"; shift 2 ;;
       --dry-run)   DRY_RUN=true; shift ;;
       --help|-h)   usage; exit 0 ;;
       *)           error "Unknown option: $1"; usage; exit 1 ;;
@@ -175,8 +184,8 @@ check_preconditions() {
     exit 1
   fi
 
-  # .env file
-  if [[ "$DEPLOY_ONLY" == false && ! -f "$JINN_NODE_DIR/.env" ]]; then
+  # .env file (not needed when --skip-env)
+  if [[ "$DEPLOY_ONLY" == false && "$SKIP_ENV" == false && ! -f "$JINN_NODE_DIR/.env" ]]; then
     error ".env not found in $JINN_NODE_DIR"
     error "Copy .env.example to .env and fill in required values."
     exit 1
@@ -253,7 +262,7 @@ ensure_project_linked() {
 
   # Try linking to existing project + service
   info "Linking to project: $PROJECT_NAME, service: $SERVICE_NAME"
-  if run railway link -p "$PROJECT_NAME" -s "$SERVICE_NAME" -e production 2>/dev/null; then
+  if run railway link -p "$PROJECT_NAME" -s "$SERVICE_NAME" -e "$ENVIRONMENT" 2>/dev/null; then
     # railway link can return 0 even when the service doesn't exist (links project only).
     # Verify the service is actually linked before proceeding.
     local verify_status verify_service
@@ -267,7 +276,7 @@ ensure_project_linked() {
   fi
 
   # Project might exist but service doesn't — link project, then create service
-  if run railway link -p "$PROJECT_NAME" -e production 2>/dev/null; then
+  if run railway link -p "$PROJECT_NAME" -e "$ENVIRONMENT" 2>/dev/null; then
     info "Project found, but service '$SERVICE_NAME' does not exist"
     add_railway_service "$SERVICE_NAME"
     run railway service link "$SERVICE_NAME"
@@ -496,18 +505,25 @@ print_summary() {
   current_project="${current_project:-$PROJECT_NAME}"
   current_service="${current_service:-$SERVICE_NAME}"
 
-  info "Project:  $current_project"
-  info "Service:  $current_service"
+  info "Project:     $current_project"
+  info "Service:     $current_service"
+  info "Environment: $ENVIRONMENT"
   if [[ "$DEPLOY_ONLY" == true ]]; then
-    info "Mode:     deploy-only (--deploy-only)"
-    info "Volume:   unchanged"
-    info "Import:   skipped"
+    info "Mode:        deploy-only (--deploy-only)"
+    info "Volume:      unchanged"
+    info "Env vars:    skipped"
+    info "Import:      skipped"
   else
-    info "Volume:   /home/jinn"
-    if [[ "$SKIP_IMPORT" == true ]]; then
-      info "Import:   skipped (--skip-import)"
+    info "Volume:      /home/jinn"
+    if [[ "$SKIP_ENV" == true ]]; then
+      info "Env vars:    skipped (--skip-env)"
     else
-      info "Import:   completed"
+      info "Env vars:    pushed from .env"
+    fi
+    if [[ "$SKIP_IMPORT" == true ]]; then
+      info "Import:      skipped (--skip-import)"
+    else
+      info "Import:      completed"
     fi
   fi
 
@@ -528,11 +544,20 @@ main() {
   echo ""
 
   parse_args "$@"
+
+  # Ensure all Railway CLI commands run from jinn-node/ regardless of caller's CWD.
+  # This is critical for `railway up` (uploads CWD) and `railway link` (stores context in CWD).
+  cd "$JINN_NODE_DIR"
+
   check_preconditions
   ensure_project_linked
   if [[ "$DEPLOY_ONLY" == false ]]; then
     ensure_volume
-    push_env_vars
+    if [[ "$SKIP_ENV" == false ]]; then
+      push_env_vars
+    else
+      step "Pushing environment variables — skipped (--skip-env)"
+    fi
     import_credentials
   else
     step "Deploy-only mode"
