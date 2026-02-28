@@ -169,7 +169,7 @@ async function handleDispatch(req: IncomingMessage, res: ServerResponse): Promis
   }
 
   if (!safeAddress) {
-    json(res, 500, { error: 'Service Safe address not configured. Check JINN_SERVICE_SAFE_ADDRESS or service config.', code: 'CONFIG_ERROR' });
+    json(res, 500, { error: 'Service Safe address not configured. Check .operate service config or on-chain resolver.', code: 'CONFIG_ERROR' });
     return;
   }
 

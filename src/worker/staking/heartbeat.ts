@@ -49,7 +49,7 @@ const resolvedMultisigByService = new Map<number, string>();
  * Calculate how many more requests we need to submit this epoch.
  *
  * IMPORTANT: The staking multisig (from getServiceInfo on the staking contract)
- * may differ from the worker's configured Safe (JINN_SERVICE_SAFE_ADDRESS).
+ * may differ from the worker's configured Safe (from .operate profile).
  * We derive the correct multisig from on-chain and use it for both querying
  * mapRequestCounts and submitting heartbeat requests.
  *

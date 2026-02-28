@@ -12,6 +12,8 @@ import { pushJsonToIpfs } from '@jinn-network/mech-client-ts/dist/ipfs.js';
 import { logger } from '../logging/index.js';
 import { submitMarketplaceRequest } from './MechMarketplaceRequester.js';
 
+import { getIpfsGatewayUrl } from '../config/index.js';
+
 const log = logger.child({ component: 'SAFE-DISPATCH' });
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -67,7 +69,7 @@ export async function dispatchViaSafe(params: SafeDispatchParams): Promise<SafeD
     if (!serviceSafeAddress) {
         throw new Error(
             'Safe address is required for marketplace dispatch. ' +
-            'Check JINN_SERVICE_SAFE_ADDRESS or service config.'
+            'Check .operate service config or on-chain resolver.'
         );
     }
 
@@ -83,7 +85,7 @@ export async function dispatchViaSafe(params: SafeDispatchParams): Promise<SafeD
     for (let i = 0; i < ipfsJsonContents.length; i++) {
         const [truncatedHash, cidString] = await pushJsonToIpfs(ipfsJsonContents[i]);
         ipfsHashes.push(truncatedHash);
-        log.debug({ index: i, ipfsUrl: `https://gateway.autonolas.tech/ipfs/${cidString}` }, 'Payload uploaded to IPFS');
+        log.debug({ index: i, ipfsUrl: `${getIpfsGatewayUrl()}${cidString}` }, 'Payload uploaded to IPFS');
     }
 
     // 2. Send individual request() per Safe tx (activity checker nonce constraint)

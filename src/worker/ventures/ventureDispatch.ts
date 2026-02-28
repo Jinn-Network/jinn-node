@@ -14,7 +14,7 @@ import { extractToolPolicyFromBlueprint } from '../../shared/template-tools.js';
 import { extractSchemaEnvVars } from '../../shared/job-env.js';
 import { getMechAddress, getServicePrivateKey, getServiceSafeAddress, getMechChainConfig } from '../../env/operate-profile.js';
 import { getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
-import { getHeliaNodeOptional } from '../../ipfs/lifecycle.js';
+import { getHeliaNode } from '../../ipfs/lifecycle.js';
 import { getRandomStakedMech } from '../filters/stakingFilter.js';
 import { get_mech_config } from '@jinn-network/mech-client-ts/dist/config.js';
 import { dispatchViaSafe } from '../safe-dispatch.js';
@@ -161,7 +161,7 @@ export async function dispatchFromTemplate(
   }
 
   if (!safeAddress) {
-    throw new Error('Service Safe address not configured. Check JINN_SERVICE_SAFE_ADDRESS or service config.');
+    throw new Error('Service Safe address not configured. Check .operate service config or on-chain resolver.');
   }
 
   const priorityMech = await getRandomStakedMech(mechAddress);
@@ -174,16 +174,12 @@ export async function dispatchFromTemplate(
     throw new Error('Mech Marketplace contract address not configured for this chain.');
   }
 
-  // Pre-upload dispatch IPFS contents to private network
-  const helia = getHeliaNodeOptional();
-  if (helia && ipfsJsonContents.length > 0) {
-    try {
-      const { ipfsUploadJson } = await import('../../ipfs/upload.js');
-      for (const content of ipfsJsonContents) {
-        await ipfsUploadJson(helia, content);
-      }
-    } catch {
-      // Non-fatal: dispatchViaSafe will still upload to Autonolas
+  // Upload dispatch IPFS contents to private network
+  const helia = getHeliaNode();
+  if (ipfsJsonContents.length > 0) {
+    const { ipfsUploadJson } = await import('../../ipfs/upload.js');
+    for (const content of ipfsJsonContents) {
+      await ipfsUploadJson(helia, content);
     }
   }
 

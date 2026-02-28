@@ -8,6 +8,10 @@ import { agentLogger } from '../logging/index.js';
 import { getOptionalCodeMetadataRepoRoot, getSandboxMode } from '../config/index.js';
 import { getRepoRoot } from '../shared/repo_utils.js';
 import { computeToolPolicy, UNIVERSAL_TOOLS, hasBrowserAutomation, BROWSER_AUTOMATION_TOOLS, hasRailwayDeployment, RAILWAY_TOOLS, hasFirefliesMeetings, FIREFLIES_TOOLS, getEnabledExtensions, EXTENSION_META_TOOLS, getExtensionExcludedTools, type ToolPolicyResult } from './toolPolicy.js';
+import { resolveRuntimeBackend } from './runtime/backendResolver.js';
+import { GeminiCliBackend } from './runtime/geminiCliBackend.js';
+import { EmulatedBackend } from './runtime/emulatedBackend.js';
+import type { AgentRuntimeBackend } from './runtime/types.js';
 // Signing proxy is now managed at the worker level (mech_worker.ts)
 // Agent subprocess inherits AGENT_SIGNING_PROXY_URL/TOKEN from process.env
 
@@ -102,7 +106,6 @@ function buildAllowlistedEnv(): NodeJS.ProcessEnv {
 const FORBIDDEN_AGENT_ENV_KEYS = [
   'WORKER_PRIVATE_KEY',
   'SERVICE_PRIVATE_KEY',
-  'JINN_SERVICE_PRIVATE_KEY',
   'PRIVATE_KEY',
   'SUPABASE_SERVICE_ROLE_KEY',
   'TELEGRAM_BOT_TOKEN',
@@ -740,7 +743,9 @@ export class Agent {
       this.generateJobSpecificSettings();
       // Small delay to allow OpenTelemetry resource attributes to settle
       await new Promise(resolve => setTimeout(resolve, 100));
-      const result = await this.runGeminiWithTelemetry(prompt);
+      const backend = this.createRuntimeBackend();
+      agentLogger.info({ backend: backend.name }, 'Using agent runtime backend');
+      const result = await backend.run(prompt);
       const telemetry = await this.parseTelemetryFromFile(result.telemetryFile, result.output, startTime);
 
       // Attach last API request for diagnostics
@@ -777,7 +782,7 @@ export class Agent {
         }
       }
 
-      // If Gemini exited with non-zero, throw with enriched telemetry
+      // If backend exited with non-zero, throw with enriched telemetry
       if (result.exitCode !== 0) {
         // Capture partial output so callers can persist work-in-progress
         try {
@@ -785,7 +790,7 @@ export class Agent {
           telemetry.raw = telemetry.raw || {};
           (telemetry.raw as any).partialOutput = partialOutput;
         } catch { } // Ignore errors here
-        const err = new Error(`Gemini process exited with code ${result.exitCode}`);
+        const err = new Error(`Agent runtime exited with code ${result.exitCode}`);
         // Preserve stderr in error message context
         (err as any).stderr = result.stderr;
         throw { error: err, telemetry };
@@ -838,6 +843,24 @@ export class Agent {
       this.cleanupJobSpecificSettings();
       // Note: telemetry file cleanup handled in runGeminiWithTelemetry result
     }
+  }
+
+  private createRuntimeBackend(): AgentRuntimeBackend {
+    const backendName = resolveRuntimeBackend(process.env);
+    if (backendName === 'emulated') {
+      return new EmulatedBackend({
+        model: this.model,
+        settingsPath: this.settingsPath,
+        agentRoot: this.agentRoot,
+        env: process.env,
+        jobName: this.jobContext?.jobName,
+        onTelemetryFileCreated: (path: string) => {
+          this.lastTelemetryFile = path;
+        },
+      });
+    }
+
+    return new GeminiCliBackend((prompt: string) => this.runGeminiWithTelemetry(prompt));
   }
 
   private async runGeminiWithTelemetry(prompt: string): Promise<{ output: string; telemetryFile: string; stderr: string; exitCode: number }> {

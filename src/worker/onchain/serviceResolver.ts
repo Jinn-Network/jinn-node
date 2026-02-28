@@ -17,6 +17,7 @@
 
 import { ethers } from 'ethers';
 import { workerLogger } from '../../logging/index.js';
+import { getMechAddress } from '../../env/operate-profile.js';
 
 const log = workerLogger.child({ component: 'SERVICE_RESOLVER' });
 
@@ -159,12 +160,12 @@ const isMain = typeof process !== 'undefined'
   && (process.argv[1].endsWith('serviceResolver.ts') || process.argv[1].endsWith('serviceResolver.js'));
 
 if (isMain) {
-  const mechAddr = process.env.JINN_SERVICE_MECH_ADDRESS || process.argv[2];
+  const mechAddr = getMechAddress() || process.argv[2];
   const rpcUrl = process.env.RPC_URL || process.argv[3];
 
   if (!mechAddr || !rpcUrl) {
     console.error('Usage: tsx serviceResolver.ts <mechAddress> <rpcUrl>');
-    console.error('  Or set JINN_SERVICE_MECH_ADDRESS and RPC_URL env vars');
+    console.error('  Or configure .operate profile with OPERATE_PROFILE_DIR');
     process.exit(1);
   }
 

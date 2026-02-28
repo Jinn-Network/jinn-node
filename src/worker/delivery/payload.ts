@@ -5,6 +5,7 @@
 import type { AgentExecutionResult, IpfsMetadata, RecognitionPhaseResult, ReflectionResult } from '../types.js';
 import type { MeasurementCoverage } from '../execution/measurementCoverage.js';
 import type { Provenance } from '../../shared/adw/types.js';
+import { getMechAddress } from '../../env/operate-profile.js';
 
 /**
  * Build execution provenance metadata from available params.
@@ -283,7 +284,7 @@ export function buildDeliveryPayload(params: {
   const structuredResult = extractStructuredResult(result, metadata?.outputSpec);
 
   // Build execution provenance from available data
-  const workerAddress = process.env.JINN_SERVICE_MECH_ADDRESS;
+  const workerAddress = getMechAddress();
   const durationMs = result.telemetry?.durationMs || workerTelemetry?.durationMs;
   const provenance = buildExecutionProvenance({ requestId, metadata, workerAddress, durationMs });
 
