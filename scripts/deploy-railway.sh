@@ -26,6 +26,7 @@ SKIP_ENV=false
 DEPLOY_ONLY=false
 DRY_RUN=false
 ENVIRONMENT="production"
+OPERATE_DIR=""
 TOML_BACKED_UP=false
 
 # =============================================================================
@@ -64,6 +65,7 @@ Options:
   --project <name>     Railway project (creates if not found)
   --service <name>     Service name (creates if not found, default: jinn-worker)
   --environment <name> Railway environment (default: production)
+  --operate-dir <path> Path to .operate directory (default: $JINN_NODE_DIR/.operate)
   --skip-import        Skip .operate/.gemini SSH import (for re-deploys)
   --skip-env           Skip pushing .env variables (for external env management)
   --deploy-only        Deploy only (skip volume/env/import bootstrap)
@@ -83,8 +85,9 @@ Examples:
   # Deploy only (no env/volume/import mutations)
   bash scripts/deploy-railway.sh --project jinn-worker --service canary-worker --deploy-only
 
-  # Staging deploy (env vars managed externally, uses staging environment)
-  bash scripts/deploy-railway.sh --project jinn-shared --service staging-worker --environment staging --skip-env
+  # Staging deploy (env vars managed externally, custom .operate location)
+  bash scripts/deploy-railway.sh --project jinn-shared --service staging-worker \
+    --environment staging --skip-env --operate-dir /path/to/.operate
 
   # Preview what would happen
   bash scripts/deploy-railway.sh --project jinn-worker --dry-run
@@ -101,6 +104,7 @@ parse_args() {
       --service)   SERVICE_NAME="$2"; shift 2 ;;
       --skip-import) SKIP_IMPORT=true; shift ;;
       --skip-env)  SKIP_ENV=true; shift ;;
+      --operate-dir) OPERATE_DIR="$2"; shift 2 ;;
       --deploy-only) DEPLOY_ONLY=true; shift ;;
       --environment) ENVIRONMENT="$2"; shift 2 ;;
       --dry-run)   DRY_RUN=true; shift ;;
@@ -178,9 +182,9 @@ check_preconditions() {
   step "Checking preconditions"
 
   # .operate directory (required for import)
-  if [[ "$DEPLOY_ONLY" == false && "$SKIP_IMPORT" == false && ! -d "$JINN_NODE_DIR/.operate" ]]; then
-    error ".operate/ not found in $JINN_NODE_DIR"
-    error "Run local setup first (yarn setup), then re-run this script."
+  if [[ "$DEPLOY_ONLY" == false && "$SKIP_IMPORT" == false && ! -d "$OPERATE_DIR" ]]; then
+    error ".operate/ not found at $OPERATE_DIR"
+    error "Use --operate-dir <path> to specify location, or run local setup first."
     exit 1
   fi
 
@@ -411,10 +415,13 @@ IDLE_TOML
   # We tar .operate/ excluding only deployment/ dirs (Python venvs, ~179MB each,
   # recreated at runtime). Service configs (config.json, keys.json) are preserved.
   # The result is base64-encoded and passed as a command argument.
-  info "Importing .operate/ to volume (excluding deployment venvs)..."
+  info "Importing $OPERATE_DIR to volume (excluding deployment venvs)..."
   if [[ "$DRY_RUN" == false ]]; then
-    local payload
-    payload=$(cd "$JINN_NODE_DIR" && tar czf - --exclude='services/*/deployment' .operate | base64)
+    local payload operate_parent
+    operate_parent="$(cd "$OPERATE_DIR/.." && pwd)"
+    # -h follows symlinks. Tar from parent dir so archive extracts as .operate/
+    payload=$(cd "$operate_parent" && tar czf - -h --exclude='services/*/deployment' \
+      "$(basename "$OPERATE_DIR")" | base64)
     railway ssh -- "echo '$payload' | base64 -d | tar xzf - -C /home/jinn"
     success ".operate imported (keys, wallets, service configs)"
   else
@@ -544,6 +551,11 @@ main() {
   echo ""
 
   parse_args "$@"
+
+  # Default --operate-dir to $JINN_NODE_DIR/.operate if not specified
+  if [[ -z "$OPERATE_DIR" ]]; then
+    OPERATE_DIR="$JINN_NODE_DIR/.operate"
+  fi
 
   # Ensure all Railway CLI commands run from jinn-node/ regardless of caller's CWD.
   # This is critical for `railway up` (uploads CWD) and `railway link` (stores context in CWD).
