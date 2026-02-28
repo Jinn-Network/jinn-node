@@ -27,14 +27,6 @@ export function getHeliaNode(): Helia {
 }
 
 /**
- * Get the Helia node if initialized, or null otherwise.
- * Use this for optional Helia integration in paths that have HTTP fallbacks.
- */
-export function getHeliaNodeOptional(): Helia | null {
-  return heliaInstance;
-}
-
-/**
  * Check if GC should run this cycle and run it if needed.
  * Call this once per worker poll cycle.
  */

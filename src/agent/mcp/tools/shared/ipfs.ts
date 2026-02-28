@@ -1,8 +1,6 @@
 import fetch from 'cross-fetch';
 import { proxyIpfsGet } from '../../../shared/signing-proxy-client.js';
-
-const DEFAULT_IPFS_GATEWAY = 'https://gateway.autonolas.tech/ipfs/';
-const FALLBACK_IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
+import { getIpfsGatewayUrl } from '../../../../config/index.js';
 
 // Retry configuration
 const MAX_RETRIES = 3;
@@ -35,10 +33,10 @@ async function retryWithBackoff<T>(
   context: string
 ): Promise<T> {
   let lastResult: T;
-  
+
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     lastResult = await fn();
-    
+
     if (!shouldRetry(lastResult)) {
       return lastResult;
     }
@@ -50,7 +48,7 @@ async function retryWithBackoff<T>(
     const delay = calculateBackoffDelay(attempt);
     await sleep(delay);
   }
-  
+
   return lastResult!;
 }
 
@@ -163,50 +161,33 @@ async function fetchFromGateways(
   timeout: number,
   contextLabel: string
 ): Promise<{ result: any; success: boolean }> {
-  const gatewayUrl = process.env.IPFS_GATEWAY_URL || DEFAULT_IPFS_GATEWAY;
+  const gatewayUrl = getIpfsGatewayUrl();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
 
-  const attempt = async (baseUrl: string) => {
-    try {
-      const response = await fetch(`${baseUrl}${cidPath}`, {
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        return null;
-      }
-      const contentType = response.headers.get('content-type') || '';
-      let payload: any;
-      if (contentType.includes('application/json')) {
-        const parsed = await response.json();
-        payload = JSON.parse(JSON.stringify(parsed));
-      } else {
-        const text = await response.text();
-        payload = { contentType, text };
-      }
+  try {
+    const response = await fetch(`${gatewayUrl}${cidPath}`, {
+      signal: controller.signal,
+    });
+    if (!response.ok) {
       clearTimeout(timer);
-      return { result: payload, success: true };
-    } catch (error: any) {
-      return { result: { error: `Failed to fetch IPFS content: ${error.message}`, status: 500 }, success: false };
+      return { result: { error: `IPFS content not found for ${contextLabel}`, status: response.status }, success: false };
     }
-  };
-
-  let attemptResult = await attempt(gatewayUrl);
-  if (attemptResult && attemptResult.success) {
-    return attemptResult;
+    const contentType = response.headers.get('content-type') || '';
+    let payload: any;
+    if (contentType.includes('application/json')) {
+      const parsed = await response.json();
+      payload = JSON.parse(JSON.stringify(parsed));
+    } else {
+      const text = await response.text();
+      payload = { contentType, text };
+    }
+    clearTimeout(timer);
+    return { result: payload, success: true };
+  } catch (error: any) {
+    clearTimeout(timer);
+    return { result: { error: `Failed to fetch IPFS content: ${error.message}`, status: 500 }, success: false };
   }
-
-  attemptResult = await attempt(FALLBACK_IPFS_GATEWAY);
-  if (attemptResult && attemptResult.success) {
-    return attemptResult;
-  }
-
-  clearTimeout(timer);
-  return {
-    result:
-      attemptResult?.result || { error: `IPFS content not found for ${contextLabel}`, status: 404 },
-    success: false,
-  };
 }
 
 async function resolveIpfsContentInternal(ipfsHash: string, requestId: string, timeout: number = 10000): Promise<any> {

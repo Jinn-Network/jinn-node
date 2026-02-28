@@ -3,11 +3,15 @@
  *
  * On-chain content before the private IPFS migration was uploaded with
  * dag-pb codec and/or directory wrapping. This module builds CID candidates
- * matching the old format and fetches from HTTP gateways as a fallback.
+ * matching the old format and fetches from the configured IPFS gateway.
+ *
+ * WARNING: Every call to fetchLegacyContent logs a warning. If you see
+ * unexpected legacy hits for content that should be in the private network,
+ * that's a red flag that the private IPFS path is broken.
  */
 
-const DEFAULT_IPFS_GATEWAY = 'https://gateway.autonolas.tech/ipfs/';
-const FALLBACK_IPFS_GATEWAY = 'https://ipfs.io/ipfs/';
+import { workerLogger } from '../logging/index.js';
+import { getIpfsGatewayUrl } from '../config/index.js';
 
 function buildCidV1HexCandidates(hexBytes: string): string[] {
   const hexClean = hexBytes.startsWith('0x') ? hexBytes.slice(2) : hexBytes;
@@ -111,13 +115,16 @@ export function buildLegacyCidCandidates(
 }
 
 /**
- * Fetch legacy content from HTTP IPFS gateways.
- * Tries the primary gateway first, falls back to IPFS.io.
+ * Fetch legacy content from configured IPFS gateway.
+ *
+ * WARNING: Every call is logged at warn level. If you see unexpected legacy
+ * hits for content that should be in the private network, that's a red flag.
  */
 export async function fetchLegacyContent(
   digestHex: string,
   options?: { requestId?: string; timeoutMs?: number },
 ): Promise<unknown | null> {
+  workerLogger.warn({ digestHex, requestId: options?.requestId }, 'LEGACY IPFS path accessed — content not found in private network, falling back to HTTP gateway');
   const candidates = buildLegacyCidCandidates(digestHex, options);
   const timeout = options?.timeoutMs ?? 10_000;
 
@@ -129,27 +136,24 @@ export async function fetchLegacyContent(
 }
 
 async function tryGateway(cidPath: string, timeout: number): Promise<unknown | null> {
-  const gatewayUrl = process.env.IPFS_GATEWAY_URL || DEFAULT_IPFS_GATEWAY;
+  const gatewayUrl = getIpfsGatewayUrl();
 
-  for (const base of [gatewayUrl, FALLBACK_IPFS_GATEWAY]) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeout);
-      const response = await fetch(`${base}${cidPath}`, { signal: controller.signal });
-      clearTimeout(timer);
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    const response = await fetch(`${gatewayUrl}${cidPath}`, { signal: controller.signal });
+    clearTimeout(timer);
 
-      if (!response.ok) continue;
+    if (!response.ok) return null;
 
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        return await response.json();
-      }
-      return { contentType, text: await response.text() };
-    } catch {
-      continue;
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      return await response.json();
     }
+    return { contentType, text: await response.text() };
+  } catch {
+    return null;
   }
-  return null;
 }
 
 export const __TEST__ = {

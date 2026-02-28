@@ -7,7 +7,7 @@ export { publishContentAnnouncement, subscribeContentAnnouncements, CONTENT_TOPI
 export { ipfsUploadJson } from './upload.js';
 export { ipfsRetrieveJson } from './retrieve.js';
 export { buildLegacyCidCandidates, fetchLegacyContent } from './legacy.js';
-export { initHeliaNode, getHeliaNode, getHeliaNodeOptional, stopHeliaNode, maybeRunGcCycle } from './lifecycle.js';
+export { initHeliaNode, getHeliaNode, stopHeliaNode, maybeRunGcCycle } from './lifecycle.js';
 export { maybeRunGc } from './gc.js';
 export { isOperatorStaked } from './staking.js';
 export { fetchBootstrapPeers, registerMultiaddrs } from './bootstrap.js';

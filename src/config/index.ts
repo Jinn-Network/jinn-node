@@ -156,8 +156,8 @@ const olasOperateSchema = z.object({
  * For request/delivery data storage
  */
 const ipfsSchema = z.object({
-  // IPFS_GATEWAY_URL: IPFS gateway for fetching and uploading
-  IPFS_GATEWAY_URL: z.string().url().optional(),
+  // IPFS_GATEWAY_URL: Private IPFS gateway for content display and retrieval
+  IPFS_GATEWAY_URL: z.string().url(),
 
   // IPFS_FETCH_TIMEOUT_MS: Timeout for IPFS fetch operations
   IPFS_FETCH_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
@@ -771,12 +771,12 @@ export function getOptionalOlasMiddlewarePath(): string | undefined {
 // Public API: IPFS Configuration
 // ============================================================================
 
-export function getOptionalIpfsGatewayUrl(): string | undefined {
-  return getConfig().IPFS_GATEWAY_URL;
-}
-
 export function getIpfsGatewayUrl(): string {
-  return getOptionalIpfsGatewayUrl() ?? 'https://gateway.autonolas.tech/ipfs/';
+  const url = getConfig().IPFS_GATEWAY_URL;
+  if (!url) {
+    throw new Error('IPFS_GATEWAY_URL is required but not configured — set it to your private IPFS gateway');
+  }
+  return url;
 }
 
 export function getOptionalIpfsFetchTimeoutMs(): number | undefined {
