@@ -227,8 +227,9 @@ export async function probeOperatorCapabilities(): Promise<WorkerOperatorCapabil
   }
 }
 
-// Cache TTL: re-probe every 5 minutes to pick up policy changes without restart
-const CACHE_TTL_MS = 5 * 60 * 1000;
+// Cache TTL: re-probe periodically to pick up policy changes without restart.
+// Configurable via env var for staging/test environments where policy changes happen rapidly.
+const CACHE_TTL_MS = Math.max(5_000, parseInt(process.env.CREDENTIAL_CACHE_TTL_MS || '300000', 10));
 
 let _cachedInfo: WorkerCredentialInfo | null = null;
 let _cachedInfoAt = 0;
