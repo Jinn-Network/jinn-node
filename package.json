@@ -65,6 +65,7 @@
     "poetry.lock"
   ],
   "scripts": {
+    "start": "sh -c 'bash scripts/init.sh && node dist/worker/worker_launcher.js'",
     "build": "tsc -p tsconfig.build.json && copyfiles -u 1 'src/**/*.json' 'src/gemini-extension/**/*.md' dist",
     "worker": "sh -c 'LOG_PRETTY=1 USE_TSX_MCP=1 tsx src/worker/mech_worker.ts \"$@\"' --",
     "setup": "sh -c 'LOG_PRETTY=1 tsx src/setup/cli.ts \"$@\"' --",
