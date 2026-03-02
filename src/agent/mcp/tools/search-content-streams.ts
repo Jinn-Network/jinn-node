@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import fetch from 'cross-fetch';
-import { getPonderGraphqlUrl } from './shared/env.js';
+import { config } from '../../../config/index.js';
 
 export const searchContentStreamsParams = z.object({
   query: z.string().optional().describe('Optional keyword to filter stream names (case-insensitive).'),
@@ -31,7 +31,7 @@ export async function searchContentStreams(params: SearchContentStreamsParams) {
 
     const { query, limit } = parsed.data;
 
-    const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
+    const PONDER_GRAPHQL_URL = config.services.ponderUrl;
     /**
      * Ponder GraphQL doesn't support GROUP BY or DISTINCT, so we fetch up to
      * AGGREGATION_LIMIT artifacts and aggregate by topic client-side. If the

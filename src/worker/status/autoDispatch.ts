@@ -16,13 +16,13 @@ import type { FinalStatus, ParentDispatchDecision } from '../types.js';
 import { fetchBranchDetails } from '../git/pr.js';
 import type { ExtractedArtifact } from '../artifacts.js';
 import { graphQLRequest } from '../../http/client.js';
-import { getPonderGraphqlUrl } from '../../agent/mcp/tools/shared/env.js';
 import type { WorkerTelemetryService } from '../worker_telemetry.js';
 import { serializeError } from '../logging/errors.js';
 import { isChildIntegrated, batchFetchBranches } from '../git/integration.js';
 import { fetchAllChildren } from '../prompt/providers/context/fetchChildren.js';
 import { getMaxCycles, requestStop } from '../cycleControl.js';
 import { claimParentDispatch } from '../control_api_client.js';
+import { config } from '../../config/index.js';
 
 /**
  * Get inherited environment variables for workstream-level config propagation.
@@ -56,7 +56,7 @@ async function wasRecentlyDispatched(
   childJobDefId: string
 ): Promise<boolean> {
   try {
-    const ponderUrl = getPonderGraphqlUrl();
+    const ponderUrl = config.services.ponderUrl;
 
     const response = await graphQLRequest<{
       requests: { items: Array<{ id: string; blockTimestamp: string }> }
@@ -114,7 +114,7 @@ async function wasRecentlyDispatched(
  */
 async function countExistingDispatches(parentJobDefId: string): Promise<number> {
   try {
-    const ponderUrl = getPonderGraphqlUrl();
+    const ponderUrl = config.services.ponderUrl;
     const response = await graphQLRequest<{
       requests: { items: Array<{ id: string }> }
     }>({
@@ -143,7 +143,7 @@ async function countExistingDispatches(parentJobDefId: string): Promise<number> 
  */
 async function jobHadChildren(jobDefinitionId: string): Promise<boolean> {
   try {
-    const ponderUrl = getPonderGraphqlUrl();
+    const ponderUrl = config.services.ponderUrl;
     const response = await graphQLRequest<{
       jobDefinitions: { items: Array<{ id: string }> };
     }>({
@@ -360,7 +360,7 @@ async function dispatchForVerification(
     // Query workstreamId from Ponder to preserve it during verification dispatch
     let workstreamId: string | undefined;
     try {
-      const ponderUrl = getPonderGraphqlUrl();
+      const ponderUrl = config.services.ponderUrl;
       const response = await graphQLRequest<{ request: { workstreamId?: string } | null }>({
         url: ponderUrl,
         query: `query GetWorkstreamId($id: String!) {
@@ -497,7 +497,7 @@ async function dispatchForContinuation(
     // Query workstreamId from Ponder
     let workstreamId: string | undefined;
     try {
-      const ponderUrl = getPonderGraphqlUrl();
+      const ponderUrl = config.services.ponderUrl;
       const response = await graphQLRequest<{ request: { workstreamId?: string } | null }>({
         url: ponderUrl,
         query: `query GetWorkstreamId($id: String!) { request(id: $id) { workstreamId } }`,
@@ -619,7 +619,7 @@ export async function dispatchForCycle(
     // Query workstreamId from Ponder
     let workstreamId: string | undefined;
     try {
-      const ponderUrl = getPonderGraphqlUrl();
+      const ponderUrl = config.services.ponderUrl;
       const response = await graphQLRequest<{ request: { workstreamId?: string } | null }>({
         url: ponderUrl,
         query: `query GetWorkstreamId($id: String!) { request(id: $id) { workstreamId } }`,
@@ -763,7 +763,7 @@ export async function dispatchForLoopRecovery(
     // Query workstreamId from Ponder
     let workstreamId: string | undefined;
     try {
-      const ponderUrl = getPonderGraphqlUrl();
+      const ponderUrl = config.services.ponderUrl;
       const response = await graphQLRequest<{ request: { workstreamId?: string } | null }>({
         url: ponderUrl,
         query: `query GetWorkstreamId($id: String!) { request(id: $id) { workstreamId } }`,
@@ -909,7 +909,7 @@ export async function dispatchForTimeoutRecovery(
     // Query workstreamId from Ponder
     let workstreamId: string | undefined;
     try {
-      const ponderUrl = getPonderGraphqlUrl();
+      const ponderUrl = config.services.ponderUrl;
       const response = await graphQLRequest<{ request: { workstreamId?: string } | null }>({
         url: ponderUrl,
         query: `query GetWorkstreamId($id: String!) { request(id: $id) { workstreamId } }`,
@@ -1032,7 +1032,7 @@ export async function shouldDispatchParent(
   const wasSelfReferential = parentJobDefId === jobDefinitionId;
   if ((!parentJobDefId || wasSelfReferential) && jobDefinitionId) {
     try {
-      const ponderUrl = getPonderGraphqlUrl();
+      const ponderUrl = config.services.ponderUrl;
       const response = await graphQLRequest<{ jobDefinition: { sourceJobDefinitionId: string | null } | null }>({
         url: ponderUrl,
         query: `query GetJobDefParent($id: String!) { jobDefinition(id: $id) { sourceJobDefinitionId } }`,
@@ -1075,7 +1075,7 @@ export async function shouldDispatchParent(
   // Check if ALL direct children of the parent are complete
   // Poll Ponder multiple times to allow for indexing lag
   try {
-    const ponderUrl = getPonderGraphqlUrl();
+    const ponderUrl = config.services.ponderUrl;
 
     // Query all job definitions that have this parent
     const childrenQuery = `query GetParentChildren($parentJobDefId: String!) {
@@ -1387,7 +1387,7 @@ export async function dispatchParentIfNeeded(
 
   let workstreamId: string | undefined;
   try {
-    const ponderUrl = getPonderGraphqlUrl();
+    const ponderUrl = config.services.ponderUrl;
     const response = await graphQLRequest<{ request: { workstreamId?: string } | null }>({
       url: ponderUrl,
       query: `query GetWorkstreamId($id: String!) {

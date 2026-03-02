@@ -13,12 +13,12 @@ import { buildIpfsPayload } from '../../agent/shared/ipfs-payload-builder.js';
 import { extractToolPolicyFromBlueprint } from '../../shared/template-tools.js';
 import { extractSchemaEnvVars } from '../../shared/job-env.js';
 import { getMechAddress, getServicePrivateKey, getServiceSafeAddress, getMechChainConfig } from '../../env/operate-profile.js';
-import { getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
 import { getRandomStakedMech } from '../filters/stakingFilter.js';
 import { get_mech_config } from '@jinn-network/mech-client-ts/dist/config.js';
 import { dispatchViaSafe } from '../safe-dispatch.js';
 import type { Venture } from '../../data/ventures.js';
 import type { ScheduleEntry } from '../../data/types/scheduleEntry.js';
+import { config } from '../../config/index.js';
 
 type DispatchFromTemplateOptions = {
   /**
@@ -148,7 +148,7 @@ export async function dispatchFromTemplate(
   const mechAddress = getMechAddress();
   const privateKey = getServicePrivateKey();
   const safeAddress = getServiceSafeAddress();
-  const rpcHttpUrl = getRequiredRpcUrl();
+  const rpcHttpUrl = config.chain.rpcUrl;
   const chainConfig = getMechChainConfig();
 
   if (!mechAddress) {

@@ -1,15 +1,7 @@
-import '../env/index.js';
+import { config, secrets, type WorkerMechFilterMode } from '../config/index.js';
 import { existsSync, unlinkSync } from 'fs';
 import { Web3 } from 'web3';
 import { graphQLRequest } from '../http/client.js';
-import {
-  getPonderGraphqlUrl,
-  getUseControlApi,
-  getEnableAutoRepost,
-  getRequiredRpcUrl,
-  getOptionalMechTargetRequestId,
-  getOptionalControlApiUrl,
-} from '../agent/mcp/tools/shared/env.js';
 // Import ABI from mech-client-ts package
 import marketplaceAbi from '@jinn-network/mech-client-ts/dist/abis/MechMarketplace.json' with { type: 'json' };
 import { workerLogger } from '../logging/index.js';
@@ -26,17 +18,6 @@ import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketpla
 import { shouldStop } from './cycleControl.js';
 import { checkAndDispatchScheduledVentures } from './ventures/ventureWatcher.js';
 import { waitForGeminiQuota } from './llm/geminiQuota.js';
-import {
-  getOptionalWorkerJobDelayMs,
-  getOptionalWorkerMechFilterMode,
-  getOptionalWorkerStakingContract,
-  getOptionalWorkerMechFilterList,
-  getWorkerMultiServiceEnabled,
-  getWorkerActivityPollMs,
-  getWorkerActivityCacheTtlMs,
-  getRequiredRpcUrl as getConfigRpcUrl,
-  type WorkerMechFilterMode,
-} from '../config/index.js';
 import { recordIdleCycle, recordExecutionTime, updateFleetState } from './healthcheck.js';
 import { maybeDistributeFunds } from './funding/FundDistributor.js';
 import { getMechAddressesForStakingContract } from './filters/stakingFilter.js';
@@ -85,10 +66,10 @@ type JobDefinitionStatus = {
 };
 
 
-const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
-const CONTROL_API_URL = getOptionalControlApiUrl();
+const PONDER_GRAPHQL_URL = config.services.ponderUrl;
+const CONTROL_API_URL = config.services.controlApiUrl;
 const SINGLE_SHOT = process.argv.includes('--single') || process.argv.includes('--single-job');
-const USE_CONTROL_API = getUseControlApi();
+const USE_CONTROL_API = config.services.useControlApi;
 
 // Track jobs executed in this session to prevent re-execution on delivery failure
 // This prevents infinite loops when delivery fails but Control API allows re-claiming
@@ -125,7 +106,7 @@ if (MAX_CYCLES !== undefined) {
 // Parse --stuck-exit-cycles=<N> flag or WORKER_STUCK_EXIT_CYCLES for watchdog exit
 const MAX_STUCK_CYCLES = (() => {
   const arg = process.argv.find(arg => arg.startsWith('--stuck-exit-cycles='));
-  const envValue = process.env.WORKER_STUCK_EXIT_CYCLES;
+  const envValue = config.worker.stuckExitCycles > 0 ? String(config.worker.stuckExitCycles) : undefined;
   const raw = arg ? arg.split('=')[1] : envValue;
   if (!raw) return undefined;
   const value = parseInt(raw, 10);
@@ -134,23 +115,18 @@ const MAX_STUCK_CYCLES = (() => {
 
 // Adaptive polling configuration for CPU optimization
 // When idle, polling interval increases exponentially up to max to reduce CPU usage
-const WORKER_POLL_BASE_MS = parseInt(process.env.WORKER_POLL_BASE_MS || '30000');
-const WORKER_POLL_MAX_MS = parseInt(process.env.WORKER_POLL_MAX_MS || '300000');
-const WORKER_POLL_BACKOFF_FACTOR = parseFloat(process.env.WORKER_POLL_BACKOFF_FACTOR || '1.5');
+const WORKER_POLL_BASE_MS = config.worker.pollBaseMs;
+const WORKER_POLL_MAX_MS = config.worker.pollMaxMs;
+const WORKER_POLL_BACKOFF_FACTOR = config.worker.pollBackoffFactor;
 
 // Earning schedule: "HH:MM-HH:MM" in local timezone (e.g., "22:00-08:00")
 // When set, worker only claims jobs during this window.
 // Supports overnight windows (start > end wraps past midnight).
 // Unset = always earning (current behavior).
-const EARNING_SCHEDULE = process.env.EARNING_SCHEDULE?.trim() || null;
+const EARNING_SCHEDULE = config.filtering.earningSchedule || null;
 
 // Max jobs per earning window. Unset = unlimited (current behavior).
-const EARNING_MAX_JOBS = (() => {
-  const raw = process.env.EARNING_MAX_JOBS;
-  if (!raw) return undefined;
-  const value = parseInt(raw, 10);
-  return isNaN(value) || value < 1 ? undefined : value;
-})();
+const EARNING_MAX_JOBS = config.filtering.earningMaxJobs > 0 ? config.filtering.earningMaxJobs : undefined;
 
 // Workstream filtering: parse --workstream=<id> flag or WORKSTREAM_FILTER env var
 // Supports multiple workstreams via:
@@ -158,43 +134,32 @@ const EARNING_MAX_JOBS = (() => {
 //   - JSON array: '["0x123","0x456"]'
 //   - Single value: "0x123"
 const WORKSTREAM_FILTERS: string[] = (() => {
+  // CLI flag overrides config
   const arg = process.argv.find(arg => arg.startsWith('--workstream='));
-  const raw = arg ? arg.split('=')[1] : process.env.WORKSTREAM_FILTER;
-  if (!raw || raw === 'none') return [];
-
-  // Try parsing as JSON array first
-  if (raw.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return parsed.map(s => String(s).trim()).filter(Boolean);
-      }
-    } catch {
-      // Not valid JSON, fall through to comma-separated parsing
+  if (arg) {
+    const raw = arg.split('=')[1];
+    if (!raw || raw === 'none') return [];
+    if (raw.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.map(s => String(s).trim()).filter(Boolean);
+      } catch { /* fall through */ }
     }
+    return raw.split(',').map(s => s.trim()).filter(Boolean);
   }
-
-  // Parse as comma-separated or single value
-  return raw.split(',').map(s => s.trim()).filter(Boolean);
+  // From config (already an array)
+  return config.filtering.workstreams;
 })();
 
 // Legacy single-value alias for backward compatibility in logging
 const WORKSTREAM_FILTER = WORKSTREAM_FILTERS.length === 1 ? WORKSTREAM_FILTERS[0] : undefined;
 
 // Template IDs for x402 gateway job pickup (legacy; dynamic validation uses Supabase)
-const VENTURE_TEMPLATE_IDS: string[] = (() => {
-  const raw = process.env.VENTURE_TEMPLATE_IDS;
-  if (!raw) return [];
-  return raw.split(',').map(s => s.trim()).filter(Boolean);
-})();
+const VENTURE_TEMPLATE_IDS: string[] = config.filtering.ventureTemplateIds;
 
 // Venture filtering: when set, only claim requests belonging to these venture IDs.
 // Requests with ventureId=null are excluded when this filter is active.
-const VENTURE_FILTERS: string[] = (() => {
-  const raw = process.env.VENTURE_FILTER;
-  if (!raw) return [];
-  return raw.split(',').map(s => s.trim()).filter(Boolean);
-})();
+const VENTURE_FILTERS: string[] = config.filtering.ventures;
 
 // Always set WORKER_STOP_FILE so external stop signals can terminate the worker
 if (!process.env.WORKER_STOP_FILE) {
@@ -229,7 +194,7 @@ async function getRuntimeResolvedConfig(): Promise<ResolvedServiceConfig | null>
   const active = getActiveService();
   if (active?.mechAddress) {
     try {
-      return await resolveServiceConfig(active.mechAddress, getRequiredRpcUrl());
+      return await resolveServiceConfig(active.mechAddress, config.chain.rpcUrl);
     } catch (e: any) {
       workerLogger.warn(
         { error: serializeError(e), activeMech: active.mechAddress, serviceId: active.serviceId },
@@ -242,7 +207,7 @@ async function getRuntimeResolvedConfig(): Promise<ResolvedServiceConfig | null>
 }
 
 // Auto-reposting configuration
-const ENABLE_AUTO_REPOST = getEnableAutoRepost();
+const ENABLE_AUTO_REPOST = config.worker.enableAutoRepost;
 const MIN_TIME_BETWEEN_REPOSTS = 5 * 60 * 1000; // 5 minutes
 
 // Track recent reposts to prevent loops
@@ -305,34 +270,34 @@ function getCurrentWindowId(schedule: string): string {
   return `${windowDate.toISOString().slice(0, 10)}-${String(startHour).padStart(2, '0')}:${String(startMin).padStart(2, '0')}`;
 }
 
-const DEFAULT_BASE_BRANCH = process.env.CODE_METADATA_DEFAULT_BASE_BRANCH || 'main';
+const DEFAULT_BASE_BRANCH = config.git.defaultBaseBranch;
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const DEPENDENCY_STALE_MS = Number(process.env.WORKER_DEPENDENCY_STALE_MS || String(2 * 60 * 60 * 1000));
-const DEPENDENCY_REDISPATCH_COOLDOWN_MS = Number(process.env.WORKER_DEPENDENCY_REDISPATCH_COOLDOWN_MS || String(60 * 60 * 1000));
-const DEPENDENCY_MISSING_FAIL_MS = Number(process.env.WORKER_DEPENDENCY_MISSING_FAIL_MS || String(2 * 60 * 60 * 1000));
-const DEPENDENCY_CANCEL_COOLDOWN_MS = Number(process.env.WORKER_DEPENDENCY_CANCEL_COOLDOWN_MS || String(60 * 60 * 1000));
-const ENABLE_DEPENDENCY_REDISPATCH = process.env.WORKER_DEPENDENCY_REDISPATCH === '1';
-const ENABLE_DEPENDENCY_AUTOFAIL = process.env.WORKER_DEPENDENCY_AUTOFAIL !== '0';
+const DEPENDENCY_STALE_MS = config.dependencies.staleMs;
+const DEPENDENCY_REDISPATCH_COOLDOWN_MS = config.dependencies.redispatchCooldownMs;
+const DEPENDENCY_MISSING_FAIL_MS = config.dependencies.missingFailMs;
+const DEPENDENCY_CANCEL_COOLDOWN_MS = config.dependencies.cancelCooldownMs;
+const ENABLE_DEPENDENCY_REDISPATCH = config.dependencies.redispatch;
+const ENABLE_DEPENDENCY_AUTOFAIL = config.dependencies.autofail;
 
 const dependencyRedispatchAttempts = new Map<string, number>();
 const dependencyCancelAttempts = new Map<string, number>();
 
 // Staking checkpoint: check every N cycles if epoch is overdue and call checkpoint()
 // At 30s base poll, 60 cycles = ~30 min. checkpoint() is a no-op if epoch hasn't ended.
-const WORKER_CHECKPOINT_CYCLES = parseInt(process.env.WORKER_CHECKPOINT_CYCLES || '60');
+const WORKER_CHECKPOINT_CYCLES = config.worker.checkpointCycles;
 
 // Staking heartbeat: submit marketplace requests to meet liveness requirement.
 // At 30s base poll, 16 cycles = ~8 min. Submits 1 request per check if deficit exists.
-const WORKER_HEARTBEAT_CYCLES = parseInt(process.env.WORKER_HEARTBEAT_CYCLES || '16');
+const WORKER_HEARTBEAT_CYCLES = config.worker.heartbeatCycles;
 
 // Venture watcher: check dispatch schedules every N cycles (~ every 2-3 min at default polling)
-const ENABLE_VENTURE_WATCHER = process.env.ENABLE_VENTURE_WATCHER === '1';
-const WORKER_VENTURE_WATCHER_CYCLES = parseInt(process.env.WORKER_VENTURE_WATCHER_CYCLES || '3');
+const ENABLE_VENTURE_WATCHER = config.worker.enableVentureWatcher;
+const WORKER_VENTURE_WATCHER_CYCLES = config.worker.ventureWatcherCycles;
 
 // Fund distribution: check service Safe/agent EOA balances and top up from Master Safe.
 // At 30s base poll, 120 cycles = ~60 min. Only active when WORKER_MULTI_SERVICE=true.
-const WORKER_FUND_CHECK_CYCLES = parseInt(process.env.WORKER_FUND_CHECK_CYCLES || '120');
+const WORKER_FUND_CHECK_CYCLES = config.worker.fundCheckCycles;
 
 // Periodic cleanup of global maps to prevent unbounded growth over weeks of uptime
 const MAP_CLEANUP_INTERVAL_CYCLES = 50;
@@ -393,9 +358,9 @@ let stakingAddressesFetchedAt: number = 0;
  * 4. WORKER_MECH_FILTER_MODE='single' or fallback to getMechAddress()
  */
 async function getMechFilterConfig(): Promise<MechFilterConfig> {
-  const explicitMode = getOptionalWorkerMechFilterMode();
-  const stakingContract = getOptionalWorkerStakingContract();
-  const filterList = getOptionalWorkerMechFilterList();
+  const explicitMode = config.worker.mechFilterMode;
+  const stakingContract = config.staking.contract || undefined;
+  const filterList = config.filtering.mechFilterList || undefined;
 
   // Deprecation warning for legacy WORKER_MECH_FILTER_LIST
   if (filterList && !explicitMode) {
@@ -568,7 +533,7 @@ async function maybeCancelMissingDependency(params: {
   const mechAddress = getMechAddress();
   const safeAddress = getServiceSafeAddress();
   const privateKey = getServicePrivateKey();
-  const rpcHttpUrl = getRequiredRpcUrl();
+  const rpcHttpUrl = config.chain.rpcUrl;
   const chainConfig = getMechChainConfig();
 
   if (!mechAddress || !safeAddress || !privateKey) {
@@ -732,7 +697,7 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
     // These jobs have jobName containing "(via x402)" and may not match any workstream filter.
     // Template ownership is validated later in jobRunner via Supabase query.
     let templateItems: any[] = [];
-    const ENABLE_TEMPLATE_PICKUP = !!(process.env.SUPABASE_URL || VENTURE_TEMPLATE_IDS.length > 0);
+    const ENABLE_TEMPLATE_PICKUP = !!(secrets.supabaseUrl || VENTURE_TEMPLATE_IDS.length > 0);
     if (ENABLE_TEMPLATE_PICKUP) {
       try {
         const templateWhereConditions: string[] = ['delivered: false', 'jobName_contains: "(via x402)"'];
@@ -877,7 +842,7 @@ async function filterUnclaimed(requests: UnclaimedRequest[]): Promise<UnclaimedR
   if (notDelivered.length === 0) return [];
   // Validate against marketplace delivery status to avoid stale indexer data
   try {
-    const rpcHttpUrl = getRequiredRpcUrl();
+    const rpcHttpUrl = config.chain.rpcUrl;
     if (!rpcHttpUrl) {
       workerLogger.debug('RPC URL missing; falling back to Ponder status');
       return notDelivered;
@@ -1441,12 +1406,12 @@ async function processOnce(): Promise<boolean> {
 
   // Optional: target a specific request id if provided (for deterministic tests).
   // A targeted recovery run should bypass epoch pickup gating.
-  const targetIdEnv = (getOptionalMechTargetRequestId() || '').trim();
+  const targetIdEnv = (config.filtering.targetRequestId || '').trim();
 
   // Staking target gate: stop claiming if request target met for this epoch
   // Use resolved config (on-chain derived) with env var override
   const runtimeResolvedConfig = await getRuntimeResolvedConfig();
-  const stakingContract = getOptionalWorkerStakingContract() || runtimeResolvedConfig?.stakingContract || null;
+  const stakingContract = config.staking.contract || runtimeResolvedConfig?.stakingContract || null;
   if (!targetIdEnv && stakingContract && runtimeResolvedConfig) {
     const gate = await checkEpochGate(stakingContract, runtimeResolvedConfig.serviceId, runtimeResolvedConfig.marketplace);
     if (gate.targetMet) {
@@ -1665,7 +1630,7 @@ async function processOnce(): Promise<boolean> {
     const mechAddress = getMechAddress();
     const safeAddress = getServiceSafeAddress();
     const privateKey = getServicePrivateKey();
-    const rpcHttpUrl = getRequiredRpcUrl();
+    const rpcHttpUrl = config.chain.rpcUrl;
     const chainConfig = getMechChainConfig();
 
     if (mechAddress && safeAddress && privateKey) {
@@ -1727,8 +1692,8 @@ async function processOnce(): Promise<boolean> {
   }
 
   // Post-job delay to spread API usage over time (helps with quota limits)
-  const jobDelayMs = getOptionalWorkerJobDelayMs();
-  if (jobDelayMs && jobDelayMs > 0) {
+  const jobDelayMs = config.worker.jobDelayMs;
+  if (jobDelayMs > 0) {
     workerLogger.info({ delayMs: jobDelayMs }, 'Post-job delay before next cycle');
     await new Promise(r => setTimeout(r, jobDelayMs));
   }
@@ -1766,7 +1731,7 @@ async function checkControlApiHealth(): Promise<void> {
 }
 
 // Repost check frequency limiting configuration
-const WORKER_REPOST_CHECK_CYCLES = parseInt(process.env.WORKER_REPOST_CHECK_CYCLES || '10');
+const WORKER_REPOST_CHECK_CYCLES = config.worker.repostCheckCycles;
 
 async function main() {
   workerLogger.info('Mech worker starting');
@@ -1782,7 +1747,7 @@ async function main() {
   // Resolve on-chain service config from mech address
   // This derives serviceId, safe, marketplace, and staking contract from chain state
   const mechAddress = getMechAddress();
-  const rpcUrl = getRequiredRpcUrl();
+  const rpcUrl = config.chain.rpcUrl;
   if (mechAddress && rpcUrl) {
     try {
       resolvedConfig = await resolveServiceConfig(mechAddress, rpcUrl);
@@ -1796,8 +1761,8 @@ async function main() {
   // Routes through middleware's Safe tx path (same as `yarn wallet:restake`)
   let pendingRestakeAt: number | null = null;
 
-  if (process.env.AUTO_RESTAKE !== 'false') {
-    const password = process.env.OPERATE_PASSWORD;
+  if (config.worker.autoRestake) {
+    const password = secrets.operatePassword;
     if (password && rpcUrl) {
       try {
         const results = await checkAndRestakeServices({ rpcUrl, operatePassword: password });
@@ -1833,15 +1798,15 @@ async function main() {
 
   // Initialize multi-service rotation if enabled
   let rotator: ServiceRotator | null = null;
-  if (getWorkerMultiServiceEnabled()) {
+  if (config.worker.multiService) {
     const middlewarePath = getMiddlewarePath();
     if (middlewarePath) {
       try {
         rotator = new ServiceRotator({
-          rpcUrl: getConfigRpcUrl(),
+          rpcUrl: config.chain.rpcUrl,
           middlewarePath,
-          activityPollMs: getWorkerActivityPollMs(),
-          activityCacheTtlMs: getWorkerActivityCacheTtlMs(),
+          activityPollMs: config.worker.activityPollMs,
+          activityCacheTtlMs: config.worker.activityCacheTtlMs,
         });
         const initial = await rotator.initialize();
         setActiveService(rotator.buildIdentity(initial.service));
@@ -1938,7 +1903,7 @@ async function main() {
       // Call staking checkpoint if epoch is overdue (permissionless, any EOA can trigger)
       {
         const runtimeResolvedConfig = await getRuntimeResolvedConfig();
-        const stakingContract = getOptionalWorkerStakingContract() || runtimeResolvedConfig?.stakingContract || null;
+        const stakingContract = config.staking.contract || runtimeResolvedConfig?.stakingContract || null;
         cyclesSinceLastCheckpoint++;
         if (stakingContract && cyclesSinceLastCheckpoint >= WORKER_CHECKPOINT_CYCLES) {
           cyclesSinceLastCheckpoint = 0;
@@ -1951,7 +1916,7 @@ async function main() {
 
         // Submit heartbeat requests to meet staking liveness requirement
         // Only the leader worker submits heartbeats to avoid Safe nonce collisions
-        const workerId = process.env.WORKER_ID || '';
+        const workerId = config.dev.workerId;
         const isHeartbeatLeader = !workerId || workerId.endsWith('-1') || workerId === 'default';
         cyclesSinceLastHeartbeat++;
         if (isHeartbeatLeader && cyclesSinceLastHeartbeat >= WORKER_HEARTBEAT_CYCLES) {
@@ -2042,7 +2007,7 @@ async function main() {
       // Deferred restake: retry once cooldown has elapsed
       if (pendingRestakeAt && Math.floor(Date.now() / 1000) >= pendingRestakeAt) {
         pendingRestakeAt = null; // Only attempt once
-        const password = process.env.OPERATE_PASSWORD;
+        const password = secrets.operatePassword;
         if (password && rpcUrl) {
           try {
             workerLogger.info('Cooldown elapsed — attempting deferred restake');

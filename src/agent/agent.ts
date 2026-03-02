@@ -5,7 +5,7 @@ import { tmpdir, homedir } from 'os';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { agentLogger } from '../logging/index.js';
-import { getOptionalCodeMetadataRepoRoot, getSandboxMode } from '../config/index.js';
+import { config } from '../config/index.js';
 import { getRepoRoot } from '../shared/repo_utils.js';
 import { computeToolPolicy, UNIVERSAL_TOOLS, hasBrowserAutomation, BROWSER_AUTOMATION_TOOLS, hasRailwayDeployment, RAILWAY_TOOLS, hasFirefliesMeetings, FIREFLIES_TOOLS, getEnabledExtensions, EXTENSION_META_TOOLS, getExtensionExcludedTools, type ToolPolicyResult } from './toolPolicy.js';
 // Signing proxy is now managed at the worker level (mech_worker.ts)
@@ -584,22 +584,22 @@ export class Agent {
       if (!existsSync(configPath)) continue;
 
       try {
-        const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+        const extensionConfig = JSON.parse(readFileSync(configPath, 'utf-8'));
 
         if (this.chromeDebugPort > 0) {
           // Connect to pre-launched Chrome via browserUrl
-          config.mcpServers['chrome-devtools'].args = [
+          extensionConfig.mcpServers['chrome-devtools'].args = [
             '-y', 'chrome-devtools-mcp@latest',
             `--browserUrl=http://127.0.0.1:${this.chromeDebugPort}`
           ];
         } else {
           // Fallback: launch own Chrome (only works without sandbox)
-          config.mcpServers['chrome-devtools'].args = [
+          extensionConfig.mcpServers['chrome-devtools'].args = [
             '-y', 'chrome-devtools-mcp@latest', '--headless=true', '--isolated=true'
           ];
         }
 
-        writeFileSync(configPath, JSON.stringify(config, null, 2));
+        writeFileSync(configPath, JSON.stringify(extensionConfig, null, 2));
         agentLogger.info({ configPath, port: this.chromeDebugPort }, 'Patched chrome-devtools extension config');
       } catch (error) {
         agentLogger.warn({ error: error instanceof Error ? error.message : String(error), configPath }, 'Failed to patch browser extension config');
@@ -1004,7 +1004,7 @@ export class Agent {
         agentLogger.debug({ error: err.message }, 'Failed to set up gemini directories');
       }
 
-      const sandboxMode = useStdinPrompt ? 'false' : getSandboxMode();
+      const sandboxMode = useStdinPrompt ? 'false' : config.agent.sandbox;
 
       const geminiProcess = spawn('npx', ['@google/gemini-cli', ...args], {
         // Use stable cwd for Gemini CLI to prevent initialization hang in test environments.

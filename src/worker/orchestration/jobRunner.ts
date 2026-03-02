@@ -42,10 +42,10 @@ import { extractMemoryArtifacts } from '../reflection/memoryArtifacts.js';
 import { DEFAULT_WORKER_MODEL, normalizeGeminiModel, validateModelAllowed } from '../../shared/gemini-models.js';
 import type { UnclaimedRequest, IpfsMetadata, AgentExecutionResult, FinalStatus, ExecutionSummaryDetails, RecognitionPhaseResult, ReflectionResult, AdditionalContext } from '../types.js';
 import { getDependencyBranchInfo } from '../mech_worker.js';
-import { getBlueprintEnableContextPhases, getBlueprintEnableBeads } from '../../config/index.js';
+import { config } from '../../config/index.js';
 import { waitForGeminiQuota, isGeminiQuotaError } from '../llm/geminiQuota.js';
 
-const DEFAULT_BASE_BRANCH = process.env.CODE_METADATA_DEFAULT_BASE_BRANCH || 'main';
+const DEFAULT_BASE_BRANCH = config.git.defaultBaseBranch;
 
 /**
  * Process a single job request
@@ -69,7 +69,7 @@ export async function processOnce(
 
   const envSnapshot = snapshotEnvironment();
   const telemetry = new WorkerTelemetryService(target.id);
-  const contextPhasesEnabled = getBlueprintEnableContextPhases();
+  const contextPhasesEnabled = config.blueprint.enableContextPhases;
 
   try {
     // Initialize: fetch metadata and set up repo
@@ -142,7 +142,7 @@ export async function processOnce(
         const { url: repoUrl, branch } = metadata.additionalContext.workspaceRepo;
         const repoName = extractRepoName(repoUrl);
         if (repoName) {
-          const workspaceDir = getJinnWorkspaceDir();
+          const workspaceDir = config.git.workspaceDir;
           const repoRoot = `${workspaceDir}/${repoName}`;
 
           workerLogger.info({ repoUrl, repoRoot, branch }, 'Bootstrapping workspace from additionalContext.workspaceRepo');
@@ -182,7 +182,7 @@ export async function processOnce(
           } else {
             const repoName = extractRepoName(remoteUrl);
             if (repoName) {
-              const workspaceDir = getJinnWorkspaceDir();
+              const workspaceDir = config.git.workspaceDir;
               repoRoot = `${workspaceDir}/${repoName}`;
               process.env.CODE_METADATA_REPO_ROOT = repoRoot;
               workerLogger.info({ repoRoot, remoteUrl }, 'Set CODE_METADATA_REPO_ROOT for job');
@@ -229,7 +229,7 @@ export async function processOnce(
         const setupRepoRoot = getRepoRoot(metadata.codeMetadata);
         if (setupRepoRoot) {
           ensureGitignore(setupRepoRoot);
-          if (getBlueprintEnableBeads()) {
+          if (config.blueprint.enableBeads) {
             await ensureBeadsInit(setupRepoRoot);
           }
           await commitRepoSetup(setupRepoRoot);

@@ -30,6 +30,7 @@ import { join } from 'path';
 import { createDefaultServiceConfig, SERVICE_CONSTANTS } from './config/ServiceConfig.js';
 import { enableMechMarketplaceInConfig, DEFAULT_MECH_DELIVERY_RATE } from './config/MechConfig.js';
 import { printFundingRequirements } from '../setup/display.js';
+import { config } from '../config/index.js';
 
 const bootstrapLogger = logger.child({ component: "SIMPLIFIED-BOOTSTRAP" });
 

@@ -4,7 +4,6 @@
 
 import { workerLogger } from '../../logging/index.js';
 import { graphQLRequest } from '../../http/client.js';
-import { getPonderGraphqlUrl, getOptionalIpfsGatewayUrl } from '../../agent/mcp/tools/shared/env.js';
 import { Agent } from '../../agent/agent.js';
 import type { RecognitionPhaseResult } from '../recognition_helpers.js';
 import {
@@ -19,6 +18,7 @@ import { serializeError } from '../logging/errors.js';
 import type { IpfsMetadata } from '../types.js';
 import { buildProgressCheckpoint, type ProgressCheckpoint } from './progressCheckpoint.js';
 import type { WorkerTelemetryService } from '../worker_telemetry.js';
+import { config } from '../../config/index.js';
 
 type RemoteSituationArtifact = {
   id: string;
@@ -114,7 +114,7 @@ export async function runRecognitionPhase(
     }));
 
     const situationArtifacts: Array<{ sourceRequestId: string; score: number; situation: any }> = [];
-    const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
+    const PONDER_GRAPHQL_URL = config.services.ponderUrl;
 
     for (const match of matches.slice(0, 3)) {
       try {
@@ -150,7 +150,7 @@ export async function runRecognitionPhase(
         }
 
         const situationArtifact = artifacts[0];
-        const gatewayBase = (getOptionalIpfsGatewayUrl() || 'https://gateway.autonolas.tech/ipfs/').replace(/\/+$/, '');
+        const gatewayBase = (config.services.ipfsGatewayUrl || 'https://gateway.autonolas.tech/ipfs/').replace(/\/+$/, '');
         const ipfsUrl = `${gatewayBase}/${situationArtifact.cid}`;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10_000);

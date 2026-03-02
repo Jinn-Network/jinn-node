@@ -2,10 +2,9 @@ import { z } from 'zod';
 import { graphQLRequest } from '../../../http/client.js';
 import { getCurrentJobContext } from './shared/context.js';
 import { getJobContextForDispatch } from './shared/job-context-utils.js';
-import { getPonderGraphqlUrl } from './shared/env.js';
 import { proxyDispatch } from '../../shared/signing-proxy-client.js';
 import { collectLocalCodeMetadata, ensureJobBranch } from '../../shared/code_metadata.js';
-import { getCodeMetadataDefaultBaseBranch } from '../../../config/index.js';
+import { config } from '../../../config/index.js';
 import { ensureUniversalTools, BASE_UNIVERSAL_TOOLS } from '../../toolPolicy.js';
 import { buildAnnotatedTools, normalizeToolArray, extractModelPolicyFromBlueprint } from '../../../shared/template-tools.js';
 import { blueprintStructureSchema } from '../../shared/blueprint-schema.js';
@@ -67,7 +66,7 @@ export async function dispatchExistingJob(args: unknown) {
   const context = getCurrentJobContext();
   const workstreamId = explicitWorkstreamId || context.workstreamId || undefined;
 
-  const gqlUrl = getPonderGraphqlUrl();
+  const gqlUrl = config.services.ponderUrl;
 
   // Validate blueprint override if provided
   let validatedBlueprint: string | undefined;
@@ -389,7 +388,7 @@ export async function dispatchExistingJob(args: unknown) {
     context.branchName ||
     context.baseBranch ||
     context.branchName ||
-    getCodeMetadataDefaultBaseBranch();
+    config.git.defaultBaseBranch;
 
   let branchResult: any = null;
   let codeMetadata: any = null;
@@ -481,7 +480,7 @@ export async function dispatchExistingJob(args: unknown) {
   // Only include branch info if we successfully collected it
   if (branchResult) {
     ipfsJsonContents[0].branchName = branchResult.branchName;
-    ipfsJsonContents[0].baseBranch = branchResult.baseBranch || getCodeMetadataDefaultBaseBranch();
+    ipfsJsonContents[0].baseBranch = branchResult.baseBranch || config.git.defaultBaseBranch;
   }
 
   if (lineage) {

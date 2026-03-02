@@ -11,7 +11,7 @@ import { workerLogger } from '../../../logging/index.js';
 import { serializeError } from '../../logging/errors.js';
 import { getCurrentJobContext } from '../../../agent/mcp/tools/shared/context.js';
 import { composeSinglePageResponse, decodeCursor, type ComposeSinglePageResult } from '../../../agent/mcp/tools/shared/context-management.js';
-import { getBlueprintEnableBeads } from '../../../config/index.js';
+import { config } from '../../../config/index.js';
 import { assertValidBranchName } from '../../../shared/git-validation.js';
 
 interface ProcessBranchArgs {
@@ -207,7 +207,7 @@ async function handleMerge(
     // Check for uncommitted changes - auto-commit beads files if they're the only changes
     if (hasUncommittedChanges(repoPath)) {
         // Only attempt beads auto-commit if beads is enabled
-        if (getBlueprintEnableBeads()) {
+        if (config.blueprint.enableBeads) {
             const statusOutput = execFileSync('git', ['status', '--porcelain'], {
                 cwd: repoPath,
                 encoding: 'utf-8',
@@ -464,7 +464,7 @@ async function handleCheckout(
     // Check for uncommitted changes - auto-commit beads files if they're the only changes
     if (hasUncommittedChanges(repoPath)) {
         // Only attempt beads auto-commit if beads is enabled
-        if (getBlueprintEnableBeads()) {
+        if (config.blueprint.enableBeads) {
             const statusOutput = execFileSync('git', ['status', '--porcelain'], {
                 cwd: repoPath,
                 encoding: 'utf-8',

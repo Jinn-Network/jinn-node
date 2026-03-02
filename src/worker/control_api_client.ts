@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import 'dotenv/config';
 import { getMechChainConfig, getServicePrivateKey } from '../env/operate-profile.js';
-import { getOptionalControlApiUrl } from '../agent/mcp/tools/shared/env.js';
+import { config } from '../config/index.js';
 import {
   buildErc8128IdempotencyKey,
   createPrivateKeyHttpSigner,
@@ -34,7 +34,7 @@ export type MessageInput = {
   status?: string;
 };
 
-const CONTROL_API_URL = getOptionalControlApiUrl();
+const CONTROL_API_URL = config.services.controlApiUrl;
 
 let cachedControlApiSigner: Erc8128Signer | null = null;
 
@@ -54,7 +54,7 @@ function getControlApiSigner(): Erc8128Signer {
     throw new Error('Service private key not found in .operate config or environment');
   }
 
-  const chainId = resolveChainId(process.env.CHAIN_ID || getMechChainConfig() || 'base');
+  const chainId = resolveChainId(String(config.chain.chainId) || getMechChainConfig() || 'base');
   cachedControlApiSigner = createPrivateKeyHttpSigner(privateKey as `0x${string}`, chainId);
   return cachedControlApiSigner;
 }

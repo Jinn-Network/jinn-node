@@ -1,10 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import {
-  getCodeMetadataRepoRoot,
-  getCodeMetadataDefaultBaseBranch,
-  isCodeMetadataDebugEnabled,
-} from '../../config/index.js';
+import { config } from '../../config/index.js';
 import { normalizeSshUrl } from '../../shared/repo_utils.js';
 
 const execFileAsync = promisify(execFile);
@@ -14,7 +10,7 @@ const GIT_TIMEOUT_MS = 30_000;
 
 // Helper to get repo root dynamically (for test environment compatibility)
 function getRepoRoot(): string {
-  return getCodeMetadataRepoRoot();
+  return config.git.repoRoot;
 }
 
 type Nullable<T> = T | null | undefined;
@@ -86,7 +82,7 @@ export interface EnsureBranchResult {
 }
 
 function debugLog(...args: unknown[]): void {
-  if (isCodeMetadataDebugEnabled()) {
+  if (false) {
     console.debug('[code-metadata]', ...args);
   }
 }
@@ -269,7 +265,7 @@ export async function ensureJobBranch(
   options: EnsureBranchOptions,
 ): Promise<EnsureBranchResult> {
   const branchName = buildJobBranchName(options);
-  const baseBranch = options.baseBranch || getCodeMetadataDefaultBaseBranch();
+  const baseBranch = options.baseBranch || config.git.defaultBaseBranch;
   const remoteName = options.remoteName || 'origin';
 
   let created = false;
@@ -340,7 +336,7 @@ export async function collectLocalCodeMetadata(
       // Note: root field removed for security (prevents leaking local paths on-chain)
       remoteUrl: remoteCandidate,
     },
-    baseBranch: hints.baseBranch || getCodeMetadataDefaultBaseBranch(),
+    baseBranch: hints.baseBranch || config.git.defaultBaseBranch,
     capturedAt: new Date().toISOString(),
     jobDefinitionId: hints.jobDefinitionId,
   };

@@ -141,7 +141,7 @@ async function storeAgentKey(
   operateBasePath: string,
   agentWallet: ethers.HDNodeWallet,
   password: string,
-): Promise<string> {
+): Promise<{ keyPath: string; encryptedKeystore: string }> {
   const keysDir = join(operateBasePath, '.operate', 'keys');
   await fsPromises.mkdir(keysDir, { recursive: true });
 
@@ -149,23 +149,26 @@ async function storeAgentKey(
   const keystoreJson = await agentWallet.encrypt(password);
   const keystore = JSON.parse(keystoreJson);
 
+  // Compact keystore string used in both .operate/keys/ and keys.json
+  const encryptedKeystore = JSON.stringify({
+    address: keystore.address,
+    crypto: keystore.crypto,
+    id: keystore.id,
+    version: keystore.version,
+  });
+
   // Store in the same format as existing .operate/keys/ files
   const keyEntry = {
     ledger: 'ethereum',
     address: agentWallet.address,
-    private_key: JSON.stringify({
-      address: keystore.address,
-      crypto: keystore.crypto,
-      id: keystore.id,
-      version: keystore.version,
-    }),
+    private_key: encryptedKeystore,
   };
 
   const keyPath = join(keysDir, agentWallet.address);
   await fsPromises.writeFile(keyPath, JSON.stringify(keyEntry, null, 2));
 
   stolasLogger.info({ address: agentWallet.address, keyPath }, 'Agent key stored');
-  return keyPath;
+  return { keyPath, encryptedKeystore };
 }
 
 // ─── Bootstrap ──────────────────────────────────────────────────────────────────
@@ -339,8 +342,10 @@ export async function stolasBootstrap(
 
   // ── 6. Store agent key in .operate/keys/ ──────────────────────────────────
 
+  let encryptedKeystore: string;
   try {
-    await storeAgentKey(operateBasePath, agentWallet, operatePassword);
+    const result = await storeAgentKey(operateBasePath, agentWallet, operatePassword);
+    encryptedKeystore = result.encryptedKeystore;
   } catch (err: any) {
     return {
       success: false,
@@ -356,7 +361,7 @@ export async function stolasBootstrap(
     imported = await importServiceFromChain({
       serviceId,
       agentInstanceAddress: agentWallet.address,
-      agentPrivateKey: agentWallet.privateKey,
+      encryptedKeystore,
       rpcUrl,
       chain,
       operateBasePath,

@@ -8,8 +8,7 @@
 
 import { graphQLRequest } from '../../http/client.js';
 import { workerLogger } from '../../logging/index.js';
-import { getPonderGraphqlUrl } from '../../agent/mcp/tools/shared/env.js';
-import { getOptionalWorkerStakingContract } from '../../config/index.js';
+import { config } from '../../config/index.js';
 import { SERVICE_CONSTANTS } from '../config/ServiceConfig.js';
 
 /** Default Jinn staking contract on Base (from ServiceConfig.ts single source of truth) */
@@ -56,7 +55,7 @@ export async function getMechAddressesForStakingContract(
     }
   }
 
-  const ponderUrl = getPonderGraphqlUrl();
+  const ponderUrl = config.services.ponderUrl;
 
   try {
     // Query for staked services in this contract, joined with mech addresses
@@ -198,7 +197,7 @@ export function getStakingFilterCacheStatus(): { size: number; entries: { contra
  * so this adds negligible overhead per dispatch.
  */
 export async function getRandomStakedMech(fallbackMech: string): Promise<string> {
-  const stakingContract = getOptionalWorkerStakingContract() || DEFAULT_JINN_STAKING_CONTRACT;
+  const stakingContract = config.staking.contract || DEFAULT_JINN_STAKING_CONTRACT;
 
   try {
     const mechs = await getMechAddressesForStakingContract(stakingContract);

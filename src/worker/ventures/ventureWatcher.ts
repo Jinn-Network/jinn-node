@@ -21,12 +21,12 @@ import { CronExpressionParser } from 'cron-parser';
 import { workerLogger } from '../../logging/index.js';
 import { listVentures, type Venture } from '../../data/ventures.js';
 import { graphQLRequest } from '../../http/client.js';
-import { getPonderGraphqlUrl } from '../../agent/mcp/tools/shared/env.js';
 import { dispatchFromTemplate } from './ventureDispatch.js';
 import { claimVentureDispatch } from '../control_api_client.js';
 import type { ScheduleEntry } from '../../data/types/scheduleEntry.js';
+import { config } from '../../config/index.js';
 
-const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
+const PONDER_GRAPHQL_URL = config.services.ponderUrl;
 
 /**
  * Check all active ventures and dispatch any due schedule entries.

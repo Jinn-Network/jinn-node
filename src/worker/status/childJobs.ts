@@ -3,12 +3,12 @@
  */
 
 import { graphQLRequest } from '../../http/client.js';
-import { getPonderGraphqlUrl } from '../../agent/mcp/tools/shared/env.js';
 import { workerLogger } from '../../logging/index.js';
 import { serializeError } from '../logging/errors.js';
 import type { ChildJobStatus } from '../types.js';
+import { config } from '../../config/index.js';
 
-const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
+const PONDER_GRAPHQL_URL = config.services.ponderUrl;
 
 /**
  * Result of child job status query including timing info

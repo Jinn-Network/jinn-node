@@ -2,13 +2,13 @@ import { z } from 'zod';
 import { graphQLRequest } from '../../../http/client.js';
 import { randomUUID } from 'node:crypto';
 import { getCurrentJobContext } from './shared/context.js';
-import { getPonderGraphqlUrl } from './shared/env.js';
 import { dispatchToMarketplace } from '../../shared/dispatch-core.js';
 import { validateInvariantsStrict } from '../../../worker/prompt/invariant-validator.js';
 import { buildAnnotatedTools, normalizeToolArray, extractModelPolicyFromBlueprint } from '../../../shared/template-tools.js';
 import { blueprintStructureSchema } from '../../shared/blueprint-schema.js';
 import { BASE_UNIVERSAL_TOOLS } from '../../toolPolicy.js';
 import { validateModelAllowed, normalizeGeminiModel, DEFAULT_WORKER_MODEL } from '../../../shared/gemini-models.js';
+import { config } from '../../../config/index.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -274,7 +274,7 @@ export async function dispatchNewJob(args: unknown) {
     }
 
     if (dependencies && dependencies.length > 0 && process.env.JINN_SKIP_DEPENDENCY_VALIDATION !== '1') {
-      const gqlUrl = getPonderGraphqlUrl();
+      const gqlUrl = config.services.ponderUrl;
       const validation = await validateDependencies({ gqlUrl, dependencies });
       if (!validation.ok) {
         if (validation.invalid.length > 0) {
@@ -490,7 +490,7 @@ export async function dispatchNewJob(args: unknown) {
     const validatedModel = modelToUse;
 
     const finalBlueprint = blueprint;
-    const gqlUrl = getPonderGraphqlUrl();
+    const gqlUrl = config.services.ponderUrl;
 
     // Generate unique job definition ID
     const jobDefinitionId: string = ensureUuid();

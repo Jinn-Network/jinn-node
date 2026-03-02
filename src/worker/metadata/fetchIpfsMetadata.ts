@@ -3,11 +3,8 @@
  */
 
 import { workerLogger } from '../../logging/index.js';
-import {
-  getOptionalIpfsGatewayUrl,
-  getIpfsFetchTimeoutMs,
-} from '../../agent/mcp/tools/shared/env.js';
 import type { IpfsMetadata } from '../types.js';
+import { config } from '../../config/index.js';
 
 /**
  * Fetch IPFS metadata from gateway
@@ -17,10 +14,10 @@ export async function fetchIpfsMetadata(ipfsHash?: string): Promise<IpfsMetadata
   try {
     const hash = String(ipfsHash).replace(/^0x/, '');
     // Use configured IPFS gateway or fallback to Autonolas
-    const gatewayBase = getOptionalIpfsGatewayUrl() || 'https://gateway.autonolas.tech/ipfs/';
+    const gatewayBase = config.services.ipfsGatewayUrl || 'https://gateway.autonolas.tech/ipfs/';
     const url = gatewayBase.endsWith('/') ? `${gatewayBase}${hash}` : `${gatewayBase}/${hash}`;
-    
-    const timeoutMs = getIpfsFetchTimeoutMs() ?? 7000;
+
+    const timeoutMs = config.services.ipfsFetchTimeoutMs ?? 7000;
     workerLogger.info({ url, hash, timeout: timeoutMs }, 'Fetching IPFS metadata');
 
     const controller = new AbortController();
@@ -37,16 +34,16 @@ export async function fetchIpfsMetadata(ipfsHash?: string): Promise<IpfsMetadata
     }
 
     const json = await res.json();
-    
+
     // Blueprint is at root level (new architecture)
     // Fall back to additionalContext.blueprint for backward compatibility
     // Fall back to prompt for legacy jobs
-    const blueprint = json?.blueprint 
-      ? String(json.blueprint) 
-      : (json?.additionalContext?.blueprint 
-          ? String(json.additionalContext.blueprint) 
-          : (json?.prompt || json?.input || undefined));
-    
+    const blueprint = json?.blueprint
+      ? String(json.blueprint)
+      : (json?.additionalContext?.blueprint
+        ? String(json.additionalContext.blueprint)
+        : (json?.prompt || json?.input || undefined));
+
     const enabledTools = Array.isArray(json?.enabledTools) ? json.enabledTools : undefined;
     const tools = Array.isArray(json?.tools) ? json.tools : undefined;
     const sourceRequestId = json?.sourceRequestId ? String(json.sourceRequestId) : undefined;
@@ -59,24 +56,24 @@ export async function fetchIpfsMetadata(ipfsHash?: string): Promise<IpfsMetadata
       ? (json.codeMetadata as any)
       : undefined;
     const model = json?.model ? String(json.model) : undefined;
-    const dependencies = Array.isArray(json?.dependencies) 
-      ? json.dependencies 
-      : (Array.isArray(json?.additionalContext?.dependencies) 
-          ? json.additionalContext.dependencies 
-          : undefined);
+    const dependencies = Array.isArray(json?.dependencies)
+      ? json.dependencies
+      : (Array.isArray(json?.additionalContext?.dependencies)
+        ? json.additionalContext.dependencies
+        : undefined);
     const lineage = json?.lineage && typeof json.lineage === 'object'
       ? {
-          dispatcherRequestId: json.lineage.dispatcherRequestId ? String(json.lineage.dispatcherRequestId) : undefined,
-          dispatcherJobDefinitionId: json.lineage.dispatcherJobDefinitionId ? String(json.lineage.dispatcherJobDefinitionId) : undefined,
-          parentDispatcherRequestId: json.lineage.parentDispatcherRequestId ? String(json.lineage.parentDispatcherRequestId) : undefined,
-          dispatcherBranchName: json.lineage.dispatcherBranchName ? String(json.lineage.dispatcherBranchName) : undefined,
-          dispatcherBaseBranch: json.lineage.dispatcherBaseBranch ? String(json.lineage.dispatcherBaseBranch) : undefined,
-        }
+        dispatcherRequestId: json.lineage.dispatcherRequestId ? String(json.lineage.dispatcherRequestId) : undefined,
+        dispatcherJobDefinitionId: json.lineage.dispatcherJobDefinitionId ? String(json.lineage.dispatcherJobDefinitionId) : undefined,
+        parentDispatcherRequestId: json.lineage.parentDispatcherRequestId ? String(json.lineage.parentDispatcherRequestId) : undefined,
+        dispatcherBranchName: json.lineage.dispatcherBranchName ? String(json.lineage.dispatcherBranchName) : undefined,
+        dispatcherBaseBranch: json.lineage.dispatcherBaseBranch ? String(json.lineage.dispatcherBaseBranch) : undefined,
+      }
       : undefined;
 
     // Template ID for tracking x402 template executions
     const templateId = json?.templateId ? String(json.templateId) : undefined;
-    
+
     // OutputSpec for structured result extraction (passthrough from x402 gateway)
     const outputSpec = json?.outputSpec && typeof json.outputSpec === 'object'
       ? json.outputSpec

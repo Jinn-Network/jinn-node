@@ -3,7 +3,7 @@ import fetch from 'cross-fetch';
 import { z } from 'zod';
 import { composeSinglePageResponse, decodeCursor } from './shared/context-management.js';
 import { resolveRequestIpfsContent } from './shared/ipfs.js';
-import { getPonderGraphqlUrl } from './shared/env.js';
+import { config } from '../../../config/index.js';
 
 function markChildWorkReviewed(requestIds: string[], artifactIds: string[]) {
     const completedRaw = process.env.JINN_CTX_COMPLETED_CHILDREN;
@@ -115,7 +115,7 @@ export async function getDetails(params: GetDetailsParams) {
         const jobDefRecords: any[] = [];
         const errors: string[] = [];
 
-        const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
+        const PONDER_GRAPHQL_URL = config.services.ponderUrl;
 
         // Fetch requests (and also fetch delivery for each to expose delivery provenance)
         if (requestIds.length > 0) {

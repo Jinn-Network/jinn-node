@@ -6,9 +6,9 @@
  */
 
 import { graphQLRequest } from '../../http/client.js';
-import { getPonderGraphqlUrl } from '../../agent/mcp/tools/shared/env.js';
+import { config } from '../../config/index.js';
 
-const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
+const PONDER_GRAPHQL_URL = config.services.ponderUrl;
 
 /**
  * Check if a dispatched request (and all descendants) are delivered.

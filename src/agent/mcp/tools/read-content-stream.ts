@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import fetch from 'cross-fetch';
-import { getPonderGraphqlUrl } from './shared/env.js';
+import { config } from '../../../config/index.js';
 
 export const readContentStreamParams = z.object({
   stream: z.string().min(1).refine(s => s.startsWith('FEED:'), {
@@ -39,7 +39,7 @@ export async function readContentStream(params: ReadContentStreamParams) {
     // blockTimestamp is stored as Unix seconds (from event.block.timestamp)
     const sinceUnix = Math.floor(new Date(sinceTs).getTime() / 1000);
 
-    const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
+    const PONDER_GRAPHQL_URL = config.services.ponderUrl;
     const gql = `query ReadContentStream($topic: String!, $sinceTs: BigInt!, $limit: Int!) {
       artifacts(where: { topic: $topic, blockTimestamp_gte: $sinceTs }, limit: $limit, orderBy: "blockTimestamp", orderDirection: "desc") {
         items {

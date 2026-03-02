@@ -21,7 +21,7 @@ import {
 } from '@slicekit/erc8128';
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
 import { verifyMessage, type Account } from 'viem';
-import { getRequiredWorkerPrivateKey } from '../config/index.js';
+import { getServicePrivateKey } from '../env/operate-profile.js';
 
 export type Erc8128Signer = EthHttpSigner;
 type Hex = `0x${string}`;
@@ -39,7 +39,8 @@ let _signer: EthHttpSigner | null = null;
 export function getControlApiSigner(): EthHttpSigner {
   if (_signer) return _signer;
 
-  const key = getRequiredWorkerPrivateKey() as `0x${string}`;
+  const key = getServicePrivateKey() as `0x${string}`;
+  if (!key) throw new Error('Service private key not found in .operate config or environment');
   const account = privateKeyToAccount(key);
 
   _signer = {

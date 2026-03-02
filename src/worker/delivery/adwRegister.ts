@@ -10,8 +10,8 @@
 
 import { ethers } from 'ethers';
 import { workerLogger } from '../../logging/index.js';
-import { getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
 import { getServicePrivateKey } from '../../env/operate-profile.js';
+import { config } from '../../config/index.js';
 
 const log = workerLogger.child({ component: 'ADW_REGISTER' });
 
@@ -46,7 +46,7 @@ export async function registerArtifactsOnChain(
 
   let rpcUrl: string;
   try {
-    rpcUrl = getRequiredRpcUrl();
+    rpcUrl = config.chain.rpcUrl;
   } catch {
     log.debug('No RPC URL available — skipping ADW on-chain registration');
     return;

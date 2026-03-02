@@ -10,7 +10,7 @@ import type { CodeMetadata } from '../../agent/shared/code_metadata.js';
 import { buildJobBranchName as buildBranchNameFromMetadata } from '../../agent/shared/code_metadata.js';
 import { DEFAULT_BASE_BRANCH, GIT_CHECKOUT_TIMEOUT_MS } from '../constants.js';
 import { serializeError } from '../logging/errors.js';
-import { getBlueprintEnableBeads } from '../../config/index.js';
+import { config } from '../../config/index.js';
 
 /**
  * Common build cache directories that can become stale across branch switches.
@@ -144,7 +144,7 @@ export async function checkoutJobBranch(codeMetadata: CodeMetadata): Promise<Bra
   // Auto-commit beads files if they're the only uncommitted changes
   // This prevents checkout failures due to beads daemon/sync activity
   // Only attempt beads auto-commit if beads is enabled
-  if (getBlueprintEnableBeads()) {
+  if (config.blueprint.enableBeads) {
     try {
       const status = execFileSync('git', ['status', '--porcelain'], {
         cwd: repoRoot,
@@ -189,7 +189,7 @@ export async function checkoutJobBranch(codeMetadata: CodeMetadata): Promise<Bra
 
     if (status) {
       const changedFiles = status.split('\n').filter(Boolean);
-      const onlyBeadsChanges = getBlueprintEnableBeads() && changedFiles.every(line => {
+      const onlyBeadsChanges = config.blueprint.enableBeads && changedFiles.every(line => {
         const filePath = line.slice(3);
         return filePath.startsWith('.beads/');
       });
@@ -402,7 +402,7 @@ export async function syncWithBranch(
 
     if (status) {
       const changedFiles = status.split('\n').filter(Boolean);
-      const onlyBeadsChanges = getBlueprintEnableBeads() && changedFiles.every(line => {
+      const onlyBeadsChanges = config.blueprint.enableBeads && changedFiles.every(line => {
         const filePath = line.slice(3);
         return filePath.startsWith('.beads/');
       });

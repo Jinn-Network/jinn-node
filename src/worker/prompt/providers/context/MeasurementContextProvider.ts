@@ -6,7 +6,7 @@
  * measurement status alongside each invariant.
  */
 
-import { getPonderGraphqlUrl } from '../../../../config/index.js';
+import { config } from '../../../../config/index.js';
 import { workerLogger } from '../../../../logging/index.js';
 import type {
   ContextProvider,
@@ -50,7 +50,7 @@ interface PonderArtifactsResponse {
  * Fetch workstream ID for the current request
  */
 async function fetchWorkstreamId(requestId: string): Promise<string | null> {
-  const ponderUrl = getPonderGraphqlUrl();
+  const ponderUrl = config.services.ponderUrl;
 
   const query = `
     query GetWorkstreamId($requestId: String!) {
@@ -82,7 +82,7 @@ async function fetchWorkstreamId(requestId: string): Promise<string | null> {
  * Fetch MEASUREMENT artifacts for a workstream
  */
 async function fetchMeasurementArtifacts(workstreamId: string): Promise<MeasurementInfo[]> {
-  const ponderUrl = getPonderGraphqlUrl();
+  const ponderUrl = config.services.ponderUrl;
 
   const query = `
     query GetMeasurementArtifacts($workstreamId: String!) {

@@ -94,9 +94,7 @@ async function main() {
       mcpLogger.info({ diagnostic: true }, 'MCP stdout cleanliness test probe');
     }
 
-    // Ensure .env variables are available to all tools before they are imported/registered
-    const envModule = await import('./tools/shared/env.js');
-    envModule.loadEnvOnce();
+    // Config system auto-loads .env on import — no manual loadEnvOnce needed
 
     // Suppress noisy stdout loggers to protect MCP stdio JSON stream
     // Only allow warnings/errors to reach stderr (Cursor will show those as errors)

@@ -13,13 +13,14 @@
  */
 
 import { z } from 'zod';
+import { secrets } from '../../../config/index.js';
 
 // ============================================
 // Helper Functions
 // ============================================
 
 function getMoltbookConfig() {
-    const apiKey = process.env.MOLTBOOK_API_KEY;
+    const apiKey = secrets.moltbookApiKey;
     if (!apiKey) {
         throw new Error('Missing required environment variable: MOLTBOOK_API_KEY');
     }

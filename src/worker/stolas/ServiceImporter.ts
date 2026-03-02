@@ -36,7 +36,7 @@ const STAKING_ABI = [
 export interface ImportServiceParams {
   serviceId: number;
   agentInstanceAddress: string;
-  agentPrivateKey: string;           // plaintext hex (0x-prefixed)
+  encryptedKeystore: string;         // encrypted keystore V3 JSON string
   rpcUrl: string;
   chain: string;
   operateBasePath: string;           // directory that will contain .operate/
@@ -67,7 +67,7 @@ export async function importServiceFromChain(
   const {
     serviceId,
     agentInstanceAddress,
-    agentPrivateKey,
+    encryptedKeystore,
     rpcUrl,
     chain,
     operateBasePath,
@@ -163,10 +163,10 @@ export async function importServiceFromChain(
   const configPath = join(servicePath, 'config.json');
   await fs.writeFile(configPath, JSON.stringify(config, null, 2));
 
-  // ── 4. Write keys.json ────────────────────────────────────────────────────
+  // ── 4. Write keys.json (encrypted keystore format) ───────────────────────
 
   const keysPath = join(servicePath, 'keys.json');
-  await fs.writeFile(keysPath, JSON.stringify([{ private_key: agentPrivateKey }]));
+  await fs.writeFile(keysPath, JSON.stringify([{ private_key: encryptedKeystore }]));
 
   importLogger.info({
     serviceConfigId,

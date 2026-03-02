@@ -14,6 +14,7 @@
 
 import { getServicePrivateKey, getMechChainConfig } from '../env/operate-profile.js';
 import { createPrivateKeyHttpSigner, resolveChainId, signRequestWithErc8128, type Erc8128Signer } from '../http/erc8128.js';
+import { secrets } from '../config/index.js';
 import { workerLogger } from '../logging/index.js';
 
 export interface RegistrationResult {
@@ -59,7 +60,7 @@ async function signedFetch(
  * @returns Registration result
  */
 export async function selfRegisterOperator(gatewayUrl?: string): Promise<RegistrationResult> {
-    const gateway = (gatewayUrl || process.env.X402_GATEWAY_URL || '').replace(/\/$/, '');
+    const gateway = (gatewayUrl || secrets.x402GatewayUrl || '').replace(/\/$/, '');
     if (!gateway) {
         return { registered: false, alreadyRegistered: false, address: '', error: 'X402_GATEWAY_URL not set' };
     }
@@ -119,7 +120,7 @@ export async function adminPromoteOperator(opts: {
     tierOverride?: string;
     gatewayUrl?: string;
 }): Promise<{ success: boolean; operator?: Record<string, unknown>; grantsAdded?: string[]; error?: string }> {
-    const gateway = (opts.gatewayUrl || process.env.X402_GATEWAY_URL || '').replace(/\/$/, '');
+    const gateway = (opts.gatewayUrl || secrets.x402GatewayUrl || '').replace(/\/$/, '');
     if (!gateway) {
         return { success: false, error: 'X402_GATEWAY_URL not set' };
     }
@@ -153,7 +154,7 @@ export async function adminPromoteOperator(opts: {
  * Called once at worker startup. Non-blocking: logs and continues on failure.
  */
 export async function ensureOperatorRegistered(): Promise<void> {
-    const gateway = process.env.X402_GATEWAY_URL;
+    const gateway = secrets.x402GatewayUrl;
     if (!gateway) {
         workerLogger.debug('X402_GATEWAY_URL not set — skipping operator self-registration');
         return;

@@ -6,9 +6,10 @@
  * bridge via the shared/supabase.ts module.
  */
 import { createClient } from '@supabase/supabase-js';
+import { secrets } from '../config/index.js';
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseUrl = secrets.supabaseUrl;
+const supabaseKey = secrets.supabaseServiceRoleKey;
 
 if (!supabaseUrl || !supabaseKey) {
   console.warn('[data/supabase] SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not set.');

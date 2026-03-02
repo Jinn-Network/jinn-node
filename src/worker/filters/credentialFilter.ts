@@ -9,6 +9,7 @@
  * independently from bridge capabilities.
  */
 
+import { config, secrets } from '../../config/index.js';
 import { workerLogger } from '../../logging/index.js';
 import { getServicePrivateKey } from '../../env/operate-profile.js';
 import {
@@ -115,7 +116,7 @@ const GITHUB_CAPABILITY = 'github';
  * Returns empty providers on any failure (bridge down, no URL, no key).
  */
 export async function probeCredentialBridge(requestId?: string): Promise<WorkerCredentialInfo> {
-  const bridgeUrl = process.env.X402_GATEWAY_URL;
+  const bridgeUrl = secrets.x402GatewayUrl;
   if (!bridgeUrl) {
     return { providers: new Set(), isTrusted: false };
   }
@@ -135,7 +136,7 @@ export async function probeCredentialBridge(requestId?: string): Promise<WorkerC
   try {
     const signer = createPrivateKeyHttpSigner(
       privateKey as `0x${string}`,
-      resolveChainId(process.env.CHAIN_ID || process.env.CHAIN_CONFIG || 'base'),
+      resolveChainId(String(config.chain.chainId)),
     );
     const body: { requestId?: string } = {};
     if (requestId) body.requestId = requestId;
@@ -189,12 +190,12 @@ export async function probeCredentialBridge(requestId?: string): Promise<WorkerC
  * and succeeds against ${GITHUB_API_URL}/user.
  */
 export async function probeOperatorCapabilities(): Promise<WorkerOperatorCapabilityInfo> {
-  const token = process.env.GITHUB_TOKEN;
+  const token = secrets.githubToken;
   if (!token) {
     return { capabilities: new Set(), isTrusted: false };
   }
 
-  const githubApiUrl = (process.env.GITHUB_API_URL || 'https://api.github.com').replace(/\/$/, '');
+  const githubApiUrl = config.git.githubApiUrl.replace(/\/$/, '');
   const url = `${githubApiUrl}/user`;
 
   try {

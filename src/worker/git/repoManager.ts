@@ -8,6 +8,7 @@ import { getRepoRoot, extractRepoName, getJinnWorkspaceDir } from '../../shared/
 import type { CodeMetadata } from '../../agent/shared/code_metadata.js';
 import { GIT_CLONE_TIMEOUT_MS, GIT_FETCH_TIMEOUT_MS } from '../constants.js';
 import { serializeError } from '../logging/errors.js';
+import { config, secrets } from '../../config/index.js';
 // Repo setup (gitignore, beads) now happens in jobRunner after branch checkout
 
 function buildGithubHttpsUrl(remoteUrl: string): string | null {
@@ -122,7 +123,7 @@ export async function ensureRepoCloned(remoteUrl: string, targetPath: string): P
   // If GITHUB_TOKEN is available, prefer HTTPS with token over SSH
   // This works in containers without SSH keys configured (e.g., Railway)
   let cloneUrl = normalizeSshUrl(remoteUrl);
-  const token = process.env.GITHUB_TOKEN;
+  const token = secrets.githubToken;
 
   if (token) {
     const httpsUrl = buildGithubHttpsUrl(remoteUrl);
@@ -151,7 +152,7 @@ export async function ensureRepoCloned(remoteUrl: string, targetPath: string): P
 
     if (authFailed) {
       const httpsUrl = buildGithubHttpsUrl(remoteUrl);
-      const token = process.env.GITHUB_TOKEN;
+      const token = secrets.githubToken;
       const authUrl = httpsUrl && token ? httpsUrl.replace('https://', `https://${token}@`) : httpsUrl;
 
       if (authUrl) {
@@ -215,7 +216,7 @@ export async function prepareRepoForJob(codeMetadata: CodeMetadata): Promise<str
   if (codeMetadata?.repo?.remoteUrl) {
     const repoName = extractRepoName(codeMetadata.repo.remoteUrl);
     if (repoName) {
-      const workspaceDir = getJinnWorkspaceDir();
+      const workspaceDir = config.git.workspaceDir;
       const repoRoot = `${workspaceDir}/${repoName}`;
       await ensureRepoCloned(codeMetadata.repo.remoteUrl, repoRoot);
       return repoRoot;

@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import fetch from 'cross-fetch';
 import { composeSinglePageResponse, decodeCursor } from './shared/context-management.js';
-import { getPonderGraphqlUrl } from './shared/env.js';
 import { getCurrentJobContext } from './shared/context.js';
+import { config } from '../../../config/index.js';
 
 const base = z.object({
   query: z.string().min(1).describe('Case-insensitive text to match against job name and description.'),
@@ -20,7 +20,7 @@ export const searchJobsSchema = {
 };
 
 async function fetchRequestsForJob(jobId: string, maxRequests: number): Promise<any[]> {
-  const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
+  const PONDER_GRAPHQL_URL = config.services.ponderUrl;
   const gql = `query GetJobRequests($jobId: String!, $limit: Int!) {
     requests(where: { sourceJobDefinitionId: $jobId }, 
             orderBy: "blockTimestamp", orderDirection: "desc", limit: $limit) {
@@ -58,7 +58,7 @@ export async function searchJobs(params: SearchJobsParams) {
     const context = getCurrentJobContext();
     const workstreamId = context.workstreamId;
 
-    const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
+    const PONDER_GRAPHQL_URL = config.services.ponderUrl;
 
     let jobs: any[] = [];
 

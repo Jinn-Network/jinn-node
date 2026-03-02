@@ -5,13 +5,13 @@
 import { deliverViaSafe } from '@jinn-network/mech-client-ts/dist/post_deliver.js';
 import { Web3 } from 'web3';
 import { workerLogger } from '../../logging/index.js';
-import { getOptionalMechChainConfig, getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
-import { getMechAddress, getServiceSafeAddress, getServicePrivateKey } from '../../env/operate-profile.js';
+import { getMechAddress, getServiceSafeAddress, getServicePrivateKey, getMechChainConfig } from '../../env/operate-profile.js';
 import { getActiveMechAddress } from '../rotation/ActiveServiceContext.js';
 import type { UnclaimedRequest, AgentExecutionResult, FinalStatus, IpfsMetadata, RecognitionPhaseResult, ReflectionResult } from '../types.js';
 import { buildDeliveryPayload } from './payload.js';
 import { checkDeliveryStatusViaPonder } from './ponderVerification.js';
 import { registerArtifactsOnChain } from './adwRegister.js';
+import { config } from '../../config/index.js';
 
 /**
  * Known Safe error codes for decoding revert reasons
@@ -104,7 +104,7 @@ const pendingDeliveries = new Map<string, { txHash: string; timestamp: number }>
 function clearStalePendingDeliveries(): void {
   const now = Date.now();
   const staleThreshold = 180000; // 3 minutes
-  
+
   for (const [requestId, delivery] of pendingDeliveries.entries()) {
     if (now - delivery.timestamp > staleThreshold) {
       workerLogger.debug({ requestId, staleTxHash: delivery.txHash, ageMs: now - delivery.timestamp }, 'Clearing stale pending delivery');
@@ -123,11 +123,11 @@ export async function isUndeliveredOnChain(params: {
   maxRetries?: number;
 }): Promise<boolean> {
   const { mechAddress, requestIdHex, rpcHttpUrl, maxRetries = 5 } = params; // Increase default retries
-  
+
   if (!rpcHttpUrl) return true; // best-effort: if no RPC provided, don't block delivery
-  
+
   let lastError: Error | undefined;
-  
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -159,48 +159,48 @@ export async function isUndeliveredOnChain(params: {
         }
 
         if (batchSize < BATCH_SIZE) break;
-        
+
         offset += BATCH_SIZE;
         if (offset > 20000) {
           workerLogger.warn({ requestIdHex, offset }, 'Exceeded safety limit while paging undelivered requests; assuming delivered');
           break;
         }
       }
-      
+
       if (!isUndelivered) {
         workerLogger.info({ requestIdHex, totalChecked: totalFetched }, 'RPC check: request not in undelivered set');
       }
-      
+
       return isUndelivered;
     } catch (error: any) {
       lastError = error;
-      
+
       if (attempt < maxRetries) {
         // Exponential backoff with jitter: 1s, 2s, 4s, 8s, 16s
         const baseBackoff = Math.pow(2, attempt - 1) * 1000;
         const jitter = Math.random() * 500; // Add 0-500ms jitter
         const backoffMs = baseBackoff + jitter;
-        
-        workerLogger.warn({ 
-          error: error?.message, 
-          attempt, 
+
+        workerLogger.warn({
+          error: error?.message,
+          attempt,
           maxRetries,
           backoffMs,
           requestIdHex
         }, `RPC delivery check failed (attempt ${attempt}/${maxRetries}, backoff ${Math.round(backoffMs)}ms): ${error?.message || 'unknown error'}`);
-        
+
         await new Promise(r => setTimeout(r, backoffMs));
       }
     }
   }
-  
+
   // After RPC retries exhausted, don't throw yet - let caller decide fallback strategy
-  workerLogger.error({ 
+  workerLogger.error({
     error: lastError?.message,
     attempts: maxRetries,
     requestIdHex
   }, `RPC verification failed after ${maxRetries} attempts: ${lastError?.message || 'unknown error'}`);
-  
+
   throw new RpcVerificationError(
     `RPC verification failed: ${lastError?.message}`,
     { attempts: maxRetries, lastError }
@@ -236,30 +236,30 @@ export async function wasRequestRevoked(params: {
       workerLogger.debug({ txHash, hasReceipt: !!receipt, hasLogs: !!receipt?.logs }, 'No logs in receipt');
       return false;
     }
-    
+
     // Parse logs for RevokeRequest event
     // Event signature: RevokeRequest(bytes32 requestId) - requestId is not indexed, so it's in data
     const contract = new (web3 as any).eth.Contract(abi, mechAddress);
     const revokeEventSignature = web3.utils.keccak256('RevokeRequest(bytes32)');
-    
-    workerLogger.debug({ 
-      txHash, 
-      totalLogs: receipt.logs.length, 
+
+    workerLogger.debug({
+      txHash,
+      totalLogs: receipt.logs.length,
       revokeEventSignature,
-      mechAddress 
+      mechAddress
     }, 'Checking logs for RevokeRequest');
-    
+
     for (const log of receipt.logs) {
-      workerLogger.debug({ 
-        logAddress: log.address, 
+      workerLogger.debug({
+        logAddress: log.address,
         logTopics: log.topics,
         logData: log.data,
         matchesAddress: log.address.toLowerCase() === mechAddress.toLowerCase(),
         matchesSignature: log.topics[0] === revokeEventSignature
       }, 'Inspecting log');
-      
-      if (log.topics[0] === revokeEventSignature && 
-          log.address.toLowerCase() === mechAddress.toLowerCase()) {
+
+      if (log.topics[0] === revokeEventSignature &&
+        log.address.toLowerCase() === mechAddress.toLowerCase()) {
         // Decode the requestId from the data field (not topics, since it's not indexed)
         // data field is the raw bytes32 requestId
         const decodedRequestId = log.data;
@@ -289,7 +289,7 @@ async function verifyUndeliveredStatus(params: {
   rpcHttpUrl?: string;
 }): Promise<boolean> {
   const { mechAddress, requestIdHex, requestId, rpcHttpUrl } = params;
-  
+
   // Strategy 1: Try RPC first (faster)
   try {
     const isUndelivered = await isUndeliveredOnChain({
@@ -298,36 +298,36 @@ async function verifyUndeliveredStatus(params: {
       rpcHttpUrl,
       maxRetries: 5,
     });
-    
-    workerLogger.info({ requestId, isUndelivered, method: 'rpc' }, 
+
+    workerLogger.info({ requestId, isUndelivered, method: 'rpc' },
       'Delivery status verified via RPC');
     return isUndelivered;
-    
+
   } catch (error: any) {
     if (error instanceof RpcVerificationError) {
-      workerLogger.warn({ requestId, error: error.message }, 
+      workerLogger.warn({ requestId, error: error.message },
         'RPC verification failed; falling back to Ponder');
-      
+
       // Strategy 2: Fallback to Ponder
       try {
         const ponderResult = await checkDeliveryStatusViaPonder({
           requestId,
           maxRetries: 3,
         });
-        
+
         if (ponderResult.error) {
-          workerLogger.error({ requestId, error: ponderResult.error }, 
+          workerLogger.error({ requestId, error: ponderResult.error },
             'Ponder verification also failed');
           throw new Error(`Both RPC and Ponder verification failed. RPC: ${error.message}, Ponder: ${ponderResult.error}`);
         }
-        
+
         const isUndelivered = !ponderResult.delivered;
-        workerLogger.info({ requestId, isUndelivered, method: 'ponder', txHash: ponderResult.txHash }, 
+        workerLogger.info({ requestId, isUndelivered, method: 'ponder', txHash: ponderResult.txHash },
           'Delivery status verified via Ponder (fallback)');
         return isUndelivered;
-        
+
       } catch (ponderError: any) {
-        workerLogger.error({ requestId, rpcError: error.message, ponderError: ponderError.message }, 
+        workerLogger.error({ requestId, rpcError: error.message, ponderError: ponderError.message },
           'Both RPC and Ponder verification failed');
         throw new Error(`Unable to verify delivery status via any method`);
       }
@@ -343,8 +343,8 @@ export async function deliverViaSafeTransaction(
   context: DeliveryTransactionContext
 ): Promise<{ tx_hash?: string; status?: string }> {
   workerLogger.info({ requestId: context.requestId }, '[DELIVERY_START] Function entered');
-  const chainConfig = getOptionalMechChainConfig() || 'base';
-  const rpcHttpUrl = getRequiredRpcUrl();
+  const chainConfig = getMechChainConfig() || 'base';
+  const rpcHttpUrl = config.chain.rpcUrl;
 
   // Always deliver through our own mech. The marketplace allows any mech to
   // deliver after cooldown, so we use the active service's mech + Safe regardless
@@ -427,20 +427,20 @@ export async function deliverViaSafeTransaction(
   const requestIdHex = String(context.requestId).startsWith('0x')
     ? String(context.requestId)
     : '0x' + BigInt(String(context.requestId)).toString(16);
-  
+
   // Clear stale pending deliveries before checking
   clearStalePendingDeliveries();
-  
+
   // Check if there's already a pending delivery for this request
   const pendingDelivery = pendingDeliveries.get(context.requestId);
   if (pendingDelivery) {
     const age = Date.now() - pendingDelivery.timestamp;
-    workerLogger.warn({ 
-      requestId: context.requestId, 
+    workerLogger.warn({
+      requestId: context.requestId,
       pendingTxHash: pendingDelivery.txHash,
       ageSeconds: Math.floor(age / 1000)
     }, 'Delivery already in progress for this request; will verify on-chain state');
-    
+
     // Try to get the transaction receipt to see if it actually succeeded
     try {
       const web3 = new Web3(rpcHttpUrl);
@@ -448,12 +448,12 @@ export async function deliverViaSafeTransaction(
       if (receipt) {
         // Transaction completed, clear from pending and check if successful
         pendingDeliveries.delete(context.requestId);
-        workerLogger.info({ 
-          requestId: context.requestId, 
+        workerLogger.info({
+          requestId: context.requestId,
           txHash: pendingDelivery.txHash,
-          status: receipt.status 
+          status: receipt.status
         }, 'Previous pending transaction completed');
-        
+
         if (receipt.status) {
           return { tx_hash: pendingDelivery.txHash, status: 'confirmed' };
         }
@@ -468,7 +468,7 @@ export async function deliverViaSafeTransaction(
       throw new Error('Delivery transaction already pending (status unknown)');
     }
   }
-  
+
   // For undelivered verification, always check the PRIORITY mech's undelivered list
   // (not our own mech, which wouldn't have the request in its list for cross-mech cases)
   const verifyMechAddress = context.request.mech;
@@ -480,7 +480,7 @@ export async function deliverViaSafeTransaction(
     rpcHttpUrl,
   });
   workerLogger.info({ requestId: context.requestId, isUndelivered }, '[DELIVERY_VERIFY] Verification complete');
-  
+
   if (!isUndelivered) {
     workerLogger.info({ requestId: context.requestId, requestIdHex }, 'Delivery preflight: request already delivered or revoked; skipping new Safe tx');
     throw new Error('Request already delivered');
@@ -517,10 +517,10 @@ export async function deliverViaSafeTransaction(
   workerLogger.info({ requestId: context.requestId }, '[DELIVERY_DEBUG] Starting delivery transaction attempt');
 
   // Get agent wallet address for nonce debugging
-  const web3ForNonce = new Web3(rpcHttpUrl || getRequiredRpcUrl());
+  const web3ForNonce = new Web3(rpcHttpUrl || config.chain.rpcUrl);
   const agentAccount = web3ForNonce.eth.accounts.privateKeyToAccount(privateKey);
   const agentAddress = agentAccount.address;
-  
+
   let delivery: any;
   // Increased retries for nonce issues - sometimes pending tx backlog needs time to clear
   const maxRetries = 5;
@@ -549,18 +549,18 @@ export async function deliverViaSafeTransaction(
         const backoffMs = Math.min(Math.pow(2, attempt) * 7500, 240000);
         workerLogger.info({ requestId: context.requestId, attempt, backoffMs, maxRetries }, 'Retrying Safe delivery');
         await new Promise(r => setTimeout(r, backoffMs));
-        
+
         // Re-check delivery status before retry
         try {
           const isUndelivered = await verifyUndeliveredStatus({
-              mechAddress: targetMechAddress,
-              requestIdHex,
-              requestId: context.requestId,
-              rpcHttpUrl,
+            mechAddress: targetMechAddress,
+            requestIdHex,
+            requestId: context.requestId,
+            rpcHttpUrl,
           });
           if (!isUndelivered) {
-               workerLogger.info({ requestId: context.requestId }, 'Request already delivered on retry check');
-               return { status: 'confirmed' };
+            workerLogger.info({ requestId: context.requestId }, 'Request already delivered on retry check');
+            return { status: 'confirmed' };
           }
         } catch (e: any) {
           // If we can't verify state on retry, fail fast
@@ -573,7 +573,7 @@ export async function deliverViaSafeTransaction(
         workerLogger.info({ requestId: context.requestId, attempt }, '[DELIVERY_DEBUG] Calling deliverViaSafe');
         delivery = await (deliverViaSafe as any)(payload);
         workerLogger.info({ requestId: context.requestId, txHash: delivery?.tx_hash, status: delivery?.status }, '[DELIVERY_DEBUG] deliverViaSafe returned');
-        
+
         // Track the transaction hash immediately after submission
         if (delivery?.tx_hash) {
           pendingDeliveries.set(context.requestId, {
@@ -582,7 +582,7 @@ export async function deliverViaSafeTransaction(
           });
           workerLogger.debug({ requestId: context.requestId, txHash: delivery.tx_hash }, 'Tracking delivery transaction');
         }
-        
+
         break; // Success
       } catch (e: any) {
         lastError = e;
@@ -623,52 +623,52 @@ export async function deliverViaSafeTransaction(
 
         // Only retry on specific transient errors
         if (e.message?.includes('nonce too low') || e.message?.includes('replacement transaction underpriced')) {
-           // Extract nonce info from error for debugging
-           const nonceMatch = e.message?.match(/next nonce (\d+), tx nonce (\d+)/);
-           const expectedNonce = nonceMatch ? nonceMatch[1] : 'unknown';
-           const usedNonce = nonceMatch ? nonceMatch[2] : 'unknown';
-           workerLogger.warn({ 
-             requestId: context.requestId, 
-             error: e.message,
-             expectedNonce,
-             usedNonce,
-             nonceGap: nonceMatch ? parseInt(nonceMatch[1]) - parseInt(nonceMatch[2]) : 'unknown',
-             attempt,
-             remainingRetries: maxRetries - attempt
-           }, 'Safe delivery nonce issue; will retry');
-           continue;
+          // Extract nonce info from error for debugging
+          const nonceMatch = e.message?.match(/next nonce (\d+), tx nonce (\d+)/);
+          const expectedNonce = nonceMatch ? nonceMatch[1] : 'unknown';
+          const usedNonce = nonceMatch ? nonceMatch[2] : 'unknown';
+          workerLogger.warn({
+            requestId: context.requestId,
+            error: e.message,
+            expectedNonce,
+            usedNonce,
+            nonceGap: nonceMatch ? parseInt(nonceMatch[1]) - parseInt(nonceMatch[2]) : 'unknown',
+            attempt,
+            remainingRetries: maxRetries - attempt
+          }, 'Safe delivery nonce issue; will retry');
+          continue;
         }
 
         // Handle "Transaction not found" - check if it actually succeeded on-chain
         if (e.message?.includes('Transaction not found')) {
-           workerLogger.warn({ requestId: context.requestId, error: e.message }, 'Transaction not found error; verifying on-chain status');
-           try {
-             const stillUndelivered = await verifyUndeliveredStatus({
-               mechAddress: targetMechAddress,
-               requestIdHex,
-               requestId: context.requestId,
-               rpcHttpUrl,
-             });
-             
-             if (!stillUndelivered) {
-               workerLogger.info({ requestId: context.requestId }, 'Recovered from Transaction not found - verified delivered via hybrid check');
-               // We don't have the hash, but we know it succeeded
-               return { status: 'confirmed', tx_hash: undefined }; 
-             }
-           } catch (verifyErr: any) {
-             workerLogger.error({ requestId: context.requestId, error: verifyErr.message }, 'Hybrid verification failed after Transaction not found');
-             throw verifyErr; // Propagate the error instead of continuing
-           }
+          workerLogger.warn({ requestId: context.requestId, error: e.message }, 'Transaction not found error; verifying on-chain status');
+          try {
+            const stillUndelivered = await verifyUndeliveredStatus({
+              mechAddress: targetMechAddress,
+              requestIdHex,
+              requestId: context.requestId,
+              rpcHttpUrl,
+            });
+
+            if (!stillUndelivered) {
+              workerLogger.info({ requestId: context.requestId }, 'Recovered from Transaction not found - verified delivered via hybrid check');
+              // We don't have the hash, but we know it succeeded
+              return { status: 'confirmed', tx_hash: undefined };
+            }
+          } catch (verifyErr: any) {
+            workerLogger.error({ requestId: context.requestId, error: verifyErr.message }, 'Hybrid verification failed after Transaction not found');
+            throw verifyErr; // Propagate the error instead of continuing
+          }
         }
 
         throw e; // Fail fast on other errors (no more timeout retries since we have 60s wait)
       }
     }
-    
+
     if (!delivery && lastError) throw lastError;
 
     workerLogger.info({ requestId: context.requestId, tx: delivery?.tx_hash, status: delivery?.status }, '[DELIVERY_DEBUG] Delivered via Safe - SUCCESS PATH');
-    
+
     // Check if the transaction actually revoked the request instead of delivering
     if (delivery?.tx_hash) {
       const wasRevoked = await wasRequestRevoked({
@@ -677,16 +677,16 @@ export async function deliverViaSafeTransaction(
         mechAddress: targetMechAddress,
         rpcHttpUrl,
       });
-      
+
       if (wasRevoked) {
         workerLogger.error({ requestId: context.requestId, tx: delivery.tx_hash }, 'Request was REVOKED instead of delivered - likely contract state issue');
         throw new Error('Request was revoked by the Mech contract during delivery');
       }
     }
-    
+
     // Best-effort ADW on-chain registration (non-blocking, never throws)
     if (context.artifactsForDelivery && context.artifactsForDelivery.length > 0) {
-      registerArtifactsOnChain(context.artifactsForDelivery).catch(() => {});
+      registerArtifactsOnChain(context.artifactsForDelivery).catch(() => { });
     }
 
     workerLogger.info({ requestId: context.requestId, txHash: delivery?.tx_hash }, '[DELIVERY_DEBUG] About to return from deliverViaSafeTransaction');
