@@ -102,7 +102,7 @@ poetry env use python3.11
 
 ### What to tell the human
 
-Only **3 things** require human input. Everything else in `.env` is pre-filled correctly.
+Only **3 things** require human input. Everything else is auto-configured via `jinn.yaml` (generated on first run).
 
 #### 1. RPC URL (required)
 
@@ -134,14 +134,14 @@ The worker uses Gemini to execute jobs. The human needs ONE of these:
 
 Recommend Option A for simplicity. If the human's machine has no browser (headless server), Option A is the only practical choice.
 
-### Setting up .env
+### Setting up .env (secrets only)
 
 ```bash
 cd jinn-node
 cp .env.example .env
 ```
 
-Then write ONLY the values that need changing:
+Then write ONLY the secrets that need human input:
 
 ```bash
 # These 3 values need human input — replace them:
@@ -150,19 +150,23 @@ OPERATE_PASSWORD=<the human's chosen password>
 GEMINI_API_KEY=<the human's API key>  # if using Option A
 ```
 
-**DO NOT modify these pre-filled values** — they are correct:
-- `PONDER_GRAPHQL_URL` — Jinn's indexer endpoint
-- `CONTROL_API_URL` — Jinn's control API endpoint
-- `X402_GATEWAY_URL` — Payment gateway
-- `STAKING_CONTRACT` — Jinn staking contract on Base
-- `WORKSTREAM_FILTER` — Growth Agency venture workstream ID
-- `WORKER_MECH_FILTER_MODE=staking` — Multi-operator mode: picks up requests for all staked mechs
-- `WORKER_STAKING_CONTRACT` — Staking contract used to discover peer mechs
-- `CHAIN_ID=8453` — Base chain ID
-
-**Optional values** (ask, but the human can skip):
+**Optional secrets** (ask, but the human can skip):
 - `GITHUB_TOKEN` — Strongly recommended if the node will work on code tasks. Personal access token from github.com/settings/tokens.
 - `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` — Commit identity for code tasks.
+
+### Configuration (jinn.yaml)
+
+`jinn.yaml` is auto-generated on first run with correct defaults for the Jinn network. **Do not create it manually.**
+
+The defaults include:
+- `chain.chain_id: 8453` — Base mainnet
+- `services.ponder_url` — Jinn's indexer endpoint
+- `services.control_api_url` — Jinn's control API endpoint
+- `staking.contract` — Jinn staking contract on Base
+- `worker.mech_filter_mode: staking` — Multi-operator mode
+- `filtering.workstreams` — Can be customized if needed
+
+To customize, edit `jinn.yaml` after first run. Legacy env var names (e.g., `WORKSTREAM_FILTER`, `CHAIN_ID`) also work as overrides.
 
 ---
 
@@ -370,21 +374,20 @@ If the operator wants to run their worker 24/7 without keeping a local machine o
    - Mount path: `/home/jinn`
    - This stores the encrypted keystore (`.operate/`) and Gemini credentials (`.gemini/`)
    - **Loss of this volume means loss of signing keys** — enable Railway backups
-5. **Set environment variables** in the Railway dashboard (Variables tab):
+5. **Set secrets** in the Railway dashboard (Variables tab):
 
-   Copy the values from your local `.env` file. The required variables are:
+   Copy secrets from your local `.env` file:
 
    | Variable | Description |
    |----------|-------------|
    | `RPC_URL` | Base chain RPC endpoint |
-   | `CHAIN_ID` | `8453` |
    | `OPERATE_PASSWORD` | Decrypts `.operate/` keystore |
    | `GEMINI_API_KEY` | Gemini API key |
    | `GITHUB_TOKEN` | For code task repo cloning |
    | `GIT_AUTHOR_NAME` | Git commit identity |
    | `GIT_AUTHOR_EMAIL` | Git commit identity |
 
-   Service endpoints (`PONDER_GRAPHQL_URL`, `CONTROL_API_URL`, `X402_GATEWAY_URL`) are pre-filled in `.env.example` and can be copied as-is.
+   Configuration values (chain ID, service URLs, polling intervals, etc.) are in `jinn.yaml`, which is auto-generated on first run. For Railway, `jinn.yaml` lives on the persistent volume.
 
 6. **Import `.operate/` into the volume.** Use `railway shell` to access the running container, then copy your local `.operate/` directory contents into `/home/jinn/.operate/`. Alternatively, use `railway volume` commands or the Railway CLI.
 
@@ -491,12 +494,17 @@ All wallet commands require `OPERATE_PASSWORD` and `RPC_URL` in `.env` (unless n
 
 ## Optional Configuration
 
-These environment variables are optional and can be added to `.env`:
+These settings can be customized in `jinn.yaml` (auto-generated on first run):
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `EARNING_SCHEDULE` | (unset — always earning) | Time window for job claiming, e.g. `22:00-08:00`. Overnight windows work. |
-| `EARNING_MAX_JOBS` | (unset — unlimited) | Max jobs per earning window |
+| YAML Path | Default | Description |
+|-----------|---------|-------------|
+| `filtering.earning_schedule` | (empty — always earning) | Time window for job claiming, e.g. `22:00-08:00`. Overnight windows work. |
+| `filtering.earning_max_jobs` | `0` (unlimited) | Max jobs per earning window |
+| `worker.poll_base_ms` | `30000` | Base polling interval |
+| `worker.poll_max_ms` | `300000` | Max idle polling interval |
+| `filtering.workstreams` | `[]` (all) | Restrict to specific workstream IDs |
+
+Legacy env var names (e.g., `EARNING_SCHEDULE`, `EARNING_MAX_JOBS`) also work as overrides in `.env`.
 
 ---
 
@@ -563,7 +571,7 @@ When reporting an issue, also describe:
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Worker can't connect to Ponder | Network issue or wrong URL | Verify `PONDER_GRAPHQL_URL` matches the pre-filled value in `.env.example` |
+| Worker can't connect to Ponder | Network issue or wrong URL | Check `jinn.yaml` has correct `services.ponder_url` (default is correct for Jinn network) |
 | Agent execution fails | LLM auth expired or invalid | Re-authenticate Gemini or check `GEMINI_API_KEY` |
 | Git clone fails during job | Missing `GITHUB_TOKEN` or SSH keys | Set `GITHUB_TOKEN` in `.env` for HTTPS clone access |
 

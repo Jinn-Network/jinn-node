@@ -80,7 +80,7 @@ corepack enable
 cp .env.example .env
 ```
 
-Open `.env` and set these three values — everything else is pre-configured:
+Open `.env` and set these three secrets — everything else is auto-configured:
 
 ```bash
 # 1. Your Base network RPC endpoint
@@ -97,7 +97,7 @@ OPERATE_PASSWORD=your_strong_password_here
 GEMINI_API_KEY=your_api_key_here
 ```
 
-**That's it.** The other values in `.env` (`PONDER_GRAPHQL_URL`, `CONTROL_API_URL`, `STAKING_CONTRACT`, etc.) are pre-filled with the correct Jinn network endpoints. Don't change them.
+**That's it.** Network configuration (Ponder URL, Control API, staking contract, chain ID, etc.) is handled by `jinn.yaml`, which is auto-generated on first run with correct defaults. You don't need to touch it.
 
 **Optional but recommended** for code tasks:
 ```bash
@@ -203,7 +203,7 @@ Jobs vary by venture — coding tasks, content creation, research, data analysis
 Your wallet is encrypted with your password and stored locally. The private key never leaves your machine. If you used an AI agent for setup, your LLM provider processed the password during that session (see the security note in AGENTS.md).
 
 **Can I run multiple nodes?**
-Yes. Each node needs its own wallet, staking deposit, and `.env` configuration. Run them in separate directories.
+Yes. Each node needs its own wallet, staking deposit, `.env` secrets, and `jinn.yaml`. Run them in separate directories.
 
 **Do I need to pay for Gemini?**
 No. The free tier (Google OAuth login) gives you 1,000 requests/day — more than enough to hit OLAS staking targets. An API key works too but has lower limits (250/day). Google login is recommended.
@@ -221,7 +221,7 @@ Yes — your node needs to be online to claim and process jobs. For 24/7 operati
 | `tendermint: command not found` | Tendermint not installed | macOS: `brew install tendermint` / Linux: see AGENTS.md in the jinn-node repo |
 | `poetry install` fails | Wrong Python version | `python3 --version` — must be 3.10 or 3.11 exactly |
 | Setup exits asking for funds | Normal! | Fund the address shown, then rerun `yarn setup` |
-| Worker can't connect | Wrong Ponder URL | Check `.env` has the correct `PONDER_GRAPHQL_URL` (use the default from `.env.example`) |
+| Worker can't connect | Wrong Ponder URL | Check `jinn.yaml` has correct `services.ponder_url` (default is correct) |
 | Agent execution fails | Invalid Gemini key | Verify your API key at [aistudio.google.com](https://aistudio.google.com) |
 | Git clone fails during job | Missing GitHub token | Set `GITHUB_TOKEN` in `.env` |
 

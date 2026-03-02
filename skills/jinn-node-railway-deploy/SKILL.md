@@ -89,8 +89,9 @@ Workers do **not** carry third-party API keys (Twitter, Umami, Supabase, etc.). 
 - **On-chain identity** (`.operate/`): Contains private keys, wallets, and service configs. Imported to volume at `/home/jinn/.operate`. Used for ERC-8128 signed HTTP requests to the Control API.
 - **LLM auth** (`.gemini/`): Contains Gemini CLI OAuth tokens. Imported to `/home/jinn/.gemini`. Alternatively, set `GEMINI_API_KEY` in `.env`.
 - **Third-party credentials**: Served at runtime by the credential bridge at `X402_GATEWAY_URL`. The worker probes the bridge at startup and on each job claim to discover which credential providers are available. No API keys in `.env`.
+- **Configuration**: `jinn.yaml` (auto-generated on volume) contains service URLs, chain config, worker tuning, and feature flags. Secrets (RPC_URL, OPERATE_PASSWORD, GEMINI_API_KEY, GITHUB_TOKEN) stay in `.env`.
 
-This means `.env` should contain only infrastructure URLs, staking config, and git identity — not secrets for external services.
+This means `.env` should contain only secrets and git identity — not infrastructure URLs or worker configuration.
 
 ## Runtime contract reminders
 

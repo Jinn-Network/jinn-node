@@ -12,9 +12,10 @@ Run a jinn-node worker in a Docker container.
 ## Quick Start
 
 ```bash
-# 1. Configure environment
+# 1. Configure secrets
 cp .env.example .env
 # Edit .env: set RPC_URL, OPERATE_PASSWORD, and optionally GEMINI_API_KEY
+# Config values are in jinn.yaml (auto-generated on first run)
 
 # 2. Import credentials into the persistent volume
 docker volume create jinn-node_node-data
@@ -33,21 +34,21 @@ docker compose logs -f worker
 
 ## Environment Variables
 
-### Required
+### Required Secrets (.env)
 
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `RPC_URL` | Base chain RPC endpoint | `https://base-mainnet.g.alchemy.com/v2/KEY` |
-| `CHAIN_ID` | Network ID | `8453` |
 | `OPERATE_PASSWORD` | Decrypts `.operate/` keystore (min 8 chars) | — |
 
-### Service Endpoints (defaults to hosted infrastructure)
+### Service Endpoints (jinn.yaml — auto-configured)
 
-| Variable | Default |
-|----------|---------|
-| `PONDER_GRAPHQL_URL` | `https://indexer.jinn.network/graphql` |
-| `CONTROL_API_URL` | `https://control-api-production-c1f5.up.railway.app/graphql` |
-| `X402_GATEWAY_URL` | `https://x402-gateway-production-1b84.up.railway.app` |
+These are set in `jinn.yaml` (auto-generated with correct defaults). Override only if needed:
+
+| YAML Path | Default | Env Override |
+|-----------|---------|-------------|
+| `services.ponder_url` | `https://indexer.jinn.network/graphql` | `PONDER_GRAPHQL_URL` |
+| `services.control_api_url` | `https://control-api-production-c1f5.up.railway.app/graphql` | `CONTROL_API_URL` |
 
 ### Optional
 
@@ -67,7 +68,7 @@ docker compose logs -f worker
 
 | Variable | Value | Reason |
 |----------|-------|--------|
-| `GEMINI_SANDBOX` | `false` | macOS `sandbox-exec` unavailable in Linux containers |
+| `GEMINI_SANDBOX` | `false` | Overrides `agent.sandbox` in jinn.yaml — macOS `sandbox-exec` unavailable in Linux containers |
 | `OPERATE_PROFILE_DIR` | `/home/jinn/.operate` | Volume mount path |
 | `NODE_ENV` | `production` | Runtime optimization |
 

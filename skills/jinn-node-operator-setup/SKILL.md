@@ -47,12 +47,12 @@ cd jinn-node
 cp .env.example .env
 ```
 
-Collect and set required values:
+Collect and set **secrets only** in `.env`:
 - `RPC_URL`
 - `OPERATE_PASSWORD`
 - Gemini auth (`GEMINI_API_KEY` or existing Gemini CLI OAuth)
 
-Strongly encouraged input (for coding-job participation):
+Strongly encouraged (for coding-job participation):
 - `GITHUB_TOKEN` (treat as effectively required for most coding ventures)
 
 Recommended with `GITHUB_TOKEN`:
@@ -61,7 +61,7 @@ Recommended with `GITHUB_TOKEN`:
 
 If operator declines `GITHUB_TOKEN`, explicitly warn that coding-job participation will be limited or fail, then require acknowledgement before continuing.
 
-Do not change prefilled endpoint defaults unless requested.
+**Configuration:** `jinn.yaml` is auto-generated on first run with correct Jinn network defaults (chain ID, service URLs, staking contract, filter mode). Do not create or edit it unless the operator has specific customization needs.
 
 ### 3. Install dependencies
 
