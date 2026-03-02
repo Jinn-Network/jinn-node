@@ -19,6 +19,7 @@ import { execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRpcProvider } from '../src/config/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -139,7 +140,7 @@ async function collectWalletAndStaking() {
   if (process.env.RPC_URL && (result.masterEOA || result.masterSafe)) {
     try {
       const { ethers } = await import('ethers');
-      const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+      const provider = createRpcProvider(process.env.RPC_URL);
       const OLAS = '0x54330d28ca3357F294334BDC454a032e7f353416';
       const erc20 = new ethers.Contract(OLAS, ['function balanceOf(address) view returns (uint256)'], provider);
 

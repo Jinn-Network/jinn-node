@@ -8,7 +8,7 @@
 
 import { ethers } from 'ethers';
 import { workerLogger } from '../../logging/index.js';
-import { getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
+import { getRequiredRpcUrl, createRpcProvider } from '../../config/index.js';
 import { getServicePrivateKey } from '../../env/operate-profile.js';
 
 const log = workerLogger.child({ component: 'CHECKPOINT' });
@@ -25,7 +25,7 @@ const STAKING_ABI = [
  */
 export async function maybeCallCheckpoint(stakingContract: string): Promise<void> {
   const rpcUrl = getRequiredRpcUrl();
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(rpcUrl);
 
   const contract = new ethers.Contract(stakingContract, STAKING_ABI, provider);
 

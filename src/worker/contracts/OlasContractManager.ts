@@ -8,6 +8,7 @@
  */
 
 import { Contract, JsonRpcProvider, keccak256, toUtf8Bytes, TransactionReceipt } from 'ethers';
+import { createRpcProvider } from '../../config/index.js';
 import { TransactionRequest, TransactionPayload } from '../types/transaction.js';
 import { 
   AGENT_REGISTRY_ABI, 
@@ -49,7 +50,7 @@ export class OlasContractManager {
   private addresses: ContractAddresses;
 
   constructor(rpcUrl: string, addresses: ContractAddresses) {
-    this.provider = new JsonRpcProvider(rpcUrl);
+    this.provider = createRpcProvider(rpcUrl);
     this.addresses = addresses;
 
     contractLogger.info({

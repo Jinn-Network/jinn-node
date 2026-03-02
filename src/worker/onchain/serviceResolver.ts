@@ -17,6 +17,7 @@
 
 import { ethers } from 'ethers';
 import { workerLogger } from '../../logging/index.js';
+import { createRpcProvider } from '../../config/index.js';
 
 const log = workerLogger.child({ component: 'SERVICE_RESOLVER' });
 
@@ -63,7 +64,7 @@ export async function resolveServiceConfig(
   const cached = _cachedByMech.get(mechKey);
   if (cached) return cached;
 
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(rpcUrl);
   const mech = new ethers.Contract(mechAddress, MECH_ABI, provider);
 
   // Step 1: Read tokenId and marketplace from mech

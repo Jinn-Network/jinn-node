@@ -18,6 +18,7 @@ import 'dotenv/config';
 import { parseArgs } from 'util';
 import { ethers } from 'ethers';
 import { OlasOperateWrapper } from '../../src/worker/OlasOperateWrapper.js';
+import { createRpcProvider } from '../../src/config/index.js';
 
 // OLAS token address on Base
 const OLAS_TOKEN_BASE = '0x54330d28ca3357F294334BDC454a032e7f353416';
@@ -120,7 +121,7 @@ Recovery steps:
 
   // Create wrapper and start daemon
   const wrapper = await OlasOperateWrapper.create({ rpcUrl });
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(rpcUrl);
 
   try {
     await wrapper.startServer();

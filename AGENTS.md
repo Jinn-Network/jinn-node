@@ -106,15 +106,16 @@ Only **3 things** require human input. Everything else in `.env` is pre-filled c
 
 #### 1. RPC URL (required)
 
-Ask the human for a Base network RPC URL. If they don't have one, explain:
+**Recommended:** Use the Jinn RPC proxy at `https://rpc.jinn.network`. This requires an `RPC_PROXY_TOKEN` — ask the Jinn team for one if the operator doesn't have it.
 
-> "You need an RPC endpoint for Base (the L2 blockchain). You can get a free one from Alchemy, Infura, or QuickNode. The simplest option is Alchemy — create a free account at alchemy.com, create a Base Mainnet app, and copy the HTTPS URL."
+```bash
+RPC_URL=https://rpc.jinn.network
+RPC_PROXY_TOKEN=<token from Jinn team>
+```
 
-If they want to get started fast, Base has a public RPC they can use temporarily:
-```
-https://mainnet.base.org
-```
-Note: the public RPC has rate limits and is not recommended for production.
+**How auth works:** The proxy expects a `Authorization: Bearer <token>` header. The frontend (viem) handles this natively. jinn-node (ethers.js) uses `ethers.FetchRequest` to attach the header when `RPC_PROXY_TOKEN` is set — see `src/config/index.ts`.
+
+**Fallback:** If the operator has their own RPC, they can set `RPC_URL` directly (e.g. Alchemy, Tenderly) and leave `RPC_PROXY_TOKEN` unset.
 
 #### 2. OPERATE_PASSWORD (required)
 
@@ -144,8 +145,9 @@ cp .env.example .env
 Then write ONLY the values that need changing:
 
 ```bash
-# These 3 values need human input — replace them:
-RPC_URL=<the human's RPC URL>
+# These values need human input — replace them:
+RPC_URL=https://rpc.jinn.network
+RPC_PROXY_TOKEN=<token from Jinn team>
 OPERATE_PASSWORD=<the human's chosen password>
 GEMINI_API_KEY=<the human's API key>  # if using Option A
 ```
@@ -318,7 +320,8 @@ If the operator wants to run their worker 24/7 without keeping a local machine o
 
    | Variable | Description |
    |----------|-------------|
-   | `RPC_URL` | Base chain RPC endpoint |
+   | `RPC_URL` | Base chain RPC endpoint (`https://rpc.jinn.network`) |
+   | `RPC_PROXY_TOKEN` | Bearer token for rpc.jinn.network (omit if using direct RPC) |
    | `CHAIN_ID` | `8453` |
    | `OPERATE_PASSWORD` | Decrypts `.operate/` keystore |
    | `GEMINI_API_KEY` | Gemini API key |
