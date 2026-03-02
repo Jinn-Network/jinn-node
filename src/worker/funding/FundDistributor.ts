@@ -17,6 +17,7 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { workerLogger } from '../../logging/index.js';
 import { getMasterSafe, getMasterPrivateKey, getMiddlewarePath } from '../../env/operate-profile.js';
+import { createRpcProvider } from '../../config/index.js';
 import type { ServiceInfo } from '../ServiceConfigReader.js';
 
 // Handle ESM/CJS interop for Safe SDK
@@ -107,7 +108,7 @@ export async function maybeDistributeFunds(
     return result;
   }
 
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(rpcUrl);
   const masterBalance = await provider.getBalance(masterSafeAddress);
 
   log.info({
@@ -201,7 +202,7 @@ export async function maybeDistributeFunds(
 
   try {
     const safeSdk = await Safe.init({
-      provider: rpcUrl,
+      provider: createRpcProvider(rpcUrl),
       signer: masterPrivateKey,
       safeAddress: masterSafeAddress,
     });

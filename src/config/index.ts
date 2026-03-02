@@ -17,6 +17,7 @@
  */
 
 import { z } from 'zod';
+import { ethers } from 'ethers';
 import {
   getMechAddress as getOperateMechAddress,
   getServiceSafeAddress,
@@ -35,6 +36,10 @@ const coreBlockchainSchema = z.object({
   // RPC_URL: Canonical HTTP(S) RPC endpoint
   // Legacy aliases: MECHX_CHAIN_RPC, MECH_RPC_HTTP_URL, BASE_RPC_URL
   RPC_URL: z.string().url('RPC_URL must be a valid HTTP/HTTPS URL'),
+
+  // RPC_PROXY_TOKEN: Bearer token for authenticated RPC proxy (rpc.jinn.network)
+  // When set, all ethers JsonRpcProvider instances get an Authorization header
+  RPC_PROXY_TOKEN: z.string().optional(),
 
   // CHAIN_ID: Network identifier (8453 = Base mainnet, 84532 = Base Sepolia)
   CHAIN_ID: z.coerce.number().int().positive('CHAIN_ID must be a positive integer'),
@@ -604,6 +609,26 @@ export function getRequiredRpcUrl(): string {
     throw new Error('RPC_URL is required but not configured');
   }
   return value;
+}
+
+export function getOptionalRpcProxyToken(): string | undefined {
+  return getConfig().RPC_PROXY_TOKEN;
+}
+
+/**
+ * Create a JsonRpcProvider with optional Bearer token auth for rpc.jinn.network.
+ * When RPC_PROXY_TOKEN is set, uses ethers FetchRequest to attach the Authorization header.
+ * When unset, creates a plain JsonRpcProvider.
+ */
+export function createRpcProvider(rpcUrl?: string): ethers.JsonRpcProvider {
+  const url = rpcUrl ?? getRequiredRpcUrl();
+  const token = getOptionalRpcProxyToken();
+  if (token) {
+    const fetchRequest = new ethers.FetchRequest(url);
+    fetchRequest.setHeader('Authorization', `Bearer ${token}`);
+    return new ethers.JsonRpcProvider(fetchRequest);
+  }
+  return new ethers.JsonRpcProvider(url);
 }
 
 export function getRequiredChainId(): number {

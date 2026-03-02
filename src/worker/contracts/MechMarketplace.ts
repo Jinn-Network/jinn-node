@@ -8,6 +8,7 @@
  */
 
 import { Contract, Interface, JsonRpcProvider, Wallet, parseUnits, zeroPadValue, toBeHex } from 'ethers';
+import { createRpcProvider } from '../../config/index.js';
 import { logger } from '../../logging/index.js';
 
 const mechLogger = logger.child({ component: 'MECH-MARKETPLACE' });
@@ -125,7 +126,7 @@ export class MechMarketplace {
   private marketplaceAddress: string;
 
   constructor(rpcUrl: string, chain: string, marketplaceAddress?: string) {
-    this.provider = new JsonRpcProvider(rpcUrl);
+    this.provider = createRpcProvider(rpcUrl);
     this.chain = chain.toLowerCase();
     this.marketplaceAddress = marketplaceAddress || DEFAULT_MECH_MARKETPLACE_ADDRESSES[this.chain];
 

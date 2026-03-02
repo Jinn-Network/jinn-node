@@ -23,7 +23,7 @@ import { enableMechMarketplaceInConfig, DEFAULT_MECH_DELIVERY_RATE } from '../..
 import { listServiceConfigs, cleanupUndeployedConfigs } from '../../src/worker/ServiceConfigReader.js';
 import { printHeader, printStep, printFundingRequirements, printSuccess, printError } from '../../src/setup/display.js';
 import { ethers } from 'ethers';
-import { getOptionalMechChainConfig } from '../../src/config/index.js';
+import { getOptionalMechChainConfig, createRpcProvider } from '../../src/config/index.js';
 
 const OLAS_TOKEN_BASE = '0x54330d28ca3357F294334BDC454a032e7f353416';
 const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
@@ -218,7 +218,7 @@ async function main() {
     // Preflight: check staking slots
     printStep('active', 'Checking staking contract slots...');
     try {
-      const provider = new ethers.JsonRpcProvider(rpcUrl);
+      const provider = createRpcProvider(rpcUrl);
       const stakingContractInstance = new ethers.Contract(stakingContract, STAKING_ABI, provider);
       const serviceIds = await stakingContractInstance.getServiceIds();
       console.log(`      Staked services: ${serviceIds.length}`);
@@ -235,7 +235,7 @@ async function main() {
     // Preflight: check OLAS balance on Master Safe
     printStep('active', 'Checking Master Safe OLAS balance...');
     try {
-      const provider = new ethers.JsonRpcProvider(rpcUrl);
+      const provider = createRpcProvider(rpcUrl);
       const olasContract = new ethers.Contract(OLAS_TOKEN_BASE, ERC20_ABI, provider);
       const olasBalance = await olasContract.balanceOf(masterSafe);
       const formatted = ethers.formatEther(olasBalance);

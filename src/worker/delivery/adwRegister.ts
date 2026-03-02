@@ -10,7 +10,7 @@
 
 import { ethers } from 'ethers';
 import { workerLogger } from '../../logging/index.js';
-import { getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
+import { getRequiredRpcUrl, createRpcProvider } from '../../config/index.js';
 import { getServicePrivateKey } from '../../env/operate-profile.js';
 
 const log = workerLogger.child({ component: 'ADW_REGISTER' });
@@ -52,7 +52,7 @@ export async function registerArtifactsOnChain(
     return;
   }
 
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(rpcUrl);
   const wallet = new ethers.Wallet(privateKey, provider);
   const registry = new ethers.Contract(DOCUMENT_REGISTRY_ADDRESS, DOCUMENT_REGISTRY_ABI, wallet);
 

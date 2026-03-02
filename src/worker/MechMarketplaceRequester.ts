@@ -15,6 +15,7 @@ import { ethers } from 'ethers';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { logger } from '../logging/index.js';
+import { createRpcProvider } from '../config/index.js';
 import { pushMetadataToIpfs } from '@jinn-network/mech-client-ts/dist/ipfs.js';
 
 const requestLogger = logger.child({ component: 'MECH-MARKETPLACE-REQUESTER' });
@@ -142,7 +143,7 @@ export async function submitMarketplaceRequest(
     }, 'Submitting marketplace request via Safe');
 
     // 1. Setup provider and wallet
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const provider = createRpcProvider(rpcUrl);
     const agentWallet = new ethers.Wallet(agentEoaPrivateKey, provider);
 
     // 2. Check Safe balance

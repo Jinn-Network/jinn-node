@@ -13,6 +13,7 @@ import { ethers } from 'ethers';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { workerLogger } from '../../logging/index.js';
+import { createRpcProvider } from '../../config/index.js';
 import { OlasOperateWrapper } from '../OlasOperateWrapper.js';
 
 const log = workerLogger.child({ component: 'AUTO-RESTAKE' });
@@ -187,7 +188,7 @@ async function readServiceConfigsFromDisk(): Promise<Array<{
 export async function checkAndRestakeServices(options: CheckAndRestakeOptions): Promise<RestakeResult[]> {
   const { rpcUrl, operatePassword, serviceFilter, dryRun } = options;
   const results: RestakeResult[] = [];
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(rpcUrl);
 
   // Phase 1: Read from disk + check on-chain state (no daemon needed)
   const diskConfigs = await readServiceConfigsFromDisk();

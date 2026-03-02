@@ -637,7 +637,8 @@ export class OlasServiceManager {
       try {
         // Use ethers to check balance directly via RPC
         const { ethers } = await import('ethers');
-        const provider = new ethers.JsonRpcProvider(rpcUrl);
+        const { createRpcProvider } = await import('../config/index.js');
+        const provider = createRpcProvider(rpcUrl);
         const balance = await provider.getBalance(walletAddress);
         const balanceEth = ethers.formatEther(balance);
         const expectedEth = ethers.formatEther(expectedAmount);

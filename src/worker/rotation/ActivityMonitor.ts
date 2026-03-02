@@ -21,6 +21,7 @@
 
 import { ethers } from 'ethers';
 import { logger } from '../../logging/index.js';
+import { createRpcProvider } from '../../config/index.js';
 
 const rotationLogger = logger.child({ component: 'ACTIVITY-MONITOR' });
 
@@ -138,7 +139,7 @@ export class ActivityMonitor {
   private dashboardCache = new Map<string, ContractDashboardCache>();
 
   constructor(rpcUrl: string, cacheTtlMs: number = 60_000) {
-    this.provider = new ethers.JsonRpcProvider(rpcUrl);
+    this.provider = createRpcProvider(rpcUrl);
     this.cacheTtlMs = cacheTtlMs;
   }
 

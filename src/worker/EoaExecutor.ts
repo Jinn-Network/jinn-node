@@ -35,7 +35,8 @@ import {
   getRequiredChainId,
   getWorkerTxConfirmations,
   getRequiredRpcUrl,
-  getRequiredWorkerPrivateKey
+  getRequiredWorkerPrivateKey,
+  createRpcProvider,
 } from '../config/index.js';
 
 // Create a child logger for EOA executor operations
@@ -57,7 +58,7 @@ export class EoaExecutor implements ITransactionExecutor {
     const rpcUrl = getRequiredRpcUrl();
     const privateKey = getRequiredWorkerPrivateKey();
 
-    this.provider = new ethers.JsonRpcProvider(rpcUrl);
+    this.provider = createRpcProvider(rpcUrl);
     this.signer = new ethers.Wallet(privateKey, this.provider);
 
     eoaLogger.info('EoaExecutor initialized');

@@ -13,6 +13,7 @@ import { ethers } from 'ethers';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { listServiceConfigs, type ServiceInfo } from '../../src/worker/ServiceConfigReader.js';
+import { createRpcProvider } from '../../src/config/index.js';
 
 const MECH_ABI = ['function maxDeliveryRate() view returns (uint256)'] as const;
 
@@ -62,7 +63,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(rpcUrl);
   let mismatches = 0;
   let errors = 0;
 

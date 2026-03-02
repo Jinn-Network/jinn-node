@@ -15,6 +15,7 @@ import 'dotenv/config';
 import { parseArgs } from 'util';
 import { OlasOperateWrapper } from '../../src/worker/OlasOperateWrapper.js';
 import { ethers } from 'ethers';
+import { createRpcProvider } from '../../src/config/index.js';
 
 // OLAS token address on Base
 const OLAS_TOKEN_BASE = '0x54330d28ca3357F294334BDC454a032e7f353416';
@@ -123,7 +124,7 @@ Options:
       process.exit(1);
     }
 
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const provider = createRpcProvider(rpcUrl);
 
     // Build withdraw_assets payload
     const withdrawAssets: Record<string, Record<string, string>> = {};

@@ -10,6 +10,7 @@
 import 'dotenv/config';
 import { OlasOperateWrapper } from '../../src/worker/OlasOperateWrapper.js';
 import { ethers } from 'ethers';
+import { createRpcProvider } from '../../src/config/index.js';
 
 // OLAS token address on Base
 const OLAS_TOKEN_BASE = '0x54330d28ca3357F294334BDC454a032e7f353416';
@@ -72,7 +73,7 @@ async function main() {
     // Setup provider for balance queries
     let provider: ethers.JsonRpcProvider | null = null;
     if (rpcUrl) {
-      provider = new ethers.JsonRpcProvider(rpcUrl);
+      provider = createRpcProvider(rpcUrl);
     }
 
     console.log('═══════════════════════════════════════════════════════════════');

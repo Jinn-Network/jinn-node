@@ -17,7 +17,7 @@
 
 import { ethers } from 'ethers';
 import { workerLogger } from '../../logging/index.js';
-import { getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
+import { getRequiredRpcUrl, createRpcProvider } from '../../config/index.js';
 import { getServicePrivateKey, getServiceSafeAddress, getMechAddress } from '../../env/operate-profile.js';
 // NOTE: getServiceSafeAddress is only used for the warning log comparing worker vs staking multisig
 import { submitMarketplaceRequest } from '../MechMarketplaceRequester.js';
@@ -62,7 +62,7 @@ async function getRequestDeficit(
   marketplaceAddress: string,
 ): Promise<{ deficit: number; current: number; target: number; epochSecondsRemaining: number; multisig: string }> {
   const rpcUrl = getRequiredRpcUrl();
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(rpcUrl);
 
   const staking = new ethers.Contract(stakingContract, STAKING_ABI, provider);
   const marketplace = new ethers.Contract(marketplaceAddress, MARKETPLACE_ABI, provider);

@@ -14,7 +14,7 @@
 
 import { ethers } from 'ethers';
 import { workerLogger } from '../../logging/index.js';
-import { getRequiredRpcUrl } from '../../agent/mcp/tools/shared/env.js';
+import { getRequiredRpcUrl, createRpcProvider } from '../../config/index.js';
 import { computeProjectedEpochTarget, readNonNegativeIntEnv, readPositiveIntEnv } from './target.js';
 
 const log = workerLogger.child({ component: 'EPOCH_GATE' });
@@ -119,7 +119,7 @@ export async function checkEpochGate(
 
   try {
     const rpcUrl = getRequiredRpcUrl();
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const provider = createRpcProvider(rpcUrl);
     const stakingContract = new ethers.Contract(stakingContractAddress, STAKING_ABI, provider);
     const marketplace = new ethers.Contract(marketplaceAddress, MARKETPLACE_ABI, provider);
 

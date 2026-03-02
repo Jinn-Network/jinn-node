@@ -13,6 +13,7 @@ import 'dotenv/config';
 import { ethers } from 'ethers';
 import { getMasterPrivateKey } from '../../src/env/operate-profile.js';
 import { getServiceSafeAddress } from '../../src/env/operate-profile.js';
+import { createRpcProvider } from '../../src/config/index.js';
 
 const JINN_STAKING = process.env.STAKING_CONTRACT || '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139';
 const SERVICE_ID = parseInt(process.env.SERVICE_ID || '165');
@@ -33,7 +34,7 @@ const SAFE_ABI = [
 
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
-  const provider = new ethers.JsonRpcProvider(RPC_URL);
+  const provider = createRpcProvider(RPC_URL);
 
   const staking = new ethers.Contract(JINN_STAKING, STAKING_ABI, provider);
   const serviceInfo = await staking.getServiceInfo(SERVICE_ID);
