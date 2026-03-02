@@ -338,7 +338,7 @@ async function main() {
 
   // Determine chain and RPC URL
   const chain = args.chain || getMechChainConfig() || 'base';
-  const rpcUrl = config.chain.rpcUrl;
+  const rpcUrl = secrets.rpcUrl;
 
   if (!rpcUrl) {
     printStep('error', 'RPC_URL is required');

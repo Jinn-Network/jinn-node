@@ -38,9 +38,9 @@ export interface WorkerConfig {
 export const workerConfig: WorkerConfig = {
   get WORKER_PRIVATE_KEY() { return getServicePrivateKey() || undefined; },
   get CHAIN_ID() { return nodeConfig.chain.chainId; },
-  get RPC_URL() { return nodeConfig.chain.rpcUrl; },
+  get RPC_URL() { return secrets.rpcUrl || ''; },
   get JINN_WALLET_STORAGE_PATH() { return process.env.JINN_WALLET_STORAGE_PATH; },
-  get TEST_RPC_URL() { return nodeConfig.dev.testRpcUrl; },
+  get TEST_RPC_URL() { return secrets.testRpcUrl; },
   get DISABLE_STS_CHECKS() { return nodeConfig.dev.disableStsChecks; },
   get SUPABASE_URL() { return secrets.supabaseUrl; },
   get SUPABASE_SERVICE_ROLE_KEY() { return secrets.supabaseServiceRoleKey; },

@@ -18,7 +18,7 @@ import { get_mech_config } from '@jinn-network/mech-client-ts/dist/config.js';
 import { dispatchViaSafe } from '../safe-dispatch.js';
 import type { Venture } from '../../data/ventures.js';
 import type { ScheduleEntry } from '../../data/types/scheduleEntry.js';
-import { config } from '../../config/index.js';
+import { config, secrets } from '../../config/index.js';
 
 type DispatchFromTemplateOptions = {
   /**
@@ -148,7 +148,7 @@ export async function dispatchFromTemplate(
   const mechAddress = getMechAddress();
   const privateKey = getServicePrivateKey();
   const safeAddress = getServiceSafeAddress();
-  const rpcHttpUrl = config.chain.rpcUrl;
+  const rpcHttpUrl = secrets.rpcUrl;
   const chainConfig = getMechChainConfig();
 
   if (!mechAddress) {

@@ -30,7 +30,6 @@ const boolCoerce = z.union([z.boolean(), z.string(), z.number()])
 // ============================================================================
 
 export const chainSchema = z.object({
-    rpc_url: z.string().default(''),
     chain_id: z.coerce.number().int().default(8453),
 });
 
@@ -108,7 +107,7 @@ export const servicesSchema = z.object({
     ponder_end_block: z.coerce.number().int().nonnegative().optional(),
     control_api_url: z.string().default('https://control-api-production-c1f5.up.railway.app/graphql'),
     control_api_port: z.coerce.number().int().positive().optional(),
-    control_api_service_key: z.string().default(''),
+
     use_control_api: boolCoerce.default(true),
     ipfs_gateway_url: z.string().default('https://gateway.autonolas.tech/ipfs/'),
     ipfs_fetch_timeout_ms: z.coerce.number().int().positive().default(30000),
@@ -162,7 +161,7 @@ export const devSchema = z.object({
     runtime_environment: z.enum(['default', 'test', 'review']).default('default'),
     dry_run: boolCoerce.default(false),
     disable_sts_checks: boolCoerce.default(false),
-    test_rpc_url: z.string().default(''),
+
     mcp_debug_mech_client: boolCoerce.default(false),
     use_tsx_mcp: boolCoerce.default(false),
     enable_transaction_executor: boolCoerce.default(false),

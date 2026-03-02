@@ -7,6 +7,12 @@
  */
 
 export interface Secrets {
+    /** RPC endpoint URL — often contains embedded API keys (e.g. Alchemy, Infura) */
+    rpcUrl?: string;
+    /** Control API authentication key */
+    controlApiServiceKey?: string;
+    /** Test RPC endpoint URL — same API key concern as rpcUrl */
+    testRpcUrl?: string;
     operatePassword?: string;
     geminiApiKey?: string;
     geminiOauthCredentials?: string;
@@ -36,6 +42,9 @@ export interface Secrets {
  */
 export function loadSecrets(): Secrets {
     return {
+        rpcUrl: process.env.RPC_URL,
+        controlApiServiceKey: process.env.CONTROL_API_SERVICE_KEY,
+        testRpcUrl: process.env.TEST_RPC_URL,
         operatePassword: process.env.OPERATE_PASSWORD,
         geminiApiKey: process.env.GEMINI_API_KEY,
         geminiOauthCredentials: process.env.GEMINI_OAUTH_CREDENTIALS,

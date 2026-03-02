@@ -27,10 +27,6 @@ interface AliasEntry {
  */
 const ALIAS_TABLE: AliasEntry[] = [
     // chain
-    { env: 'RPC_URL', path: 'chain.rpc_url', priority: 0 },
-    { env: 'MECHX_CHAIN_RPC', path: 'chain.rpc_url', priority: 1 },
-    { env: 'MECH_RPC_HTTP_URL', path: 'chain.rpc_url', priority: 2 },
-    { env: 'BASE_RPC_URL', path: 'chain.rpc_url', priority: 3 },
     { env: 'CHAIN_ID', path: 'chain.chain_id', priority: 0 },
 
     // worker
@@ -102,7 +98,7 @@ const ALIAS_TABLE: AliasEntry[] = [
     { env: 'PONDER_END_BLOCK', path: 'services.ponder_end_block', priority: 0 },
     { env: 'CONTROL_API_URL', path: 'services.control_api_url', priority: 0 },
     { env: 'CONTROL_API_PORT', path: 'services.control_api_port', priority: 0 },
-    { env: 'CONTROL_API_SERVICE_KEY', path: 'services.control_api_service_key', priority: 0 },
+
     { env: 'USE_CONTROL_API', path: 'services.use_control_api', priority: 0 },
     { env: 'IPFS_GATEWAY_URL', path: 'services.ipfs_gateway_url', priority: 0 },
     { env: 'IPFS_FETCH_TIMEOUT_MS', path: 'services.ipfs_fetch_timeout_ms', priority: 0 },
@@ -151,7 +147,7 @@ const ALIAS_TABLE: AliasEntry[] = [
     { env: 'RUNTIME_ENVIRONMENT', path: 'dev.runtime_environment', priority: 0 },
     { env: 'DRY_RUN', path: 'dev.dry_run', priority: 0 },
     { env: 'DISABLE_STS_CHECKS', path: 'dev.disable_sts_checks', priority: 0 },
-    { env: 'TEST_RPC_URL', path: 'dev.test_rpc_url', priority: 0 },
+
     { env: 'MCP_DEBUG_MECH_CLIENT', path: 'dev.mcp_debug_mech_client', priority: 0 },
     { env: 'USE_TSX_MCP', path: 'dev.use_tsx_mcp', priority: 0 },
     { env: 'ENABLE_TRANSACTION_EXECUTOR', path: 'dev.enable_transaction_executor', priority: 0 },

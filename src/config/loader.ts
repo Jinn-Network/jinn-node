@@ -65,7 +65,6 @@ function deepFreeze<T extends Record<string, any>>(obj: T): Readonly<T> {
  */
 export interface NodeConfig {
     chain: {
-        rpcUrl: string;
         chainId: number;
     };
     worker: {
@@ -136,7 +135,7 @@ export interface NodeConfig {
         ponderEndBlock?: number;
         controlApiUrl: string;
         controlApiPort?: number;
-        controlApiServiceKey: string;
+
         useControlApi: boolean;
         ipfsGatewayUrl: string;
         ipfsFetchTimeoutMs: number;
@@ -184,7 +183,7 @@ export interface NodeConfig {
         runtimeEnvironment: string;
         dryRun: boolean;
         disableStsChecks: boolean;
-        testRpcUrl: string;
+
         mcpDebugMechClient: boolean;
         useTsxMcp: boolean;
         enableTransactionExecutor: boolean;

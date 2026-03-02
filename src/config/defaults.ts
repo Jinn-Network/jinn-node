@@ -20,7 +20,7 @@ export function getDefaultYaml(): string {
     const defaults = generateDefaultConfig();
     const header = `# jinn.yaml — Node operator configuration
 # Auto-generated with defaults. Edit what you need.
-# Secrets stay in .env (never committed).
+# Secrets (RPC_URL, API keys, passwords) stay in .env (never committed).
 # Env vars override YAML values (see docs for mapping).
 `;
     return header + YAML.stringify(defaults, { lineWidth: 120 });

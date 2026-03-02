@@ -194,7 +194,7 @@ async function getRuntimeResolvedConfig(): Promise<ResolvedServiceConfig | null>
   const active = getActiveService();
   if (active?.mechAddress) {
     try {
-      return await resolveServiceConfig(active.mechAddress, config.chain.rpcUrl);
+      return await resolveServiceConfig(active.mechAddress, secrets.rpcUrl);
     } catch (e: any) {
       workerLogger.warn(
         { error: serializeError(e), activeMech: active.mechAddress, serviceId: active.serviceId },
@@ -533,7 +533,7 @@ async function maybeCancelMissingDependency(params: {
   const mechAddress = getMechAddress();
   const safeAddress = getServiceSafeAddress();
   const privateKey = getServicePrivateKey();
-  const rpcHttpUrl = config.chain.rpcUrl;
+  const rpcHttpUrl = secrets.rpcUrl;
   const chainConfig = getMechChainConfig();
 
   if (!mechAddress || !safeAddress || !privateKey) {
@@ -842,7 +842,7 @@ async function filterUnclaimed(requests: UnclaimedRequest[]): Promise<UnclaimedR
   if (notDelivered.length === 0) return [];
   // Validate against marketplace delivery status to avoid stale indexer data
   try {
-    const rpcHttpUrl = config.chain.rpcUrl;
+    const rpcHttpUrl = secrets.rpcUrl;
     if (!rpcHttpUrl) {
       workerLogger.debug('RPC URL missing; falling back to Ponder status');
       return notDelivered;
@@ -1630,7 +1630,7 @@ async function processOnce(): Promise<boolean> {
     const mechAddress = getMechAddress();
     const safeAddress = getServiceSafeAddress();
     const privateKey = getServicePrivateKey();
-    const rpcHttpUrl = config.chain.rpcUrl;
+    const rpcHttpUrl = secrets.rpcUrl;
     const chainConfig = getMechChainConfig();
 
     if (mechAddress && safeAddress && privateKey) {
@@ -1747,7 +1747,7 @@ async function main() {
   // Resolve on-chain service config from mech address
   // This derives serviceId, safe, marketplace, and staking contract from chain state
   const mechAddress = getMechAddress();
-  const rpcUrl = config.chain.rpcUrl;
+  const rpcUrl = secrets.rpcUrl;
   if (mechAddress && rpcUrl) {
     try {
       resolvedConfig = await resolveServiceConfig(mechAddress, rpcUrl);
@@ -1803,7 +1803,7 @@ async function main() {
     if (middlewarePath) {
       try {
         rotator = new ServiceRotator({
-          rpcUrl: config.chain.rpcUrl,
+          rpcUrl: secrets.rpcUrl,
           middlewarePath,
           activityPollMs: config.worker.activityPollMs,
           activityCacheTtlMs: config.worker.activityCacheTtlMs,

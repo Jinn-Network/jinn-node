@@ -26,7 +26,7 @@ import { getServicePrivateKey, getServiceSafeAddress, getMechAddress } from '../
 import { submitMarketplaceRequest } from '../MechMarketplaceRequester.js';
 import { computeProjectedEpochTarget, readNonNegativeIntEnv, readPositiveIntEnv } from './target.js';
 import type { ServiceInfo } from '../ServiceConfigReader.js';
-import { config } from '../../config/index.js';
+import { config, secrets } from '../../config/index.js';
 
 const log = workerLogger.child({ component: 'HEARTBEAT' });
 
@@ -124,7 +124,7 @@ async function getActivityDeficit(
   serviceId: number,
   marketplaceAddress: string,
 ): Promise<{ deficit: number; current: number; target: number; epochSecondsRemaining: number; multisig: string }> {
-  const rpcUrl = config.chain.rpcUrl;
+  const rpcUrl = secrets.rpcUrl;
   const provider = new ethers.JsonRpcProvider(rpcUrl);
 
   const staking = new ethers.Contract(stakingContract, STAKING_ABI, provider);
@@ -227,7 +227,7 @@ async function submitHeartbeatWithCredentials(
   serviceId: number,
   marketplaceAddress: string,
 ): Promise<boolean> {
-  const rpcUrl = config.chain.rpcUrl;
+  const rpcUrl = secrets.rpcUrl;
 
   const prompt = JSON.stringify({
     heartbeat: true,
@@ -287,7 +287,7 @@ export async function maybeSubmitHeartbeat(
   }
 
   // Detect checker type — skip heartbeat for delivery-based (v2) checkers
-  const rpcUrl = config.chain.rpcUrl;
+  const rpcUrl = secrets.rpcUrl;
   const provider = new ethers.JsonRpcProvider(rpcUrl);
 
   // We need a multisig for detection. Resolve from staking contract if not cached.

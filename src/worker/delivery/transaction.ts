@@ -11,7 +11,7 @@ import type { UnclaimedRequest, AgentExecutionResult, FinalStatus, IpfsMetadata,
 import { buildDeliveryPayload } from './payload.js';
 import { checkDeliveryStatusViaPonder } from './ponderVerification.js';
 import { registerArtifactsOnChain } from './adwRegister.js';
-import { config } from '../../config/index.js';
+import { config, secrets } from '../../config/index.js';
 
 /**
  * Known Safe error codes for decoding revert reasons
@@ -344,7 +344,7 @@ export async function deliverViaSafeTransaction(
 ): Promise<{ tx_hash?: string; status?: string }> {
   workerLogger.info({ requestId: context.requestId }, '[DELIVERY_START] Function entered');
   const chainConfig = getMechChainConfig() || 'base';
-  const rpcHttpUrl = config.chain.rpcUrl;
+  const rpcHttpUrl = secrets.rpcUrl;
 
   // Always deliver through our own mech. The marketplace allows any mech to
   // deliver after cooldown, so we use the active service's mech + Safe regardless
@@ -517,7 +517,7 @@ export async function deliverViaSafeTransaction(
   workerLogger.info({ requestId: context.requestId }, '[DELIVERY_DEBUG] Starting delivery transaction attempt');
 
   // Get agent wallet address for nonce debugging
-  const web3ForNonce = new Web3(rpcHttpUrl || config.chain.rpcUrl);
+  const web3ForNonce = new Web3(rpcHttpUrl || secrets.rpcUrl);
   const agentAccount = web3ForNonce.eth.accounts.privateKeyToAccount(privateKey);
   const agentAddress = agentAccount.address;
 

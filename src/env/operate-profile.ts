@@ -17,6 +17,7 @@ import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { configLogger } from '../logging/index.js';
 import { decryptKeystoreV3 } from './keystore-decrypt.js';
+import { secrets } from '../config/index.js';
 import {
   getActiveMechAddress,
   getActiveSafeAddress,
@@ -464,7 +465,7 @@ export function getServicePrivateKey(): string | null {
 
     if (typeof privateKeyField === 'string' && privateKeyField.startsWith('{')) {
       // New format: encrypted keystore JSON string - decrypt it
-      const password = process.env.OPERATE_PASSWORD;
+      const password = secrets.operatePassword;
       if (!password) {
         throw new Error(
           'Encrypted keystore detected but OPERATE_PASSWORD not set. ' +
@@ -646,7 +647,7 @@ export function getMasterPrivateKey(): string | null {
     return null;
   }
 
-  const password = process.env.OPERATE_PASSWORD;
+  const password = secrets.operatePassword;
   if (password === undefined || password === '') {
     configLogger.warn('OPERATE_PASSWORD env var required to decrypt master wallet');
     return null;

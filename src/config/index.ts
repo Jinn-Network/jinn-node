@@ -5,9 +5,10 @@
  *
  * Usage:
  *   import { config, secrets } from '../config/index.js';
- *   config.chain.rpcUrl        // string
- *   config.worker.pollBaseMs   // number
- *   secrets.operatePassword    // string | undefined
+ *   config.chain.chainId        // number
+ *   config.worker.pollBaseMs    // number
+ *   secrets.rpcUrl              // string | undefined
+ *   secrets.operatePassword     // string | undefined
  *
  * Job context:
  *   import { getJobContext, setJobContext, clearJobContext } from '../config/index.js';
