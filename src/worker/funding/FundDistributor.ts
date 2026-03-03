@@ -15,7 +15,7 @@ import { ethers } from 'ethers';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 import { workerLogger } from '../../logging/index.js';
-import { getMasterSafe, getMasterPrivateKey, getMiddlewarePath } from '../../env/operate-profile.js';
+import { getMasterSafe, getMasterPrivateKey, getMasterEOA, getMiddlewarePath } from '../../env/operate-profile.js';
 import { createRpcProvider } from '../../config/index.js';
 import type { ServiceInfo } from '../ServiceConfigReader.js';
 
@@ -33,6 +33,12 @@ const TOPUP_THRESHOLD_FRACTION = 0.5;
 
 /** Minimum ETH to keep in Master Safe (don't drain it completely) */
 const DEFAULT_RESERVE_WEI = ethers.parseEther('0.002');
+
+/** Minimum ETH to keep in Master EOA (needs gas for Safe txns) */
+const EOA_RESERVE_WEI = ethers.parseEther('0.005');
+
+/** Target balance for Master Safe when topping up from Master EOA */
+const MASTER_SAFE_TARGET_WEI = ethers.parseEther('0.02');
 
 /** Minimum fund target per address — overrides low config.json values */
 const MIN_FUND_TARGET_WEI = ethers.parseEther('0.002');
@@ -112,13 +118,49 @@ export async function maybeDistributeFunds(
   }
 
   const provider = createRpcProvider(rpcUrl);
-  const masterBalance = await provider.getBalance(masterSafeAddress);
+  let masterBalance = await provider.getBalance(masterSafeAddress);
 
   log.info({
     masterSafe: masterSafeAddress,
     masterBalanceEth: ethers.formatEther(masterBalance),
     serviceCount: services.length,
   }, 'Fund distribution check starting');
+
+  // If Master Safe is low, top it up from Master EOA
+  if (masterBalance < MASTER_SAFE_TARGET_WEI) {
+    const eoaAddress = getMasterEOA();
+    if (eoaAddress && masterPrivateKey) {
+      const eoaBalance = await provider.getBalance(eoaAddress);
+      const eoaAvailable = eoaBalance > EOA_RESERVE_WEI ? eoaBalance - EOA_RESERVE_WEI : 0n;
+      const safeDeficit = MASTER_SAFE_TARGET_WEI - masterBalance;
+      const topUpAmount = eoaAvailable < safeDeficit ? eoaAvailable : safeDeficit;
+
+      if (topUpAmount > 0n) {
+        log.info({
+          from: eoaAddress,
+          to: masterSafeAddress,
+          ethAmount: ethers.formatEther(topUpAmount),
+          eoaBalance: ethers.formatEther(eoaBalance),
+        }, 'Topping up Master Safe from Master EOA');
+
+        try {
+          const eoaWallet = new ethers.Wallet(masterPrivateKey, provider);
+          const tx = await eoaWallet.sendTransaction({
+            to: masterSafeAddress,
+            value: topUpAmount,
+          });
+          const receipt = await tx.wait();
+          if (receipt && receipt.status === 1) {
+            log.info({ txHash: receipt.hash, ethAmount: ethers.formatEther(topUpAmount) },
+              'Master Safe topped up from Master EOA');
+            masterBalance = await provider.getBalance(masterSafeAddress);
+          }
+        } catch (err) {
+          log.error({ error: (err as Error).message }, 'Failed to top up Master Safe from EOA');
+        }
+      }
+    }
+  }
 
   if (masterBalance <= reserveWei) {
     result.error = `Master Safe balance (${ethers.formatEther(masterBalance)} ETH) at or below reserve (${ethers.formatEther(reserveWei)} ETH)`;
@@ -127,7 +169,8 @@ export async function maybeDistributeFunds(
   }
 
   const availableWei = masterBalance - reserveWei;
-  const transfers: FundTransfer[] = [];
+  const agentTransfers: FundTransfer[] = [];
+  const safeTransfers: FundTransfer[] = [];
 
   for (const svc of services) {
     if (!svc.serviceSafeAddress || !svc.agentEoaAddress) continue;
@@ -140,34 +183,37 @@ export async function maybeDistributeFunds(
 
     result.checked++;
 
-    // Check service Safe balance against threshold (enforce minimum target)
-    const safeTarget = BigInt(reqs.safe) < MIN_FUND_TARGET_WEI ? MIN_FUND_TARGET_WEI : BigInt(reqs.safe);
-    const safeThreshold = safeTarget / 2n;
-    const safeBalance = await provider.getBalance(svc.serviceSafeAddress);
-
-    if (safeBalance < safeThreshold && safeTarget > 0n) {
-      const topUp = safeTarget - safeBalance;
-      transfers.push({
-        to: svc.serviceSafeAddress,
-        label: `Service #${svc.serviceId} Safe`,
-        amountWei: topUp,
-      });
-    }
-
-    // Check agent EOA balance against threshold (enforce minimum target)
+    // Check agent EOA balance first — agents pay gas for every transaction
     const agentTarget = BigInt(reqs.agent) < MIN_FUND_TARGET_WEI ? MIN_FUND_TARGET_WEI : BigInt(reqs.agent);
     const agentThreshold = agentTarget / 2n;
     const agentBalance = await provider.getBalance(svc.agentEoaAddress);
 
     if (agentBalance < agentThreshold && agentTarget > 0n) {
       const topUp = agentTarget - agentBalance;
-      transfers.push({
+      agentTransfers.push({
         to: svc.agentEoaAddress,
-        label: `Service #${svc.serviceId} Agent`,
+        label: `Service #${svc.serviceId} Agent EOA`,
+        amountWei: topUp,
+      });
+    }
+
+    // Check service Safe balance — holds value for marketplace request payments
+    const safeTarget = BigInt(reqs.safe) < MIN_FUND_TARGET_WEI ? MIN_FUND_TARGET_WEI : BigInt(reqs.safe);
+    const safeThreshold = safeTarget / 2n;
+    const safeBalance = await provider.getBalance(svc.serviceSafeAddress);
+
+    if (safeBalance < safeThreshold && safeTarget > 0n) {
+      const topUp = safeTarget - safeBalance;
+      safeTransfers.push({
+        to: svc.serviceSafeAddress,
+        label: `Service #${svc.serviceId} Safe`,
         amountWei: topUp,
       });
     }
   }
+
+  // Agent EOAs first (gas payers), then service Safes (value holders)
+  const transfers = [...agentTransfers, ...safeTransfers];
 
   if (transfers.length === 0) {
     log.info({ checked: result.checked }, 'All service addresses adequately funded');
