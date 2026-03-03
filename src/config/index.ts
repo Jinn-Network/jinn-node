@@ -623,12 +623,15 @@ export function getOptionalRpcProxyToken(): string | undefined {
 export function createRpcProvider(rpcUrl?: string): ethers.JsonRpcProvider {
   const url = rpcUrl ?? getRequiredRpcUrl();
   const token = getOptionalRpcProxyToken();
+  // Cap batch size to stay within RPC proxy limits (default: 10 calls per batch).
+  // ethers v6 auto-splits larger batches into sequential chunks.
+  const batchMaxCount = 10;
   if (token) {
     const fetchRequest = new ethers.FetchRequest(url);
     fetchRequest.setHeader('Authorization', `Bearer ${token}`);
-    return new ethers.JsonRpcProvider(fetchRequest);
+    return new ethers.JsonRpcProvider(fetchRequest, undefined, { batchMaxCount });
   }
-  return new ethers.JsonRpcProvider(url);
+  return new ethers.JsonRpcProvider(url, undefined, { batchMaxCount });
 }
 
 export function getRequiredChainId(): number {
