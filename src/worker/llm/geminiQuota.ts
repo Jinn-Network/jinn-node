@@ -480,6 +480,17 @@ export async function waitForGeminiQuota(options: QuotaWaitOptions = {}): Promis
     }
   }
 
+  // All OAuth credentials exhausted — try API key as fallback before blocking
+  const apiKey = getOptionalGeminiApiKey() || process.env.GEMINI_API_KEY;
+  if (apiKey) {
+    const apiKeyResult = await checkGeminiQuota({ model });
+    if (apiKeyResult.ok || !apiKeyResult.checked) {
+      workerLogger.info({ model }, 'All OAuth credentials exhausted; falling back to GEMINI_API_KEY');
+      return { selectedCredential: null, selectedIndex: -1, allExhausted: false };
+    }
+    workerLogger.warn({ model, detail: apiKeyResult.detail }, 'API key also exhausted');
+  }
+
   // All credentials exhausted - enter backoff loop until one becomes available
   let backoffAttempt = 0;
   while (selection.allExhausted) {
@@ -497,8 +508,18 @@ export async function waitForGeminiQuota(options: QuotaWaitOptions = {}): Promis
     await sleep(waitMs);
     backoffAttempt += 1;
 
-    // Re-check all credentials
+    // Re-check OAuth credentials first
     selection = await selectAvailableCredential({ model });
+    if (selection.selectedCredential) break;
+
+    // Also check API key on each retry
+    if (apiKey) {
+      const retryResult = await checkGeminiQuota({ model });
+      if (retryResult.ok || !retryResult.checked) {
+        workerLogger.info({ model }, 'OAuth still exhausted; falling back to GEMINI_API_KEY');
+        return { selectedCredential: null, selectedIndex: -1, allExhausted: false };
+      }
+    }
   }
 
   return selection;
