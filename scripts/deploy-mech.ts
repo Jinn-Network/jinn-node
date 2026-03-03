@@ -305,12 +305,20 @@ async function main() {
       console.log(`  Funded Agent EOA. txHash: ${receipt?.hash}`);
     }
 
-    // Re-check agent balance
-    const newAgentBalance = await provider.getBalance(target.agentEoaAddress);
+    // Re-check agent balance (retry a few times — RPC may lag behind confirmed tx)
+    let newAgentBalance = 0n;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      newAgentBalance = await provider.getBalance(target.agentEoaAddress);
+      if (newAgentBalance >= minAgentGas) break;
+      if (attempt < 4) {
+        console.log(`  Waiting for balance to reflect (attempt ${attempt + 1}/5)...`);
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
     console.log(`  Agent EOA balance after funding: ${ethers.formatEther(newAgentBalance)} ETH`);
 
     if (newAgentBalance < minAgentGas) {
-      console.error(`\n  Agent EOA still has insufficient ETH for gas.`);
+      console.error(`\n  Agent EOA still has insufficient ETH for gas after retries.`);
       process.exit(1);
     }
   }

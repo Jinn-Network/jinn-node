@@ -470,6 +470,15 @@ export async function stolasBootstrap(
       funded: fundResult.funded.map((t: FundTransfer) => ({ to: t.to, eth: ethers.formatEther(t.amountWei) })),
       txHash: fundResult.txHash,
     }, 'Agent EOA funded from Master Safe');
+
+    // Wait for RPC to reflect the funding tx before checking balance in mech deployer
+    const minAgentGas = ethers.parseEther('0.001');
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const bal = await provider.getBalance(agentWallet.address);
+      if (bal >= minAgentGas) break;
+      stolasLogger.info({ attempt: attempt + 1 }, 'Waiting for agent balance to reflect...');
+      await new Promise(r => setTimeout(r, 2000));
+    }
   }
 
   // ── 10. Deploy mech via Service Safe ──────────────────────────────────
