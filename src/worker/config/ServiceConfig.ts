@@ -63,7 +63,7 @@ export const SERVICE_CONSTANTS = {
 
   // Default agent release metadata for the service package
   DEFAULT_AGENT_RELEASE: {
-    is_aea: true,
+    is_aea: false,
     repository: {
       owner: "Jinn-Network",
       name: "jinn_node",

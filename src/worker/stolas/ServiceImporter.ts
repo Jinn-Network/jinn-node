@@ -121,7 +121,7 @@ export async function importServiceFromChain(
     package_path: 'memeooorr',
     hash: 'bafybeiawqqwkoeovm453mscwkxvmtnvaanhatlqh52cf5sdqavz6ldybae',
     agent_release: {
-      is_aea: true,
+      is_aea: false,
       repository: { owner: 'valory-xyz', name: 'meme-ooorr', version: 'v2.0.2' },
     },
     home_chain: chain,
