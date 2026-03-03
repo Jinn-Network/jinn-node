@@ -861,6 +861,19 @@ let cachedWeb3: InstanceType<typeof Web3> | null = null;
 let cachedWeb3RpcUrl: string | null = null;
 let cachedMarketplaceContract: any = null;
 const MARKETPLACE_ADDRESS = '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020';
+// Multicall3 is deployed at the same address on all EVM chains
+const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11';
+const MULTICALL3_ABI = [
+  {
+    inputs: [{ components: [{ name: 'target', type: 'address' }, { name: 'callData', type: 'bytes' }], name: 'calls', type: 'tuple[]' }],
+    name: 'aggregate',
+    outputs: [{ name: 'blockNumber', type: 'uint256' }, { name: 'returnData', type: 'bytes[]' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+// Max calls per multicall batch — stay well within gas limits
+const MULTICALL_BATCH_SIZE = 100;
 
 function getWeb3Singleton(rpcUrl: string): InstanceType<typeof Web3> {
   if (cachedWeb3 && cachedWeb3RpcUrl === rpcUrl) return cachedWeb3;
@@ -891,33 +904,58 @@ async function filterUnclaimed(requests: UnclaimedRequest[]): Promise<UnclaimedR
 
     const web3 = getWeb3Singleton(rpcHttpUrl);
     const marketplace = getMarketplaceContract(web3);
+    const multicall = new (web3 as any).eth.Contract(MULTICALL3_ABI, MULTICALL3_ADDRESS);
 
+    // Encode all mapRequestIdInfos calls
+    const calls = notDelivered.map(request => ({
+      target: MARKETPLACE_ADDRESS,
+      callData: marketplace.methods.mapRequestIdInfos(String(request.id)).encodeABI(),
+    }));
+
+    // mapRequestIdInfos return type: (address, address, address, uint256, uint256, bytes32)
+    const RETURN_TYPES = ['address', 'address', 'address', 'uint256', 'uint256', 'bytes32'];
+    const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
     const filtered: UnclaimedRequest[] = [];
 
-    for (const request of notDelivered) {
-      const requestId = String(request.id);
-      try {
-        const requestInfo = await marketplace.methods.mapRequestIdInfos(requestId).call();
-        const isDelivered = requestInfo.deliveryMech !== '0x0000000000000000000000000000000000000000';
+    // Process in chunks to avoid gas limit issues
+    for (let i = 0; i < calls.length; i += MULTICALL_BATCH_SIZE) {
+      const chunk = calls.slice(i, i + MULTICALL_BATCH_SIZE);
+      const chunkRequests = notDelivered.slice(i, i + MULTICALL_BATCH_SIZE);
 
-        if (!isDelivered) {
-          // Store responseTimeout from on-chain data for priority window checks
-          if (requestInfo.responseTimeout) {
-            request.responseTimeout = Number(requestInfo.responseTimeout);
+      try {
+        const { returnData } = await multicall.methods.aggregate(chunk).call();
+
+        for (let j = 0; j < chunkRequests.length; j++) {
+          try {
+            const decoded = web3.eth.abi.decodeParameters(RETURN_TYPES, returnData[j]) as any;
+            const deliveryMech = decoded[1]; // second output is deliveryMech
+            const responseTimeout = decoded[3]; // fourth output is responseTimeout
+            const isDelivered = deliveryMech !== ZERO_ADDRESS;
+
+            if (!isDelivered) {
+              if (responseTimeout) {
+                chunkRequests[j].responseTimeout = Number(responseTimeout);
+              }
+              filtered.push(chunkRequests[j]);
+            } else {
+              workerLogger.debug({
+                requestId: String(chunkRequests[j].id),
+                deliveredByMech: deliveryMech,
+              }, 'Request already delivered in marketplace by another mech - filtering out');
+            }
+          } catch (decodeErr) {
+            workerLogger.warn({ requestId: String(chunkRequests[j].id), error: serializeError(decodeErr) }, 'Failed to decode marketplace status; keeping request');
+            filtered.push(chunkRequests[j]);
           }
-          filtered.push(request);
-        } else {
-          workerLogger.debug({
-            requestId,
-            deliveredByMech: requestInfo.deliveryMech
-          }, 'Request already delivered in marketplace by another mech - filtering out');
         }
-      } catch (err) {
-        workerLogger.warn({ requestId, error: serializeError(err) }, 'Failed to check marketplace status for request; keeping request');
-        filtered.push(request);
+      } catch (batchErr) {
+        // If multicall fails for a chunk, keep all requests in that chunk
+        workerLogger.warn({ error: serializeError(batchErr), chunkSize: chunk.length, offset: i }, 'Multicall batch failed; keeping all requests in chunk');
+        filtered.push(...chunkRequests);
       }
     }
 
+    workerLogger.info({ total: notDelivered.length, kept: filtered.length, rpcCalls: Math.ceil(calls.length / MULTICALL_BATCH_SIZE) }, 'Marketplace status check via multicall');
     return filtered;
   } catch (e) {
     workerLogger.warn({ error: serializeError(e) }, 'Error checking marketplace status, falling back to Ponder status');
