@@ -1,6 +1,6 @@
 ---
 name: jinn-node-operator-setup
-description: Onboard a first-time jinn-node operator locally, including prerequisite checks, .env configuration, setup funding loops, mnemonic capture protocol, and initial worker run.
+description: Onboard a jinn-node operator locally with stOLAS (default, no OLAS needed) or standard OLAS staking, including prerequisite checks, .env configuration, setup funding loops, mnemonic capture, and initial worker run.
 allowed-tools: Bash, Read, Edit, Write, Glob
 user-invocable: true
 metadata:
@@ -30,15 +30,20 @@ If the operator is not comfortable, stop and instruct manual setup.
 Validate toolchain and install missing dependencies where possible:
 
 ```bash
-node --version
+node --version        # Must be 20+
 yarn --version
-python3 --version
+python3 --version     # Must be 3.10 or 3.11
 poetry --version
 tendermint version
 git --version
 ```
 
-Python must be `3.10` or `3.11`.
+Python must be `3.10` or `3.11`. If wrong, install 3.11 alongside existing Python:
+```bash
+# macOS: brew install python@3.11
+# Ubuntu: sudo apt-get install python3.11 python3.11-venv python3.11-dev
+poetry env use python3.11
+```
 
 ### 2. Environment bootstrap
 
@@ -48,20 +53,18 @@ cp .env.example .env
 ```
 
 Collect and set **secrets only** in `.env`:
-- `RPC_URL`
-- `OPERATE_PASSWORD`
-- Gemini auth (`GEMINI_API_KEY` or existing Gemini CLI OAuth)
+- `RPC_URL` — Base network RPC endpoint (Alchemy, Infura, or QuickNode recommended)
+- `OPERATE_PASSWORD` — encrypts the wallet keystore (min 8 chars)
+- Gemini auth: `GEMINI_API_KEY` (simplest) or Gemini CLI OAuth (`npx @google/gemini-cli auth login`)
 
-Strongly encouraged (for coding-job participation):
-- `GITHUB_TOKEN` (treat as effectively required for most coding ventures)
+Strongly encouraged:
+- `GITHUB_TOKEN` — required for most coding ventures. Without it, explicitly warn operator.
 
 Recommended with `GITHUB_TOKEN`:
 - `GIT_AUTHOR_NAME`
 - `GIT_AUTHOR_EMAIL`
 
-If operator declines `GITHUB_TOKEN`, explicitly warn that coding-job participation will be limited or fail, then require acknowledgement before continuing.
-
-**Configuration:** `jinn.yaml` is auto-generated on first run with correct Jinn network defaults (chain ID, service URLs, staking contract, filter mode). Do not create or edit it unless the operator has specific customization needs.
+**Configuration:** `jinn.yaml` is auto-generated on first run with correct defaults. Do not create or edit unless the operator has specific customization needs.
 
 ### 3. Install dependencies
 
@@ -70,67 +73,187 @@ cd jinn-node
 yarn install
 ```
 
-### 4. Run setup (funding loop)
+### 4. Run stOLAS setup (recommended — no OLAS required)
+
+stOLAS uses the ExternalStakingDistributor so operators stake without providing OLAS. LemonTree depositors fund the capital. Only ETH is needed for gas.
+
+#### 4a. Ensure wallet exists
+
+If this is a brand new setup (no `.operate/` directory), run standard setup first to create the wallet:
 
 ```bash
 cd jinn-node
 yarn setup 2>&1
 ```
 
-When setup exits for funding, treat as expected behavior:
-1. capture required address/amount from output,
-2. ask operator to fund,
-3. rerun `yarn setup`,
-4. repeat until complete.
+This will create the Master EOA + Master Safe and then exit requesting funding. **Capture the mnemonic** (see Step 5). Fund the Master EOA with ~0.005 ETH and rerun until the Master Safe is created. You do NOT need OLAS for this step.
 
-### 4b. Alternative: stOLAS setup (no OLAS required)
+If `.operate/wallets/ethereum.json` already exists, skip to 4b.
 
-If operator does not have 10,000 OLAS:
+#### 4b. Preflight check
+
+Before running stOLAS setup, verify availability:
 
 ```bash
 cd jinn-node
-yarn setup --stolas
+npx tsx -e "
+import { stolasPreflightCheck } from './src/worker/stolas/StolasServiceBootstrap.js';
+import 'dotenv/config';
+async function main() {
+  const result = await stolasPreflightCheck(process.env.RPC_URL || '');
+  if (result.ok) {
+    console.log('stOLAS available:', result.slotsRemaining, 'slots remaining');
+  } else {
+    console.log('stOLAS unavailable:', result.error);
+    console.log('Falling back to standard setup (10,000 OLAS required)');
+  }
+}
+main();
+"
+```
+
+If stOLAS is **unavailable** (no slots or distributor not configured), inform the operator:
+
+> stOLAS is currently unavailable — either all staking slots are occupied or the distributor is not configured for this staking contract. You can use the standard setup path which requires ~10,000 OLAS. See Step 4-alt below.
+
+If stOLAS is **available**, proceed:
+
+#### 4c. Fund for stOLAS
+
+stOLAS requires only ETH — no OLAS:
+
+| Address | Amount | Purpose |
+|---------|--------|---------|
+| Master EOA | >= 0.001 ETH | Gas for Safe transaction |
+| Master Safe | >= 0.007 ETH | Agent EOA funding + mech deployment gas |
+
+Total: ~0.01 ETH (~$25 on Base L2).
+
+Check current balances:
+```bash
+cd jinn-node
+npx tsx -e "
+import { ethers } from 'ethers';
+import 'dotenv/config';
+async function main() {
+  const p = new ethers.JsonRpcProvider(process.env.RPC_URL);
+  const w = JSON.parse(require('fs').readFileSync('.operate/wallets/ethereum.json','utf-8'));
+  const eoa = await p.getBalance(w.address);
+  const safe = await p.getBalance(w.safes.base);
+  console.log('Master EOA (' + w.address + '):', ethers.formatEther(eoa), 'ETH');
+  console.log('Master Safe (' + w.safes.base + '):', ethers.formatEther(safe), 'ETH');
+  if (eoa < ethers.parseEther('0.001')) console.log('>>> Fund Master EOA with >= 0.001 ETH');
+  if (safe < ethers.parseEther('0.007')) console.log('>>> Fund Master Safe with >= 0.007 ETH');
+}
+main();
+"
+```
+
+Ask operator to fund if needed. After funding:
+
+#### 4d. Run stOLAS setup
+
+```bash
+cd jinn-node
+yarn setup --stolas 2>&1
 ```
 
 This will:
-1. Create the Master EOA + Master Safe (if first run — only ETH needed)
-2. Stake via ExternalStakingDistributor (no OLAS required, funded by LemonTree)
-3. Deploy a mech contract
+1. Load Master EOA + Master Safe from `.operate/`
+2. Generate new agent EOA
+3. Preflight check (distributor + slots)
+4. Route `stake()` through Master Safe → creates service on-chain
+5. Discover serviceId + Safe
+6. Store agent key + import config to `.operate/services/`
+7. Fund agent EOA from Master Safe
+8. Deploy mech via service Safe
+9. Update config with mech address
 
-Only ETH needed: ~0.02 ETH on Master EOA + ~0.01 ETH in Master Safe.
+If mech deployment fails (insufficient Master Safe ETH), setup will succeed but print instructions to deploy the mech separately:
+```bash
+npx tsx scripts/deploy-mech.ts --service-config-id=<id>
+```
+
+### 4-alt. Standard setup (when stOLAS is unavailable)
+
+If stOLAS slots are full or the distributor is not configured:
+
+```bash
+cd jinn-node
+yarn setup 2>&1
+```
+
+Funding requirements for standard path:
+- Master EOA: ~0.005 ETH (gas)
+- Master Safe: ~0.01 ETH (operational gas) + **~10,000 OLAS** (5k deposit + 5k bond)
+
+When setup exits for funding:
+1. Capture required address/amount from output
+2. Ask operator to fund (OLAS can be purchased on Uniswap Base or bridged from Ethereum mainnet)
+3. Rerun `yarn setup`
+4. Repeat until complete
 
 ### 5. Mnemonic capture protocol
 
 On first wallet creation, extract and show the mnemonic from setup output immediately.
 Require explicit operator confirmation they saved it before continuing.
 
-### 6. Verify local runtime
+### 6. Verify setup
 
 ```bash
 cd jinn-node
 yarn wallet:info
-yarn worker --single
+yarn service:list
+yarn service:status
 ```
 
-### 7. Optional: add a second service
+Expected:
+- Wallet addresses and balances displayed
+- At least one service config with a service ID
+- Service staked (status = Staked)
+- Mech address present in config
 
-For multi-service rotation readiness:
+### 7. Run the worker
 
 ```bash
 cd jinn-node
-yarn service:add --dry-run
-yarn service:add
+yarn worker --single    # Single job execution to verify
+yarn worker             # Full polling loop
 ```
 
-Repeat funding loop if requested by script.
+### 8. Optional: add more services
+
+For multi-service rotation:
+
+```bash
+cd jinn-node
+yarn setup --stolas     # Add another stOLAS service
+# or
+yarn service:add        # Add via standard middleware flow
+```
 
 ## Common failure classes
 
 See `references/setup-failures.md`.
 
+### stOLAS-specific failures
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `stOLAS distributor not configured` | ExternalStakingDistributor not set up for this staking contract | Contact Jinn team or use standard setup (Step 4-alt) |
+| `All staking slots occupied` | Max services reached in the staking contract | Wait for slots to free up or use standard setup (Step 4-alt) |
+| `Master EOA has insufficient ETH` | Not enough gas for Safe transaction | Fund Master EOA with >= 0.001 ETH on Base |
+| `Master Safe needs ETH for mech deployment` | Mech deploy deferred | Fund Master Safe, then run `npx tsx scripts/deploy-mech.ts --service-config-id=<id>` |
+| `stake() via Master Safe reverted` | Safe nonce issue or contract error | Check Master Safe is owner of the service, check on-chain state |
+| `Service created but config import failed` | `.operate/services/` write error | Check disk permissions, manually import with `ServiceImporter` |
+| `Pre-flight simulation failed` | MechMarketplace.create() would revert | Check service Safe is registered, check mech factory address |
+
 ## Exit criteria
 
 - `.operate/` exists and contains service config + keys.
 - `yarn wallet:info` returns valid addresses and balances.
+- `yarn service:list` shows at least one service.
+- Service is staked (staking state = 1).
+- Mech address is present in service config.
 - Worker starts and reaches polling loop.
 - Operator has confirmed mnemonic backup.

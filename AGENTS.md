@@ -28,7 +28,7 @@ Primary onboarding venture:
 
 Use these skills based on task intent:
 
-- Local first-time onboarding and setup loop:
+- Local first-time onboarding (stOLAS default, OLAS fallback):
   - [`skills/jinn-node-operator-setup/SKILL.md`](skills/jinn-node-operator-setup/SKILL.md)
 - Railway deployment and canary/prod gateway switching:
   - [`skills/jinn-node-railway-deploy/SKILL.md`](skills/jinn-node-railway-deploy/SKILL.md)
@@ -44,6 +44,8 @@ Use these skills based on task intent:
 ## Default Execution Order (new operator)
 
 1. Local setup: `jinn-node-operator-setup`
+   - **Default path:** stOLAS (no OLAS required, ~0.01 ETH total)
+   - **Fallback:** Standard OLAS staking if stOLAS slots are full or distributor not configured (requires ~10,000 OLAS)
 2. Optional local validation run (`yarn worker --single`)
 3. Railway migration: `jinn-node-railway-deploy`
 4. Ongoing operations via wallet/staking/support skills
@@ -184,6 +186,8 @@ This also installs Python dependencies via Poetry automatically. If `poetry inst
 ---
 
 ## Phase 3: Run Setup
+
+> **Recommended:** Use stOLAS setup (`yarn setup --stolas`) — no OLAS required, only ~0.01 ETH for gas. See [Phase 3b](#phase-3b-stolas-setup-no-olas-required) for details. If stOLAS slots are full, fall back to the standard setup below.
 
 ### CRITICAL — Mnemonic Capture Protocol
 

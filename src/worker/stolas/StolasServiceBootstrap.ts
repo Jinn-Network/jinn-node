@@ -18,10 +18,10 @@
  * Flow:
  *   1. Load Master EOA + Master Safe from .operate/
  *   2. Generate new agent EOA for this service
- *   3. Preflight: verify stOLAS proxy configured + staking slots available
- *   4. Route stake() through Master Safe → creates service + Safe on-chain
- *   5. Discover serviceId + Safe from chain
- *   6. Store agent key in .operate/keys/
+ *   3. Store agent key in .operate/keys/ (persisted before stake tx)
+ *   4. Preflight: verify stOLAS proxy configured + staking slots available
+ *   5. Route stake() through Master Safe → creates service + Safe on-chain
+ *   6. Parse CreateService event from receipt → serviceId
  *   7. Import service config to .operate/services/
  */
 
@@ -30,6 +30,7 @@ import { join } from 'path';
 import { ethers } from 'ethers';
 import { createRpcProvider } from '../../config/index.js';
 import { logger } from '../../logging/index.js';
+import { decryptKeystoreV3 } from '../../env/keystore-decrypt.js';
 import { getMasterPrivateKey, getMasterSafe } from '../../env/operate-profile.js';
 import { SERVICE_CONSTANTS } from '../config/ServiceConfig.js';
 import { importServiceFromChain, type ImportServiceResult } from './ServiceImporter.js';
@@ -52,6 +53,12 @@ const DISTRIBUTOR_ABI = [
 const STAKING_ABI = [
   'function getServiceIds() view returns (uint256[])',
   'function maxNumServices() view returns (uint256)',
+];
+
+// ServiceRegistryL2 events for parsing receipt logs
+const SERVICE_REGISTRY_EVENTS = [
+  'event CreateService(uint256 indexed serviceId, bytes32 configHash)',
+  'event CreateMultisigWithAgents(uint256 indexed serviceId, address indexed multisig)',
 ];
 
 const SAFE_ABI = [
@@ -152,9 +159,14 @@ async function storeAgentKey(
   const keystore = JSON.parse(keystoreJson);
 
   // Compact keystore string used in both .operate/keys/ and keys.json
+  // ethers v6 uses "Crypto" (capital C), ethers v5 uses "crypto" (lowercase)
+  const cryptoSection = keystore.crypto || keystore.Crypto;
+  if (!cryptoSection) {
+    throw new Error('Encrypted keystore has no crypto section — cannot store agent key');
+  }
   const encryptedKeystore = JSON.stringify({
     address: keystore.address,
-    crypto: keystore.crypto,
+    crypto: cryptoSection,
     id: keystore.id,
     version: keystore.version,
   });
@@ -169,7 +181,19 @@ async function storeAgentKey(
   const keyPath = join(keysDir, agentWallet.address);
   await fsPromises.writeFile(keyPath, JSON.stringify(keyEntry, null, 2));
 
-  stolasLogger.info({ address: agentWallet.address, keyPath }, 'Agent key stored');
+  // Round-trip verification: read back from disk, decrypt, compare address.
+  // Catches any encryption/serialization bugs BEFORE on-chain transactions.
+  const storedRaw = await fsPromises.readFile(keyPath, 'utf-8');
+  const storedEntry = JSON.parse(storedRaw);
+  const decryptedKey = decryptKeystoreV3(storedEntry.private_key, password);
+  const recoveredAddress = ethers.computeAddress(decryptedKey);
+  if (recoveredAddress.toLowerCase() !== agentWallet.address.toLowerCase()) {
+    throw new Error(
+      `Key round-trip failed: stored key decrypts to ${recoveredAddress}, expected ${agentWallet.address}`
+    );
+  }
+
+  stolasLogger.info({ address: agentWallet.address, keyPath }, 'Agent key stored and verified (round-trip OK)');
   return { keyPath, encryptedKeystore };
 }
 
@@ -179,10 +203,11 @@ async function storeAgentKey(
  * Execute the stOLAS bootstrap flow:
  *   1. Load Master EOA + Master Safe from .operate/
  *   2. Generate new agent EOA
- *   3. Preflight checks
- *   4. Route stake() through Master Safe (Master EOA signs)
- *   5. Discover new serviceId
- *   6. Store agent key + import service config to .operate/
+ *   3. Store agent key (persisted before any on-chain tx)
+ *   4. Preflight checks
+ *   5. Route stake() through Master Safe (Master EOA signs)
+ *   6. Parse CreateService event from receipt → serviceId
+ *   7. Import service config to .operate/
  *
  * The Master Safe becomes the service owner in the staking contract,
  * consistent with services 378/379 created through the middleware.
@@ -227,7 +252,7 @@ export async function stolasBootstrap(
   if (balance < minBalance) {
     return {
       success: false,
-      error: `Master EOA ${masterWallet.address} has insufficient ETH: ${ethers.formatEther(balance)} ETH. Need at least 0.005 ETH for gas.`,
+      error: `Master EOA ${masterWallet.address} has insufficient ETH: ${ethers.formatEther(balance)} ETH. Need at least 0.001 ETH for gas.`,
     };
   }
 
@@ -239,7 +264,20 @@ export async function stolasBootstrap(
     masterSafe: masterSafeAddress,
   }, 'Generated new agent EOA for service');
 
-  // ── 3. Preflight ──────────────────────────────────────────────────────────
+  // ── 3. Store agent key BEFORE stake tx (so it's never lost) ─────────────
+
+  let encryptedKeystore: string;
+  try {
+    const result = await storeAgentKey(operateBasePath, agentWallet, operatePassword);
+    encryptedKeystore = result.encryptedKeystore;
+  } catch (err: any) {
+    return {
+      success: false,
+      error: `Agent key storage failed: ${err.message}`,
+    };
+  }
+
+  // ── 4. Preflight ──────────────────────────────────────────────────────────
 
   const preflight = await stolasPreflightCheck(rpcUrl);
   if (!preflight.ok) {
@@ -248,10 +286,7 @@ export async function stolasBootstrap(
 
   stolasLogger.info({ slotsRemaining: preflight.slotsRemaining }, 'Preflight passed');
 
-  // ── 4. Route stake() through Master Safe ──────────────────────────────────
-
-  const staking = new ethers.Contract(JINN_STAKING, STAKING_ABI, provider);
-  const serviceIdsBefore: bigint[] = await staking.getServiceIds();
+  // ── 5. Route stake() through Master Safe ──────────────────────────────────
 
   // Encode the stake() calldata
   const distIface = new ethers.Interface(DISTRIBUTOR_ABI);
@@ -326,36 +361,36 @@ export async function stolasBootstrap(
     logs: receipt.logs.length,
   }, 'stake() via Master Safe confirmed');
 
-  // ── 5. Discover new serviceId ─────────────────────────────────────────────
+  // ── 6. Parse CreateService event from receipt → serviceId ─────────────────
 
-  const serviceIdsAfter: bigint[] = await staking.getServiceIds();
-  const newServiceIds = serviceIdsAfter.filter(
-    id => !serviceIdsBefore.some(old => old === id)
-  );
+  const registryIface = new ethers.Interface(SERVICE_REGISTRY_EVENTS);
+  let serviceId: number | undefined;
+  let onChainMultisig: string | undefined;
 
-  if (newServiceIds.length === 0) {
+  for (const log of receipt.logs) {
+    try {
+      const parsed = registryIface.parseLog({
+        topics: log.topics as string[],
+        data: log.data,
+      });
+      if (parsed?.name === 'CreateService') {
+        serviceId = Number(parsed.args.serviceId);
+      } else if (parsed?.name === 'CreateMultisigWithAgents') {
+        onChainMultisig = parsed.args.multisig;
+      }
+    } catch {
+      // Not a matching event, continue
+    }
+  }
+
+  if (serviceId === undefined) {
     return {
       success: false,
-      error: 'stake() succeeded but no new service ID found in getServiceIds()',
+      error: `stake() succeeded (txHash: ${receipt.hash}) but no CreateService event found in ${receipt.logs.length} logs. Check tx on basescan.`,
     };
   }
 
-  const serviceId = Number(newServiceIds[0]);
-  stolasLogger.info({ serviceId }, 'New service discovered');
-
-  // ── 6. Store agent key in .operate/keys/ ──────────────────────────────────
-
-  let encryptedKeystore: string;
-  try {
-    const result = await storeAgentKey(operateBasePath, agentWallet, operatePassword);
-    encryptedKeystore = result.encryptedKeystore;
-  } catch (err: any) {
-    return {
-      success: false,
-      serviceId,
-      error: `Service created (ID ${serviceId}) but agent key storage failed: ${err.message}`,
-    };
-  }
+  stolasLogger.info({ serviceId, onChainMultisig }, 'Service created (parsed from receipt)');
 
   // ── 7. Import service config to .operate/services/ ────────────────────────
 
