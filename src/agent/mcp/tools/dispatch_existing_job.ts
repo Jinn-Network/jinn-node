@@ -23,7 +23,7 @@ const dispatchExistingJobParamsBase = z.object({
   blueprint: z.string().optional().describe('JSON string containing structured blueprint with invariants array. If provided, replaces the job definition blueprint for this run and updates the job definition.'),
   message: z.string().optional(),
   workstreamId: z.string().optional().describe('Workstream ID to preserve when re-dispatching parent jobs. If provided, ensures the new request maintains the same workstream as the child that triggered it.'),
-  responseTimeout: z.number().optional().default(61).describe('Response timeout in seconds for marketplace request. Defaults to 61 (just above the 60s on-chain minimum). This is the priority mech exclusivity window — after it expires, any staked mech can deliver. Range: 60-300.'),
+  responseTimeout: z.number().optional().default(61).describe('Response timeout in seconds for marketplace request. Defaults to 61 (just above the 60s on-chain minimum). This is the priority mech exclusivity window — after it expires, any staked mech can deliver. Min/max range is queried from the on-chain marketplace contract.'),
   additionalContext: z.record(z.unknown()).optional().describe('Additional context to pass to the job, as a key-value object.'),
 });
 
