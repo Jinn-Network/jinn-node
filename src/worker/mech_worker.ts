@@ -1945,7 +1945,8 @@ async function main() {
   let cyclesSinceLastCheckpoint = 0;
   let cyclesSinceLastHeartbeat = 0;
   let cyclesSinceLastVentureCheck = 0;
-  let cyclesSinceLastFundCheck = 0;
+  // Start near threshold so first fund check runs within ~2 cycles of startup
+  let cyclesSinceLastFundCheck = WORKER_FUND_CHECK_CYCLES - 2;
 
   for (; ;) {
     const cycleStart = Date.now();
