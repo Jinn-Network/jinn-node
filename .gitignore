@@ -18,6 +18,7 @@ __pycache__/
 .gemini/
 .claude/
 .jinn/
+jinn.yaml
 src/gemini-extension/skills/
 
 coverage/
