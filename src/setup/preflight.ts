@@ -246,10 +246,10 @@ async function checkStrictDeployFundingBehavior(cwd: string): Promise<{ success:
   return new Promise((res) => {
     const script = [
       'import inspect',
-      'import operate.cli',
+      'import operate.services.manage',
       'import sys',
-      'src = inspect.getsource(operate.cli)',
-      "has_fund = 'manager.fund_service_single_chain(' in src",
+      'src = inspect.getsource(operate.services.manage)',
+      "has_fund = 'fund_service_single_chain' in src",
       "has_nonfatal = 'Agent funding failed (non-fatal)' in src",
       'if (not has_fund) or has_nonfatal:',
       "    sys.stderr.write(f'has_fund={has_fund} has_nonfatal={has_nonfatal}\\n')",
