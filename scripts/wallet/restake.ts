@@ -21,6 +21,7 @@
 import 'dotenv/config';
 import { parseArgs } from 'util';
 import { ethers } from 'ethers';
+import { createRpcProvider } from '../../src/config/index.js';
 import { OlasOperateWrapper } from '../../src/worker/OlasOperateWrapper.js';
 import {
   getServiceStakingInfo,
@@ -101,7 +102,7 @@ which handles claim → unstake → approve → stake automatically.
   // This gives operators full visibility. The core logic is in checkAndRestakeServices().
 
   const wrapper = await OlasOperateWrapper.create({ rpcUrl });
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(rpcUrl);
 
   try {
     await wrapper.startServer();

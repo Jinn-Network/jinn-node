@@ -24,6 +24,7 @@
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
+import { ethers } from 'ethers';
 
 const __here = path.dirname(fileURLToPath(import.meta.url));
 const __repoRoot = path.resolve(__here, '../..');
@@ -77,3 +78,30 @@ export const config: FrozenNodeConfig = loadNodeConfig();
 
 /** Secrets loaded from .env (API keys, passwords — never in YAML). */
 export const secrets: Secrets = loadSecrets();
+
+// ---------------------------------------------------------------------------
+// RPC Provider Factory (ported from main's centralized RPC proxy support)
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a JsonRpcProvider with optional Bearer token auth for rpc.jinn.network.
+ * When RPC_PROXY_TOKEN is set, uses ethers FetchRequest to attach the Authorization header.
+ * When unset, creates a plain JsonRpcProvider.
+ *
+ * Batch size is capped at 10 to stay within RPC proxy limits.
+ * ethers v6 auto-splits larger batches into sequential chunks.
+ */
+export function createRpcProvider(rpcUrl?: string): ethers.JsonRpcProvider {
+  const url = rpcUrl ?? secrets.rpcUrl;
+  if (!url) {
+    throw new Error('RPC URL is required but not configured (set RPC_URL in .env or jinn.yaml)');
+  }
+  const token = secrets.rpcProxyToken;
+  const batchMaxCount = 10;
+  if (token) {
+    const fetchRequest = new ethers.FetchRequest(url);
+    fetchRequest.setHeader('Authorization', `Bearer ${token}`);
+    return new ethers.JsonRpcProvider(fetchRequest, undefined, { batchMaxCount });
+  }
+  return new ethers.JsonRpcProvider(url, undefined, { batchMaxCount });
+}

@@ -25,6 +25,7 @@ import 'dotenv/config';
 import { ethers } from 'ethers';
 import Safe from '@safe-global/protocol-kit';
 import { getMasterPrivateKey, getMasterEOA, getMasterSafe } from '../../src/env/operate-profile.js';
+import { createRpcProvider } from '../../src/config/index.js';
 
 // ============================================================================
 // Configuration
@@ -163,7 +164,7 @@ async function main() {
     console.log();
 
     // Setup provider (read-only for preflight)
-    const provider = new ethers.JsonRpcProvider(RPC_URL);
+    const provider = createRpcProvider(RPC_URL);
 
     // For dry-run, we only need read access. Defer wallet decryption to live execution.
     const masterEOA = getMasterEOA();

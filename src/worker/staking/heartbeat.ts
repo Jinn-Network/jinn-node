@@ -26,7 +26,7 @@ import { getServicePrivateKey, getServiceSafeAddress, getMechAddress } from '../
 import { submitMarketplaceRequest } from '../MechMarketplaceRequester.js';
 import { computeProjectedEpochTarget, readNonNegativeIntEnv, readPositiveIntEnv } from './target.js';
 import type { ServiceInfo } from '../ServiceConfigReader.js';
-import { config, secrets } from '../../config/index.js';
+import { config, secrets, createRpcProvider } from '../../config/index.js';
 
 const log = workerLogger.child({ component: 'HEARTBEAT' });
 
@@ -124,8 +124,7 @@ async function getActivityDeficit(
   serviceId: number,
   marketplaceAddress: string,
 ): Promise<{ deficit: number; current: number; target: number; epochSecondsRemaining: number; multisig: string }> {
-  const rpcUrl = secrets.rpcUrl;
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(secrets.rpcUrl);
 
   const staking = new ethers.Contract(stakingContract, STAKING_ABI, provider);
   const overrideTarget = readPositiveIntEnv('WORKER_STAKING_TARGET');
@@ -261,6 +260,17 @@ async function submitHeartbeatWithCredentials(
 const HEARTBEAT_MIN_INTERVAL_SEC = parseInt(process.env.HEARTBEAT_MIN_INTERVAL_SEC || '60');
 
 const lastHeartbeatTimestampByService = new Map<number, number>();
+const lastHeartbeatTimestampBySigner = new Map<string, number>();
+
+function getSignerKeyForService(service: ServiceInfo): string | null {
+  if (service.agentEoaAddress) return service.agentEoaAddress.toLowerCase();
+  if (!service.agentPrivateKey) return null;
+  try {
+    return ethers.computeAddress(service.agentPrivateKey).toLowerCase();
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Maybe submit heartbeat requests to meet the staking liveness requirement.
@@ -287,8 +297,7 @@ export async function maybeSubmitHeartbeat(
   }
 
   // Detect checker type — skip heartbeat for delivery-based (v2) checkers
-  const rpcUrl = secrets.rpcUrl;
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(secrets.rpcUrl);
 
   // We need a multisig for detection. Resolve from staking contract if not cached.
   let multisig = resolvedMultisigByService.get(serviceId);
@@ -371,6 +380,20 @@ export async function maybeSubmitHeartbeatForService(
     return;
   }
 
+  const signerKey = getSignerKeyForService(service);
+  if (signerKey) {
+    const lastBySigner = lastHeartbeatTimestampBySigner.get(signerKey) ?? 0;
+    if (now - lastBySigner < HEARTBEAT_MIN_INTERVAL_SEC) {
+      log.info({
+        serviceId,
+        signer: signerKey,
+        secondsSinceLast: now - lastBySigner,
+        minInterval: HEARTBEAT_MIN_INTERVAL_SEC,
+      }, 'Heartbeat throttled by signer');
+      return;
+    }
+  }
+
   try {
     const { deficit, current, target, epochSecondsRemaining, multisig } = await getActivityDeficit(stakingContract, serviceId, marketplaceAddress);
 
@@ -396,6 +419,9 @@ export async function maybeSubmitHeartbeatForService(
     await submitHeartbeatWithCredentials(multisig, service.mechContractAddress, service.agentPrivateKey, serviceId, marketplaceAddress);
 
     lastHeartbeatTimestampByService.set(serviceId, Math.floor(Date.now() / 1000));
+    if (signerKey) {
+      lastHeartbeatTimestampBySigner.set(signerKey, Math.floor(Date.now() / 1000));
+    }
   } catch (error: any) {
     log.warn({ error: error.message, serviceId }, 'Heartbeat check failed (non-fatal)');
   }

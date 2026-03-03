@@ -31,7 +31,7 @@ import { ExecutionResult } from './types.js';
 import { validateTransaction } from './validation.js';
 import { updateTransactionStatus } from './control_api_client.js';
 import { serializeError } from './logging/errors.js';
-import { config, secrets } from '../config/index.js';
+import { config, secrets, createRpcProvider } from '../config/index.js';
 import { getServicePrivateKey } from '../env/operate-profile.js';
 
 // Create a child logger for EOA executor operations
@@ -54,7 +54,7 @@ export class EoaExecutor implements ITransactionExecutor {
     const privateKey = getServicePrivateKey();
     if (!privateKey) throw new Error('Worker private key not found in .operate config or environment');
 
-    this.provider = new ethers.JsonRpcProvider(rpcUrl);
+    this.provider = createRpcProvider(rpcUrl);
     this.signer = new ethers.Wallet(privateKey, this.provider);
 
     eoaLogger.info('EoaExecutor initialized');

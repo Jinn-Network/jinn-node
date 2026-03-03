@@ -13,6 +13,7 @@
  */
 
 import { ethers } from 'ethers';
+import { createRpcProvider } from '../../config/index.js';
 import { logger } from '../../logging/index.js';
 import {
   MECH_MARKETPLACE_ABI,
@@ -85,7 +86,7 @@ export async function deployMechViaSafe(config: MechDeployConfig): Promise<MechD
   }
 
   try {
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const provider = createRpcProvider(rpcUrl);
     const agentWallet = new ethers.Wallet(agentPrivateKey, provider);
 
     // 1. Verify agent EOA has ETH for gas

@@ -16,6 +16,7 @@ import { listServiceConfigs, type ServiceInfo } from '../../src/worker/ServiceCo
 import { ActivityMonitor, type ServiceCheckInput, type ServiceDashboardStatus } from '../../src/worker/rotation/ActivityMonitor.js';
 import { printHeader } from '../../src/setup/display.js';
 import { OlasOperateWrapper } from '../../src/worker/OlasOperateWrapper.js';
+import { createRpcProvider } from '../../src/config/index.js';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -95,7 +96,7 @@ async function main() {
     process.exit(1);
   }
 
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(rpcUrl);
   const middlewarePath = await resolveMiddlewarePath();
   const allServices = await listServiceConfigs(middlewarePath);
 

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { mcpLogger } from '../../../logging/index.js';
-import { getVenture } from '../../../data/ventures.js';
+import { getSupabase } from './shared/supabase.js';
 
 export const readDispatchScheduleParams = z.object({
   ventureId: z.string().uuid().describe('Venture ID to read schedule for'),
@@ -29,9 +29,16 @@ export async function readDispatchSchedule(args: unknown) {
     }
 
     const { ventureId } = parsed.data;
-    const venture = await getVenture(ventureId);
 
-    if (!venture) {
+    // Use credential bridge supabase (worker-side client is null in agent context)
+    const supabase = await getSupabase();
+    const { data: venture, error } = await supabase
+      .from('ventures')
+      .select('*')
+      .eq('id', ventureId)
+      .single();
+
+    if (error || !venture) {
       return errorResponse('NOT_FOUND', `Venture not found: ${ventureId}`);
     }
 

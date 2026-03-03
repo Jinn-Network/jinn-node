@@ -9,7 +9,7 @@
 import { ethers } from 'ethers';
 import { workerLogger } from '../../logging/index.js';
 import { getServicePrivateKey } from '../../env/operate-profile.js';
-import { config, secrets } from '../../config/index.js';
+import { config, secrets, createRpcProvider } from '../../config/index.js';
 
 const log = workerLogger.child({ component: 'CHECKPOINT' });
 
@@ -24,8 +24,7 @@ const STAKING_ABI = [
  * Safe to call frequently — it's a no-op if the epoch hasn't ended.
  */
 export async function maybeCallCheckpoint(stakingContract: string): Promise<void> {
-  const rpcUrl = secrets.rpcUrl;
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(secrets.rpcUrl);
 
   const contract = new ethers.Contract(stakingContract, STAKING_ABI, provider);
 

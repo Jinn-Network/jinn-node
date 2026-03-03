@@ -18,6 +18,7 @@ import { ethers } from 'ethers';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { listServiceConfigs, type ServiceInfo } from '../../src/worker/ServiceConfigReader.js';
+import { createRpcProvider } from '../../src/config/index.js';
 
 const MECH_ABI = [
   'function changeMaxDeliveryRate(uint256 newMaxDeliveryRate)',
@@ -135,7 +136,7 @@ async function main() {
   }
 
   console.log(`Found ${services.length} service(s):\n`);
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(rpcUrl);
   const target = BigInt(newRate);
 
   let success = 0;

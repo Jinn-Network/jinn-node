@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { mcpLogger } from '../../../logging/index.js';
-import { getTemplate, getTemplateBySlug, listTemplates } from '../../../scripts/templates/crud.js';
+import { getSupabase } from './shared/supabase.js';
 
 /**
  * Input schema for querying templates.
@@ -56,8 +56,9 @@ export async function templateQuery(args: unknown) {
         if (!id) {
           return errorResponse('VALIDATION_ERROR', 'get mode requires id');
         }
-        const template = await getTemplate(id);
-        if (!template) {
+        const supabaseGet = await getSupabase();
+        const { data: template, error: getErr } = await supabaseGet.from('templates').select('*').eq('id', id).single();
+        if (getErr || !template) {
           return errorResponse('NOT_FOUND', `Template not found: ${id}`);
         }
         mcpLogger.info({ templateId: id }, 'Retrieved template by ID');
@@ -68,37 +69,41 @@ export async function templateQuery(args: unknown) {
         if (!slug) {
           return errorResponse('VALIDATION_ERROR', 'by_slug mode requires slug');
         }
-        const template = await getTemplateBySlug(slug);
-        if (!template) {
+        const supabaseSlug = await getSupabase();
+        const { data: slugTemplate, error: slugErr } = await supabaseSlug.from('templates').select('*').eq('slug', slug).single();
+        if (slugErr || !slugTemplate) {
           return errorResponse('NOT_FOUND', `Template not found with slug: ${slug}`);
         }
         mcpLogger.info({ slug }, 'Retrieved template by slug');
-        return successResponse({ template });
+        return successResponse({ template: slugTemplate });
       }
 
       case 'by_venture': {
         if (!ventureId) {
           return errorResponse('VALIDATION_ERROR', 'by_venture mode requires ventureId');
         }
-        const templates = await listTemplates({
-          ventureId,
-          status,
-          limit: limit || 20,
-          offset: offset || 0,
-        });
+        const supabaseVenture = await getSupabase();
+        let ventureQuery = supabaseVenture.from('templates').select('*').eq('venture_id', ventureId).order('created_at', { ascending: false });
+        if (status) ventureQuery = ventureQuery.eq('status', status);
+        ventureQuery = ventureQuery.range(offset || 0, (offset || 0) + (limit || 20) - 1);
+        const { data: ventureTemplates, error: ventureErr } = await ventureQuery;
+        if (ventureErr) throw new Error(`Failed to list templates: ${ventureErr.message}`);
+        const templates = ventureTemplates || [];
         mcpLogger.info({ ventureId, count: templates.length }, 'Listed templates by venture');
         return successResponse({ templates, total: templates.length });
       }
 
       case 'list':
       default: {
-        const templates = await listTemplates({
-          status,
-          search,
-          tags,
-          limit: limit || 20,
-          offset: offset || 0,
-        });
+        const supabaseList = await getSupabase();
+        let listQuery = supabaseList.from('templates').select('*').order('created_at', { ascending: false });
+        if (status) listQuery = listQuery.eq('status', status);
+        if (search) listQuery = listQuery.or(`name.ilike.%${search}%,description.ilike.%${search}%`);
+        if (tags && tags.length > 0) listQuery = listQuery.overlaps('tags', tags);
+        listQuery = listQuery.range(offset || 0, (offset || 0) + (limit || 20) - 1);
+        const { data: listData, error: listErr } = await listQuery;
+        if (listErr) throw new Error(`Failed to list templates: ${listErr.message}`);
+        const templates = listData || [];
         mcpLogger.info({ count: templates.length }, 'Listed templates');
         return successResponse({ templates, total: templates.length });
       }

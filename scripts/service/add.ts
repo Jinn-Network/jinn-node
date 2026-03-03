@@ -218,7 +218,7 @@ async function main() {
     // Preflight: check staking slots
     printStep('active', 'Checking staking contract slots...');
     try {
-      const provider = new ethers.JsonRpcProvider(rpcUrl);
+      const provider = createRpcProvider(rpcUrl);
       const stakingContractInstance = new ethers.Contract(stakingContract, STAKING_ABI, provider);
       const serviceIds = await stakingContractInstance.getServiceIds();
       console.log(`      Staked services: ${serviceIds.length}`);
@@ -235,7 +235,7 @@ async function main() {
     // Preflight: check OLAS balance on Master Safe
     printStep('active', 'Checking Master Safe OLAS balance...');
     try {
-      const provider = new ethers.JsonRpcProvider(rpcUrl);
+      const provider = createRpcProvider(rpcUrl);
       const olasContract = new ethers.Contract(OLAS_TOKEN_BASE, ERC20_ABI, provider);
       const olasBalance = await olasContract.balanceOf(masterSafe);
       const formatted = ethers.formatEther(olasBalance);

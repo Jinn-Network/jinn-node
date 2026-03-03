@@ -9,6 +9,8 @@
 export interface Secrets {
     /** RPC endpoint URL — often contains embedded API keys (e.g. Alchemy, Infura) */
     rpcUrl?: string;
+    /** Bearer token for authenticated RPC proxy (rpc.jinn.network) */
+    rpcProxyToken?: string;
     /** Control API authentication key */
     controlApiServiceKey?: string;
     /** Test RPC endpoint URL — same API key concern as rpcUrl */
@@ -43,6 +45,7 @@ export interface Secrets {
 export function loadSecrets(): Secrets {
     return {
         rpcUrl: process.env.RPC_URL,
+        rpcProxyToken: process.env.RPC_PROXY_TOKEN,
         controlApiServiceKey: process.env.CONTROL_API_SERVICE_KEY,
         testRpcUrl: process.env.TEST_RPC_URL,
         operatePassword: process.env.OPERATE_PASSWORD,

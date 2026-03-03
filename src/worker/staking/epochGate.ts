@@ -18,7 +18,7 @@
 import { ethers } from 'ethers';
 import { workerLogger } from '../../logging/index.js';
 import { computeProjectedEpochTarget, readNonNegativeIntEnv, readPositiveIntEnv } from './target.js';
-import { config, secrets } from '../../config/index.js';
+import { config, secrets, createRpcProvider } from '../../config/index.js';
 
 const log = workerLogger.child({ component: 'EPOCH_GATE' });
 
@@ -123,8 +123,7 @@ export async function checkEpochGate(
   }
 
   try {
-    const rpcUrl = secrets.rpcUrl;
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const provider = createRpcProvider(secrets.rpcUrl);
     const stakingContract = new ethers.Contract(stakingContractAddress, STAKING_ABI, provider);
 
     const [{ tsCheckpoint, nextCheckpoint }, serviceInfo, activityCheckerAddress, livenessPeriod] = await Promise.all([

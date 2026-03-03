@@ -201,7 +201,7 @@ export const EXTENSION_META_TOOLS = {
     tools: [...BROWSER_AUTOMATION_TOOLS] as string[],
   },
   // nano_banana: deprecated — Gemini CLI extension unreliable on Railway
-workstream_analysis: {
+  workstream_analysis: {
     installUrl: 'local:gemini-extension',
     extensionName: 'jinn-extensions',
     requiredEnv: [] as readonly string[],
@@ -421,6 +421,9 @@ export const VALID_JOB_TOOLS: ReadonlySet<string> = new Set([
   ...FIREFLIES_TOOLS,
   ...RAILWAY_TOOLS,
   ...CONTENT_STREAM_TOOLS,
+  // Dispatch schedule tools (venture orchestration)
+  'read_dispatch_schedule',
+  'update_dispatch_schedule',
   // Extension tools
   'inspect_workstream',
   'inspect_job_run',

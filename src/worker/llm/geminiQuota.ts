@@ -5,7 +5,7 @@ import { DEFAULT_WORKER_MODEL, normalizeGeminiModel } from '../../shared/gemini-
 import { OAuth2Client } from 'google-auth-library';
 import { homedir } from 'os';
 import { join } from 'path';
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from 'fs';
 import {
   getGeminiCredentialFromAuthManager,
   syncAndWriteGeminiCredentials,
@@ -52,6 +52,38 @@ const DEFAULT_MAX_BACKOFF_MS = 10 * 60_000;
 
 let loggedMissingKey = false;
 let loggedNonQuotaFailure = false;
+
+// Cooldown map: credential index → expiry timestamp.
+// Populated when the Gemini CLI itself reports a quota error (TerminalQuotaError),
+// which the retrieveUserQuota endpoint may not reflect (it misses RPM limits).
+const credentialCooldownMap = new Map<number, number>();
+const DEFAULT_CREDENTIAL_COOLDOWN_MS = 5 * 60_000; // 5 minutes
+
+/**
+ * Mark an OAuth credential as temporarily exhausted after a CLI quota error.
+ * selectAvailableCredential() will skip credentials in cooldown.
+ */
+export function markCredentialExhausted(
+  index: number,
+  cooldownMs: number = DEFAULT_CREDENTIAL_COOLDOWN_MS
+): void {
+  const expiry = Date.now() + cooldownMs;
+  credentialCooldownMap.set(index, expiry);
+  workerLogger.info(
+    { credentialIndex: index, cooldownMs, expiresAt: new Date(expiry).toISOString() },
+    'Credential marked as exhausted (CLI quota error feedback)'
+  );
+}
+
+function isCredentialInCooldown(index: number): boolean {
+  const expiry = credentialCooldownMap.get(index);
+  if (!expiry) return false;
+  if (Date.now() >= expiry) {
+    credentialCooldownMap.delete(index);
+    return false;
+  }
+  return true;
+}
 
 function normalizeModel(model: string): string {
   const trimmed = model.trim();
@@ -311,6 +343,24 @@ function writeCredentialToGeminiDir(cred: OAuthCredentialSet, index: number): vo
   );
 }
 
+// Remove OAuth creds from ~/.gemini/ so the Gemini CLI falls back to API key.
+// The CLI prioritizes OAuth creds on disk over the settings.json selectedType,
+// so we must remove them to force API key auth.
+function clearOAuthCredsFromDisk(): void {
+  const userGeminiDir = join(homedir(), '.gemini');
+  for (const file of ['oauth_creds.json', 'google_accounts.json']) {
+    const path = join(userGeminiDir, file);
+    try {
+      if (existsSync(path)) {
+        unlinkSync(path);
+        workerLogger.info({ file }, 'Removed OAuth credential file for API key fallback');
+      }
+    } catch (err: any) {
+      workerLogger.debug({ file, error: err.message }, 'Failed to remove OAuth credential file');
+    }
+  }
+}
+
 // Select first credential with available quota and write it to ~/.gemini/
 export async function selectAvailableCredential(
   options?: { model?: string }
@@ -331,6 +381,13 @@ export async function selectAvailableCredential(
 
   for (let i = 0; i < credentials.length; i++) {
     const cred = credentials[i];
+
+    // Skip credentials in cooldown (marked exhausted by CLI quota error feedback)
+    if (isCredentialInCooldown(i)) {
+      workerLogger.info({ credentialIndex: i, total: credentials.length }, 'Skipping credential (in cooldown from CLI quota error)');
+      continue;
+    }
+
     workerLogger.info({ credentialIndex: i, total: credentials.length }, 'Checking credential quota');
 
     const result = await checkOAuthQuotaForCredential(cred, options?.model);
@@ -474,6 +531,20 @@ export async function waitForGeminiQuota(options: QuotaWaitOptions = {}): Promis
     }
   }
 
+  // All OAuth credentials exhausted — try API key as fallback before blocking
+  const apiKey = secrets.geminiApiKey || process.env.GEMINI_API_KEY;
+  if (apiKey) {
+    const apiKeyResult = await checkGeminiQuota({ model });
+    if (apiKeyResult.ok || !apiKeyResult.checked) {
+      workerLogger.info({ model }, 'All OAuth credentials exhausted; falling back to GEMINI_API_KEY');
+      // Remove OAuth creds from ~/.gemini/ so the CLI doesn't pick them up
+      // and instead uses the API key via settings.json selectedType.
+      clearOAuthCredsFromDisk();
+      return { selectedCredential: null, selectedIndex: -1, allExhausted: false };
+    }
+    workerLogger.warn({ model, detail: apiKeyResult.detail }, 'API key also exhausted');
+  }
+
   // All credentials exhausted - enter backoff loop until one becomes available
   let backoffAttempt = 0;
   while (selection.allExhausted) {
@@ -491,8 +562,19 @@ export async function waitForGeminiQuota(options: QuotaWaitOptions = {}): Promis
     await sleep(waitMs);
     backoffAttempt += 1;
 
-    // Re-check all credentials
+    // Re-check OAuth credentials first
     selection = await selectAvailableCredential({ model });
+    if (selection.selectedCredential) break;
+
+    // Also check API key on each retry
+    if (apiKey) {
+      const retryResult = await checkGeminiQuota({ model });
+      if (retryResult.ok || !retryResult.checked) {
+        workerLogger.info({ model }, 'OAuth still exhausted; falling back to GEMINI_API_KEY');
+        clearOAuthCredsFromDisk();
+        return { selectedCredential: null, selectedIndex: -1, allExhausted: false };
+      }
+    }
   }
 
   return selection;

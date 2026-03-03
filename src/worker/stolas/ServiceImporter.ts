@@ -11,6 +11,7 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { ethers } from 'ethers';
+import { createRpcProvider } from '../../config/index.js';
 import { logger } from '../../logging/index.js';
 import { SERVICE_CONSTANTS } from '../config/ServiceConfig.js';
 
@@ -79,7 +80,7 @@ export async function importServiceFromChain(
 
   // ── 1. Query on-chain state ───────────────────────────────────────────────
 
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(rpcUrl);
 
   // Get multisig from staking contract's mapServiceInfo
   const staking = new ethers.Contract(stakingContractAddress, STAKING_ABI, provider);

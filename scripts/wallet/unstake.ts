@@ -16,6 +16,7 @@ import { parseArgs } from 'util';
 import { ethers } from 'ethers';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { createRpcProvider } from '../../src/config/index.js';
 
 // StakingTokenProxy ABI - just the unstake function
 const STAKING_ABI = [
@@ -128,7 +129,7 @@ Any accumulated rewards are returned to the Service Safe.
   console.log(`Staking Contract: ${stakingContract}`);
   console.log('');
 
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(rpcUrl);
   const staking = new ethers.Contract(stakingContract, STAKING_ABI, provider);
 
   // Check if service is staked

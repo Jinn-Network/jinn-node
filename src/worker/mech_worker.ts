@@ -13,7 +13,6 @@ import { getInheritedEnv } from './status/autoDispatch.js';
 import { serializeError } from './logging/errors.js';
 import { safeParseToolResponse } from './tool_utils.js';
 import { processOnce as processJobOnce } from './orchestration/jobRunner.js';
-import { fetchIpfsMetadata } from './metadata/fetchIpfsMetadata.js';
 import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
 import { shouldStop } from './cycleControl.js';
 import { checkAndDispatchScheduledVentures } from './ventures/ventureWatcher.js';
@@ -70,6 +69,11 @@ const PONDER_GRAPHQL_URL = config.services.ponderUrl;
 const CONTROL_API_URL = config.services.controlApiUrl;
 const SINGLE_SHOT = process.argv.includes('--single') || process.argv.includes('--single-job');
 const USE_CONTROL_API = config.services.useControlApi;
+
+function isHeartbeatLeaderWorker(): boolean {
+  const workerId = process.env.WORKER_ID || '';
+  return !workerId || workerId.endsWith('-1') || workerId === 'default';
+}
 
 // Track jobs executed in this session to prevent re-execution on delivery failure
 // This prevents infinite loops when delivery fails but Control API allows re-claiming
@@ -656,6 +660,7 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       mech
       sender
       workstreamId
+      ventureId
       ipfsHash
       blockTimestamp
       delivered
@@ -737,6 +742,7 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       mech
       sender
       workstreamId
+      ventureId
       ipfsHash
       blockTimestamp
       delivered
@@ -807,7 +813,8 @@ async function fetchRecentRequests(limit: number = 10): Promise<UnclaimedRequest
       delivered: Boolean(r?.delivered === true),
       dependencies: Array.isArray(r?.dependencies) ? r.dependencies.map((dep: any) => String(dep)) : undefined,
       enabledTools: Array.isArray(r?.enabledTools) ? r.enabledTools : undefined,
-      jobName: r?.jobName ? String(r.jobName) : undefined
+      jobName: r?.jobName ? String(r.jobName) : undefined,
+      ventureId: r?.ventureId ? String(r.ventureId) : undefined,
     })) as UnclaimedRequest[];
   } catch (e) {
     workerLogger.warn({ error: serializeError(e) }, 'Ponder GraphQL not reachable; returning empty set');
@@ -820,6 +827,19 @@ let cachedWeb3: InstanceType<typeof Web3> | null = null;
 let cachedWeb3RpcUrl: string | null = null;
 let cachedMarketplaceContract: any = null;
 const MARKETPLACE_ADDRESS = '0xf24eE42edA0fc9b33B7D41B06Ee8ccD2Ef7C5020';
+// Multicall3 is deployed at the same address on all EVM chains
+const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11';
+const MULTICALL3_ABI = [
+  {
+    inputs: [{ components: [{ name: 'target', type: 'address' }, { name: 'callData', type: 'bytes' }], name: 'calls', type: 'tuple[]' }],
+    name: 'aggregate',
+    outputs: [{ name: 'blockNumber', type: 'uint256' }, { name: 'returnData', type: 'bytes[]' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+// Max calls per multicall batch — stay well within gas limits
+const MULTICALL_BATCH_SIZE = 100;
 
 function getWeb3Singleton(rpcUrl: string): InstanceType<typeof Web3> {
   if (cachedWeb3 && cachedWeb3RpcUrl === rpcUrl) return cachedWeb3;
@@ -850,33 +870,58 @@ async function filterUnclaimed(requests: UnclaimedRequest[]): Promise<UnclaimedR
 
     const web3 = getWeb3Singleton(rpcHttpUrl);
     const marketplace = getMarketplaceContract(web3);
+    const multicall = new (web3 as any).eth.Contract(MULTICALL3_ABI, MULTICALL3_ADDRESS);
 
+    // Encode all mapRequestIdInfos calls
+    const calls = notDelivered.map(request => ({
+      target: MARKETPLACE_ADDRESS,
+      callData: marketplace.methods.mapRequestIdInfos(String(request.id)).encodeABI(),
+    }));
+
+    // mapRequestIdInfos return type: (address, address, address, uint256, uint256, bytes32)
+    const RETURN_TYPES = ['address', 'address', 'address', 'uint256', 'uint256', 'bytes32'];
+    const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
     const filtered: UnclaimedRequest[] = [];
 
-    for (const request of notDelivered) {
-      const requestId = String(request.id);
-      try {
-        const requestInfo = await marketplace.methods.mapRequestIdInfos(requestId).call();
-        const isDelivered = requestInfo.deliveryMech !== '0x0000000000000000000000000000000000000000';
+    // Process in chunks to avoid gas limit issues
+    for (let i = 0; i < calls.length; i += MULTICALL_BATCH_SIZE) {
+      const chunk = calls.slice(i, i + MULTICALL_BATCH_SIZE);
+      const chunkRequests = notDelivered.slice(i, i + MULTICALL_BATCH_SIZE);
 
-        if (!isDelivered) {
-          // Store responseTimeout from on-chain data for priority window checks
-          if (requestInfo.responseTimeout) {
-            request.responseTimeout = Number(requestInfo.responseTimeout);
+      try {
+        const { returnData } = await multicall.methods.aggregate(chunk).call();
+
+        for (let j = 0; j < chunkRequests.length; j++) {
+          try {
+            const decoded = web3.eth.abi.decodeParameters(RETURN_TYPES, returnData[j]) as any;
+            const deliveryMech = decoded[1]; // second output is deliveryMech
+            const responseTimeout = decoded[3]; // fourth output is responseTimeout
+            const isDelivered = deliveryMech !== ZERO_ADDRESS;
+
+            if (!isDelivered) {
+              if (responseTimeout) {
+                chunkRequests[j].responseTimeout = Number(responseTimeout);
+              }
+              filtered.push(chunkRequests[j]);
+            } else {
+              workerLogger.debug({
+                requestId: String(chunkRequests[j].id),
+                deliveredByMech: deliveryMech,
+              }, 'Request already delivered in marketplace by another mech - filtering out');
+            }
+          } catch (decodeErr) {
+            workerLogger.warn({ requestId: String(chunkRequests[j].id), error: serializeError(decodeErr) }, 'Failed to decode marketplace status; keeping request');
+            filtered.push(chunkRequests[j]);
           }
-          filtered.push(request);
-        } else {
-          workerLogger.debug({
-            requestId,
-            deliveredByMech: requestInfo.deliveryMech
-          }, 'Request already delivered in marketplace by another mech - filtering out');
         }
-      } catch (err) {
-        workerLogger.warn({ requestId, error: serializeError(err) }, 'Failed to check marketplace status for request; keeping request');
-        filtered.push(request);
+      } catch (batchErr) {
+        // If multicall fails for a chunk, keep all requests in that chunk
+        workerLogger.warn({ error: serializeError(batchErr), chunkSize: chunk.length, offset: i }, 'Multicall batch failed; keeping all requests in chunk');
+        filtered.push(...chunkRequests);
       }
     }
 
+    workerLogger.info({ total: notDelivered.length, kept: filtered.length, rpcCalls: Math.ceil(calls.length / MULTICALL_BATCH_SIZE) }, 'Marketplace status check via multicall');
     return filtered;
   } catch (e) {
     workerLogger.warn({ error: serializeError(e) }, 'Error checking marketplace status, falling back to Ponder status');
@@ -1562,6 +1607,25 @@ async function processOnce(): Promise<boolean> {
     }
   }
 
+  // Heartbeat coordination: only leader worker should claim heartbeat jobs.
+  // Non-leaders skip them before claim to avoid nonce collisions on delivery.
+  if (!isHeartbeatLeaderWorker()) {
+    const nonHeartbeat = candidates.filter(c => c.jobName !== '__heartbeat__');
+    if (nonHeartbeat.length !== candidates.length) {
+      workerLogger.info({
+        skippedHeartbeats: candidates.length - nonHeartbeat.length,
+      }, 'Skipping heartbeat requests on non-leader worker');
+    }
+    candidates = nonHeartbeat;
+  }
+
+  if (candidates.length === 0) {
+    consecutiveStuckCycles = 0;
+    lastStuckRequestIds = [];
+    workerLogger.info('No eligible requests after heartbeat-leader filter');
+    return false;
+  }
+
   const eligibleCandidates = candidates.filter(c => !executedJobsThisSession.has(c.id));
   if (eligibleCandidates.length === 0) {
     consecutiveStuckCycles += 1;
@@ -1850,7 +1914,8 @@ async function main() {
   let cyclesSinceLastCheckpoint = 0;
   let cyclesSinceLastHeartbeat = 0;
   let cyclesSinceLastVentureCheck = 0;
-  let cyclesSinceLastFundCheck = 0;
+  // Start near threshold so first fund check runs within ~2 cycles of startup
+  let cyclesSinceLastFundCheck = WORKER_FUND_CHECK_CYCLES - 2;
 
   for (; ;) {
     const cycleStart = Date.now();
@@ -1916,8 +1981,7 @@ async function main() {
 
         // Submit heartbeat requests to meet staking liveness requirement
         // Only the leader worker submits heartbeats to avoid Safe nonce collisions
-        const workerId = config.dev.workerId;
-        const isHeartbeatLeader = !workerId || workerId.endsWith('-1') || workerId === 'default';
+        const isHeartbeatLeader = isHeartbeatLeaderWorker();
         cyclesSinceLastHeartbeat++;
         if (isHeartbeatLeader && cyclesSinceLastHeartbeat >= WORKER_HEARTBEAT_CYCLES) {
           cyclesSinceLastHeartbeat = 0;

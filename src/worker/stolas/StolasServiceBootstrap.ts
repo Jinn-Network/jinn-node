@@ -28,6 +28,7 @@
 import { promises as fsPromises } from 'fs';
 import { join } from 'path';
 import { ethers } from 'ethers';
+import { createRpcProvider } from '../../config/index.js';
 import { logger } from '../../logging/index.js';
 import { getMasterPrivateKey, getMasterSafe } from '../../env/operate-profile.js';
 import { SERVICE_CONSTANTS } from '../config/ServiceConfig.js';
@@ -38,10 +39,10 @@ import type { ServiceInfo } from '../ServiceConfigReader.js';
 
 const stolasLogger = logger.child({ component: 'STOLAS-BOOTSTRAP' });
 
-// ─── Contracts ──────────────────────────────────────────────────────────────────
+// ─── Contracts (Base mainnet) ────────────────────────────────────────────────────
 
-const DISTRIBUTOR_PROXY = '0x40abf47B926181148000DbCC7c8DE76A3a61a66f';
-const JINN_STAKING      = '0x66A92CDa5B319DCCcAC6c1cECbb690CA3Fb59488';
+const DISTRIBUTOR_PROXY = '0x40abf47B926181148000DbCC7c8DE76A3a61a66f'; // ExternalStakingDistributor proxy
+const JINN_STAKING = '0x66A92CDa5B319DCCcAC6c1cECbb690CA3Fb59488'; // Jinn Staking v2 (agent 103, DeliveryActivityChecker)
 
 const DISTRIBUTOR_ABI = [
   'function mapStakingProxyConfigs(address) view returns (uint256)',
@@ -60,6 +61,7 @@ const SAFE_ABI = [
 ];
 
 // configHash = keccak256(abi.encode([103], [(1, 5000e18)]))
+// Tied to agent ID 103 with 1 instance at 5000 OLAS bond — must be recomputed if agent ID changes
 const CONFIG_HASH = (() => {
   const coder = ethers.AbiCoder.defaultAbiCoder();
   const encoded = coder.encode(
@@ -103,7 +105,7 @@ export async function stolasPreflightCheck(rpcUrl: string): Promise<{
   slotsRemaining: number;
   error?: string;
 }> {
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(rpcUrl);
 
   const dist = new ethers.Contract(DISTRIBUTOR_PROXY, DISTRIBUTOR_ABI, provider);
   const proxyConfig = await dist.mapStakingProxyConfigs(JINN_STAKING);
@@ -190,7 +192,7 @@ export async function stolasBootstrap(
 ): Promise<StolasBootstrapResult> {
   const { rpcUrl, chain, operateBasePath, operatePassword } = config;
 
-  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const provider = createRpcProvider(rpcUrl);
 
   // ── 1. Load Master EOA + Master Safe ──────────────────────────────────────
 

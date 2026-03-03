@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { mcpLogger } from '../../../logging/index.js';
-import { getVenture, updateVenture } from '../../../data/ventures.js';
+import { getSupabase } from './shared/supabase.js';
 import type { ScheduleEntry } from '../../../data/types/scheduleEntry.js';
 
 const scheduleEntrySchema = z.object({
@@ -63,8 +63,14 @@ export async function updateDispatchSchedule(args: unknown) {
 
     const { ventureId, schedule: fullSchedule, add, remove, update: updates } = parsed.data;
 
-    const venture = await getVenture(ventureId);
-    if (!venture) {
+    // Use credential bridge supabase (worker-side client is null in agent context)
+    const supabase = await getSupabase();
+    const { data: venture, error: fetchErr } = await supabase
+      .from('ventures')
+      .select('*')
+      .eq('id', ventureId)
+      .single();
+    if (fetchErr || !venture) {
       return errorResponse('NOT_FOUND', `Venture not found: ${ventureId}`);
     }
 
@@ -106,10 +112,13 @@ export async function updateDispatchSchedule(args: unknown) {
       }
     }
 
-    const updated = await updateVenture({
-      id: ventureId,
-      dispatchSchedule: newSchedule,
-    });
+    const { data: updated, error: updateErr } = await supabase
+      .from('ventures')
+      .update({ dispatch_schedule: newSchedule })
+      .eq('id', ventureId)
+      .select()
+      .single();
+    if (updateErr) throw new Error(`Failed to update schedule: ${updateErr.message}`);
 
     mcpLogger.info({ ventureId, scheduleCount: newSchedule.length }, 'Updated dispatch schedule');
     return successResponse({ schedule: updated.dispatch_schedule });

@@ -43,7 +43,8 @@ import { DEFAULT_WORKER_MODEL, normalizeGeminiModel, validateModelAllowed } from
 import type { UnclaimedRequest, IpfsMetadata, AgentExecutionResult, FinalStatus, ExecutionSummaryDetails, RecognitionPhaseResult, ReflectionResult, AdditionalContext } from '../types.js';
 import { getDependencyBranchInfo } from '../mech_worker.js';
 import { config } from '../../config/index.js';
-import { waitForGeminiQuota, isGeminiQuotaError } from '../llm/geminiQuota.js';
+import { waitForGeminiQuota, isGeminiQuotaError, markCredentialExhausted } from '../llm/geminiQuota.js';
+
 
 const DEFAULT_BASE_BRANCH = config.git.defaultBaseBranch;
 
@@ -372,8 +373,8 @@ export async function processOnce(
     });
     try {
       let executionAttempt = 0;
-      for (;;) {
-        await waitForGeminiQuota({
+      for (; ;) {
+        const quotaResult = await waitForGeminiQuota({
           reason: executionAttempt === 0 ? 'pre_execution' : 'execution_retry',
           requestId: target.id,
           jobName: metadata?.jobName,
@@ -385,6 +386,11 @@ export async function processOnce(
           break;
         } catch (agentError: any) {
           if (isGeminiQuotaError(agentError)) {
+            // Feed back CLI quota error to credential cooldown so the same
+            // credential isn't immediately re-selected on retry.
+            if (quotaResult.selectedIndex >= 0) {
+              markCredentialExhausted(quotaResult.selectedIndex);
+            }
             executionAttempt += 1;
             continue;
           }
