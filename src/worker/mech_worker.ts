@@ -363,7 +363,9 @@ let stakingAddressesFetchedAt: number = 0;
  */
 async function getMechFilterConfig(): Promise<MechFilterConfig> {
   const explicitMode = config.worker.mechFilterMode;
-  const stakingContract = config.staking.contract || undefined;
+  // Fall through to runtime-resolved staking contract (same pattern as epoch gate)
+  const runtimeResolved = await getRuntimeResolvedConfig();
+  const stakingContract = config.staking.contract || runtimeResolved?.stakingContract || undefined;
   const filterList = config.filtering.mechFilterList || undefined;
 
   // Deprecation warning for legacy WORKER_MECH_FILTER_LIST

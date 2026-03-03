@@ -23,6 +23,6 @@
 
 | Symptom | Fix |
 |---|---|
-| Worker cannot reach Ponder | Verify `PONDER_GRAPHQL_URL` |
-| Worker cannot reach Control API | Verify `CONTROL_API_URL` |
+| Worker cannot reach Ponder | Check `services.ponder_url` in jinn.yaml (env: `PONDER_GRAPHQL_URL`) |
+| Worker cannot reach Control API | Check `services.control_api_url` in jinn.yaml (env: `CONTROL_API_URL`) |
 | Git task failures | Set `GITHUB_TOKEN` and git author vars |

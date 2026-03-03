@@ -293,8 +293,7 @@ If the operator does not have 10,000 OLAS, they can use the **stOLAS** path. stO
 ### Prerequisites
 
 - Phases 1-2 completed (`.env` configured, dependencies installed)
-- Run `yarn setup` at least once to create the wallet (Master EOA + Master Safe). If setup exits for ETH funding, fund the Master EOA and rerun until the Master Safe is created.
-- **~0.02 ETH** on the Master EOA (gas for `stake()` transaction)
+- **~0.02 ETH** on the Master EOA (gas for wallet creation + `stake()` transaction)
 - **~0.01 ETH** in the Master Safe (for agent funding + mech deployment gas)
 
 ### Run stOLAS Setup
@@ -305,19 +304,20 @@ yarn setup --stolas
 ```
 
 This will:
-1. Load Master EOA + Master Safe from `.operate/`
-2. Generate a new agent EOA for this service
-3. Preflight check (distributor configured, staking slots available)
-4. Route `stake()` through Master Safe (creates service + Safe on-chain)
-5. Discover serviceId + Safe from chain events
-6. Store agent key in `.operate/keys/`
-7. Import service config to `.operate/services/`
-8. Check Master Safe has enough ETH for mech deployment
-9. Fund agent EOA from Master Safe (via FundDistributor)
-10. Deploy mech contract via service Safe
-11. Update config with mech address
+1. Create Master EOA + Master Safe if first run (wallet-only bootstrap, no OLAS needed)
+2. Load Master EOA + Master Safe from `.operate/`
+3. Generate a new agent EOA for this service
+4. Preflight check (distributor configured, staking slots available)
+5. Route `stake()` through Master Safe (creates service + Safe on-chain)
+6. Discover serviceId + Safe from chain events
+7. Store agent key in `.operate/keys/`
+8. Import service config to `.operate/services/`
+9. Check Master Safe has enough ETH for mech deployment
+10. Fund agent EOA from Master Safe (via FundDistributor)
+11. Deploy mech contract via service Safe
+12. Update config with mech address
 
-If step 8 fails (insufficient Master Safe ETH), setup returns with instructions to fund the Master Safe and run:
+If step 9 fails (insufficient Master Safe ETH), setup returns with instructions to fund the Master Safe and run:
 ```bash
 npx tsx scripts/deploy-mech.ts --service-config-id=<id>
 ```

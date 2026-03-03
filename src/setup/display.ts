@@ -77,7 +77,7 @@ export function printFundingRequirements(requirements: Array<{
   address: string;
   amount: string;
   token: string;
-}>): void {
+}>, network: string = 'Base'): void {
   if (requirements.length === 0) return;
 
   const innerWidth = BOX_WIDTH - 4;
@@ -95,7 +95,7 @@ export function printFundingRequirements(requirements: Array<{
   }
 
   console.log('║' + ' '.repeat(BOX_WIDTH - 2) + '║');
-  console.log('║  Network: Base'.padEnd(BOX_WIDTH - 1) + '║');
+  console.log(`║  Network: ${network}`.padEnd(BOX_WIDTH - 1) + '║');
   console.log('║' + ' '.repeat(BOX_WIDTH - 2) + '║');
   console.log('║  Checking balance every 10 seconds...'.padEnd(BOX_WIDTH - 1) + '║');
   console.log('║  Press Ctrl+C to exit'.padEnd(BOX_WIDTH - 1) + '║');

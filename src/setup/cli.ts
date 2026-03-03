@@ -454,6 +454,32 @@ async function main() {
 
     const basePath = isolatedEnv?.tempDir || process.cwd();
 
+    // ── Ensure wallet exists (first-time setup) ─────────────────────────
+    const walletDir = join(basePath, '.operate', 'wallets');
+    if (!existsSync(join(walletDir, 'ethereum.txt')) || !existsSync(join(walletDir, 'ethereum.json'))) {
+      printStep('active', 'No wallet found — creating Master EOA + Safe (no OLAS required)...');
+
+      const walletBootstrapConfig: SimplifiedBootstrapConfig = {
+        chain: chain as any,
+        operatePassword,
+        rpcUrl,
+        attended: attendedMode,
+        deployMech: false,
+        stakingProgram: 'no_staking',
+        walletOnly: true,
+        middlewarePath: isolatedEnv?.middlewareDir,
+        workingDirectory: isolatedEnv?.tempDir,
+      };
+
+      const walletBootstrap = new SimplifiedServiceBootstrap(walletBootstrapConfig);
+      const walletResult = await walletBootstrap.bootstrap();
+      if (!walletResult.success) {
+        printError(`Wallet creation failed: ${walletResult.error}`);
+        process.exit(1);
+      }
+      printStep('done', 'Wallet created — continuing with stOLAS bootstrap');
+    }
+
     printStep('active', 'Loading Master Safe + generating agent key...');
     printStep('active', 'Routing stake() through Master Safe...');
     const result = await stolasBootstrap({

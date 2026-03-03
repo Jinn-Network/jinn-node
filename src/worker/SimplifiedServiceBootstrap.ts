@@ -82,6 +82,11 @@ export interface SimplifiedBootstrapConfig {
    * Defaults to true unless JINN_REUSE_SERVICE_CONFIG is set to false.
    */
   reuseExistingService?: boolean;
+  /**
+   * When true, stop after creating wallet + Safe (skip service creation and deployment).
+   * Used by stOLAS flow to bootstrap wallet infrastructure without requiring OLAS.
+   */
+  walletOnly?: boolean;
 }
 
 export interface SimplifiedBootstrapResult {
@@ -514,6 +519,19 @@ ${'='.repeat(80)}
       masterSafe = safeResult.safeAddress;
     }
 
+    // walletOnly mode: return after wallet + Safe creation (skip service deployment).
+    // Used by stOLAS to bootstrap wallet infrastructure without requiring OLAS.
+    if (this.config.walletOnly) {
+      bootstrapLogger.info({ walletAddress, masterSafe }, 'walletOnly mode — returning after wallet + Safe creation');
+      return {
+        success: true,
+        serviceConfigId,
+        serviceSafeAddress: masterSafe,
+        configPath,
+        fundingRequirements: {},
+      };
+    }
+
     const fundingResultAfterSafe = await this.operateWrapper.getFundingRequirements(serviceConfigId);
     if (!fundingResultAfterSafe.success) {
       throw new Error(`Failed to fetch funding requirements: ${fundingResultAfterSafe.error}`);
@@ -632,7 +650,7 @@ ${'='.repeat(80)}
 
     // Use the new display utility
     if (requirements.length > 0) {
-      printFundingRequirements(requirements);
+      printFundingRequirements(requirements, this.config.chain);
     }
   }
 

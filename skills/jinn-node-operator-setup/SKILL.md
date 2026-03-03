@@ -92,7 +92,12 @@ cd jinn-node
 yarn setup --stolas
 ```
 
-Requires Master EOA + Master Safe to exist (run `yarn setup` first to create wallet). Only ETH needed for gas (~0.02 ETH on Master EOA + ~0.01 ETH in Master Safe).
+This will:
+1. Create the Master EOA + Master Safe (if first run — only ETH needed)
+2. Stake via ExternalStakingDistributor (no OLAS required, funded by LemonTree)
+3. Deploy a mech contract
+
+Only ETH needed: ~0.02 ETH on Master EOA + ~0.01 ETH in Master Safe.
 
 ### 5. Mnemonic capture protocol
 

@@ -220,9 +220,10 @@ export async function stolasBootstrap(
   }, 'Master EOA + Safe loaded');
 
   // Check Master EOA has ETH for gas (it signs and submits the Safe tx)
-  // Base L2 gas is cheap (~0.00003 ETH for 2.5M gas), so 0.001 ETH is plenty
+  // Base L2 gas is cheap, but stOLAS involves multiple transactions (Safe exec + stake)
+  // so keep a comfortable 0.005 ETH margin
   const balance = await provider.getBalance(masterWallet.address);
-  const minBalance = ethers.parseEther('0.001');
+  const minBalance = ethers.parseEther('0.005');
   if (balance < minBalance) {
     return {
       success: false,

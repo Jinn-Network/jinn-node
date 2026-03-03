@@ -46,7 +46,7 @@ export const workerSchema = z.object({
     activity_poll_ms: z.coerce.number().int().positive().default(60000),
     activity_cache_ttl_ms: z.coerce.number().int().positive().default(60000),
     staking_refresh_ms: z.coerce.number().int().positive().default(300000),
-    mech_filter_mode: z.enum(['any', 'list', 'single', 'staking']).default('single'),
+    mech_filter_mode: z.enum(['any', 'list', 'single', 'staking']).default('staking'),
     auto_restake: boolCoerce.default(true),
     tx_confirmations: z.coerce.number().int().positive().default(3),
     job_delay_ms: z.coerce.number().int().nonnegative().default(0),
@@ -58,7 +58,7 @@ export const workerSchema = z.object({
 });
 
 export const stakingSchema = z.object({
-    contract: z.string().default(''),
+    contract: z.string().default('0x66A92CDa5B319DCCcAC6c1cECbb690CA3Fb59488'),
     interval_ms_override: z.coerce.number().int().positive().optional(),
     program: z.string().default(''),
 });
