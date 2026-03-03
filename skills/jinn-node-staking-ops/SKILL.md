@@ -51,11 +51,12 @@ yarn staking:claim-rewards
 
 ```bash
 cd jinn-node
-yarn staking:migrate --source=jinn --target=jinn_v2 --dry-run
-yarn staking:migrate --source=jinn --target=jinn_v2
+yarn wallet:restake --target jinn_v2 --dry-run
+yarn wallet:restake --target jinn_v2
 ```
 
-Handles: unstake from source → top-up bond if target requires more → stake to target → verify.
+The `--target` flag updates each service's `staking_program_id` in config, then the middleware
+handles the full lifecycle (unstake → terminate → unbond → re-register → deploy → stake).
 
 ## Failure handling
 

@@ -496,7 +496,7 @@ All wallet commands require `OPERATE_PASSWORD` and `RPC_URL` in `.env` (unless n
 | `yarn service:fleet` | Fleet health summary (JSON output) |
 | `yarn service:add` | Add another service (multi-service rotation) |
 | `yarn rewards:summary` | View pending staking rewards |
-| `yarn staking:migrate --source=X --target=Y` | Migrate between staking contracts |
+| `yarn wallet:restake --target=jinn_v2` | Migrate between staking contracts |
 
 ---
 

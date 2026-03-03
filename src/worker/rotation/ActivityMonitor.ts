@@ -27,7 +27,7 @@ const rotationLogger = logger.child({ component: 'ACTIVITY-MONITOR' });
 
 const SAFETY_MARGIN = 1;
 
-// ABIs (from scripts/migrate-staking-contract.ts and scripts/archive/query-service-165-activity-requirements.ts)
+// ABIs (from scripts/wallet/restake.ts and scripts/archive/query-service-165-activity-requirements.ts)
 const STAKING_ABI = [
   'function livenessPeriod() view returns (uint256)',
   'function tsCheckpoint() view returns (uint256)',
