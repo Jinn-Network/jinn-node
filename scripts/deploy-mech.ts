@@ -253,9 +253,25 @@ async function main() {
   if (agentBalance < minAgentGas) {
     console.log('\n  Agent EOA needs funding for gas...');
 
-    if (masterSafeBalance >= ethers.parseEther('0.003')) {
-      // Normal path: distribute from Master Safe via FundDistributor
-      console.log('  Distributing from Master Safe...');
+    // Send directly from Master EOA to Agent EOA.
+    // We only need ~0.001 ETH for mech deployment gas.
+    // (The generic FundDistributor may fund the Service Safe first and
+    //  exhaust Master Safe budget before reaching the Agent. For mech
+    //  deployment, the Agent key just needs enough gas to sign the create() tx.)
+    const masterPrivateKey = getMasterPrivateKey();
+    if (!masterPrivateKey) {
+      console.error('\n  Cannot decrypt Master EOA key. Set OPERATE_PASSWORD.');
+      process.exit(1);
+    }
+
+    const masterWallet = new ethers.Wallet(masterPrivateKey, provider);
+    const masterEoaBalance = await provider.getBalance(masterWallet.address);
+    console.log(`  Master EOA (${masterWallet.address}): ${ethers.formatEther(masterEoaBalance)} ETH`);
+
+    const agentFundAmount = ethers.parseEther('0.001'); // minimal gas for mech create() tx
+    if (masterEoaBalance < agentFundAmount + ethers.parseEther('0.0005')) {
+      // Fallback: try Master Safe via FundDistributor
+      console.log('  Master EOA too low, trying FundDistributor from Master Safe...');
       const svcInfo: ServiceInfo = {
         serviceConfigId: target.serviceConfigId,
         serviceName: `jinn-stolas-${target.serviceId}`,
@@ -264,42 +280,19 @@ async function main() {
         chain: target.chain,
         serviceId: target.serviceId,
       };
-
       const fundResult = await maybeDistributeFunds([svcInfo], rpcUrl);
-      if (fundResult.error) {
-        console.error(`\n  Fund distribution error: ${fundResult.error}`);
-        process.exit(1);
-      }
       if (fundResult.funded.length > 0) {
         console.log(`  Funded ${fundResult.funded.length} address(es). txHash: ${fundResult.txHash}`);
+      } else {
+        console.error(`\n  Neither Master EOA nor Master Safe have enough ETH.`);
+        console.error(`  Send >= 0.002 ETH to Master EOA: ${masterWallet.address}`);
+        process.exit(1);
       }
     } else {
-      // Fallback: send ETH directly from Master EOA to Agent EOA
-      console.log('  Master Safe is empty. Sending ETH directly from Master EOA...');
-      const masterPrivateKey = getMasterPrivateKey();
-      if (!masterPrivateKey) {
-        console.error('\n  Cannot decrypt Master EOA key. Set OPERATE_PASSWORD.');
-        process.exit(1);
-      }
-
-      const masterWallet = new ethers.Wallet(masterPrivateKey, provider);
-      const masterEoaBalance = await provider.getBalance(masterWallet.address);
-      console.log(`  Master EOA (${masterWallet.address}): ${ethers.formatEther(masterEoaBalance)} ETH`);
-
-      if (masterEoaBalance < ethers.parseEther('0.002')) {
-        console.error(`\n  Master EOA has insufficient ETH (${ethers.formatEther(masterEoaBalance)}).`);
-        console.error(`  Send >= 0.01 ETH to Master Safe: ${masterSafeAddress}`);
-        console.error(`  Or send >= 0.002 ETH to Master EOA: ${masterWallet.address}`);
-        process.exit(1);
-      }
-
-      // Send ~0.002 ETH to agent, keeping some for Master EOA gas
-      const sendAmount = masterEoaBalance - ethers.parseEther('0.0003');
-      console.log(`  Sending ${ethers.formatEther(sendAmount)} ETH to Agent EOA...`);
-
+      console.log(`  Sending ${ethers.formatEther(agentFundAmount)} ETH from Master EOA to Agent EOA...`);
       const tx = await masterWallet.sendTransaction({
         to: target.agentEoaAddress,
-        value: sendAmount,
+        value: agentFundAmount,
       });
       const receipt = await tx.wait();
       console.log(`  Funded Agent EOA. txHash: ${receipt?.hash}`);
