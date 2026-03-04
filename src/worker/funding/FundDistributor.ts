@@ -16,6 +16,7 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { workerLogger } from '../../logging/index.js';
 import { getMasterSafe, getMasterPrivateKey, getMasterEOA, getMiddlewarePath } from '../../env/operate-profile.js';
+import { verifyAgentKeyAccessible } from '../../env/keystore-verify.js';
 import { createRpcProvider } from '../../config/index.js';
 import type { ServiceInfo } from '../ServiceConfigReader.js';
 
@@ -172,6 +173,9 @@ export async function maybeDistributeFunds(
   const agentTransfers: FundTransfer[] = [];
   const safeTransfers: FundTransfer[] = [];
 
+  // OPERATE_PASSWORD needed for key verification
+  const operatePassword = process.env.OPERATE_PASSWORD;
+
   for (const svc of services) {
     if (!svc.serviceSafeAddress || !svc.agentEoaAddress) continue;
 
@@ -179,6 +183,27 @@ export async function maybeDistributeFunds(
     if (!reqs) {
       result.skipped.push(`${svc.serviceConfigId}: no fund_requirements`);
       continue;
+    }
+
+    // SAFETY GATE: verify we can access the agent key before sending ETH.
+    // Never fund a wallet whose private key we can't prove we hold.
+    if (operatePassword) {
+      const keyAccessible = verifyAgentKeyAccessible(
+        svc.serviceConfigId,
+        svc.agentEoaAddress,
+        operatePassword,
+      );
+      if (!keyAccessible) {
+        result.skipped.push(
+          `Service #${svc.serviceId} (${svc.serviceConfigId}): agent key NOT accessible — refusing to fund`,
+        );
+        log.warn({ serviceId: svc.serviceId, agentEoa: svc.agentEoaAddress },
+          'SAFETY: Skipping service funding — agent key verification failed');
+        continue;
+      }
+    } else {
+      log.warn({ serviceId: svc.serviceId },
+        'OPERATE_PASSWORD not set — cannot verify agent key, skipping key verification');
     }
 
     result.checked++;
