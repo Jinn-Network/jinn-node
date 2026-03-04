@@ -78,7 +78,10 @@ export async function processOnce(
     try {
       metadata = await fetchIpfsMetadata(target.ipfsHash!);
       if (!metadata) {
-        metadata = {};
+        throw new Error(
+          `Cannot execute job: IPFS metadata fetch failed for hash ${target.ipfsHash}. ` +
+          `Without metadata, the worker has no prompt or configuration. Skipping.`
+        );
       }
       // Use model from job metadata if available, otherwise fall back to default
       const normalized = normalizeGeminiModel(metadata.model, DEFAULT_WORKER_MODEL);
