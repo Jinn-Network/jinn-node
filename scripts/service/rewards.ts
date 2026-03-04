@@ -112,7 +112,7 @@ async function main() {
     console.log(`  Service #${status.serviceId} (${status.serviceConfigId})`);
     console.log(`    Accrued:     ${formatOlas(status.accruedRewards)} OLAS`);
     console.log(`    This Epoch:  ~${epochRewardOlas} OLAS (${eligibilityLabel})`);
-    console.log(`    Activity:    ${status.eligibleRequests}/${status.requiredRequests} requests`);
+    console.log(`    Activity:    ${status.eligibleActivities}/${status.requiredActivities} deliveries`);
     console.log(`    Inactivity:  ${inactivityLabel}`);
     console.log(`    Staked Since: ${formatDate(status.tsStart)}`);
     console.log('');

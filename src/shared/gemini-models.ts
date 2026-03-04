@@ -9,6 +9,21 @@
 
 export const DEFAULT_WORKER_MODEL = 'gemini-3-flash';
 
+/**
+ * Models currently available on the Gemini API.
+ * Used as an enum constraint in dispatch tools to prevent agents from
+ * hallucinating model names from training data.
+ */
+export const AVAILABLE_MODELS = [
+  'gemini-3-flash-preview',
+  'gemini-3.1-pro-preview',
+  'gemini-3.1-flash-lite-preview',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash',
+] as const;
+
+export type AvailableModel = typeof AVAILABLE_MODELS[number];
+
 const MODELS_PREFIX = 'models/';
 
 /**
@@ -20,6 +35,8 @@ const LEGACY_MODEL_ALIASES: Record<string, string> = {
   'gemini-3-pro-latest': 'gemini-3-pro-preview',
   'gemini-3-flash': 'gemini-3-flash-preview',
   'gemini-3-flash-latest': 'gemini-3-flash-preview',
+  'gemini-3.1-pro': 'gemini-3.1-pro-preview',
+  'gemini-3.1-flash-lite': 'gemini-3.1-flash-lite-preview',
   // Deprecated experimental models - agent LLMs sometimes suggest these from training data
   'gemini-2.0-flash-thinking-exp-1219': 'gemini-3-flash',
   'gemini-2.0-flash-thinking-exp': 'gemini-3-flash',

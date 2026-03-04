@@ -4,7 +4,7 @@ import { Web3 } from 'web3';
 import { graphQLRequest } from '../http/client.js';
 // Import ABI from mech-client-ts package
 import marketplaceAbi from '@jinn-network/mech-client-ts/dist/abis/MechMarketplace.json' with { type: 'json' };
-import { workerLogger } from '../logging/index.js';
+import { workerLogger, flushLogger } from '../logging/index.js';
 import { claimRequest as apiClaimRequest, resetControlApiSigner } from './control_api_client.js';
 import { deliverViaSafe } from '@jinn-network/mech-client-ts/dist/post_deliver.js';
 import { getMechAddress, getServicePrivateKey, getMechChainConfig, getServiceSafeAddress, getMiddlewarePath } from '../env/operate-profile.js';
@@ -1901,7 +1901,9 @@ async function main() {
 
   if (SINGLE_SHOT) {
     await processOnce();
-    return;
+    await signingProxy.close().catch(() => { });
+    await flushLogger();
+    process.exit(0);
   }
 
   let runCount = 0;

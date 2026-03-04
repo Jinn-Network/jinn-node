@@ -206,14 +206,14 @@ async function main() {
     const jsonRows = serviceDataList.map(({ svc, dashboard, safeEth, agentEth }) => ({
       serviceId: svc.serviceId,
       configId: svc.serviceConfigId,
-      deliveries: dashboard ? `${dashboard.eligibleRequests}/${dashboard.requiredRequests}` : 'N/A',
+      deliveries: dashboard ? `${dashboard.eligibleActivities}/${dashboard.requiredActivities}` : 'N/A',
       status: !dashboard || dashboard.error
         ? 'ERROR'
         : dashboard.stakingState === 2
           ? 'EVICTED'
           : dashboard.isEligibleForRewards
             ? 'ELIGIBLE'
-            : `NEEDS ${dashboard.requestsNeeded}`,
+            : `NEEDS ${dashboard.activitiesNeeded}`,
       safeEth,
       agentEth,
       rewards: dashboard ? parseFloat(ethers.formatEther(dashboard.accruedRewards)).toFixed(4) : '0',
@@ -274,12 +274,12 @@ async function main() {
         ? 'ELIGIBLE'
         : dashboard.stakingState === 2
           ? 'EVICTED'
-          : `NEEDS ${dashboard.requestsNeeded} MORE REQUEST${dashboard.requestsNeeded === 1 ? '' : 'S'}`;
+          : `NEEDS ${dashboard.activitiesNeeded} MORE DELIVER${dashboard.activitiesNeeded === 1 ? 'Y' : 'IES'}`;
 
       const rewardsOlas = parseFloat(ethers.formatEther(dashboard.accruedRewards)).toFixed(4);
       const requestsDisplay = dashboard.isEligibleForRewards
-        ? `${dashboard.eligibleRequests}/${dashboard.requiredRequests} (${dashboard.eligibleRequests - dashboard.requiredRequests} extra)`
-        : `${dashboard.eligibleRequests}/${dashboard.requiredRequests}`;
+        ? `${dashboard.eligibleActivities}/${dashboard.requiredActivities} (${dashboard.eligibleActivities - dashboard.requiredActivities} extra)`
+        : `${dashboard.eligibleActivities}/${dashboard.requiredActivities}`;
 
       console.log(`  [${icon}] ${svc.serviceConfigId}  Service #${svc.serviceId}  ${statusLabel}`);
       console.log(`      Requests: ${requestsDisplay}  |  Rewards: ${rewardsOlas} OLAS`);
