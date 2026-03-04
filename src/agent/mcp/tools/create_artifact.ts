@@ -34,7 +34,7 @@ Parameters:
 - topic: Category or subject matter
 - content: The actual content to store
 - mimeType: (optional) MIME type, defaults to 'text/plain'
-- type: (optional) Artifact type (e.g., 'MEMORY', 'RESEARCH_REPORT')
+- type: (optional) Artifact type (e.g., 'MEMORY', 'RESEARCH_REPORT', 'TEMPLATE_OUTPUT' for the workstream's primary deliverable)
 - tags: (optional) Array of descriptive tags for discovery (e.g., ['staking', 'bug-fix', 'optimization'])
 - idempotencyKey: (optional) Stable key to deduplicate retries within the same request execution
 
