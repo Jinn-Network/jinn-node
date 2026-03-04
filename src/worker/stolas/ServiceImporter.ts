@@ -117,14 +117,18 @@ export async function importServiceFromChain(
 
   const config = {
     name: `jinn-stolas-${serviceId}`,
-    version: 1,
+    version: 9,
     service_config_id: serviceConfigId,
     package_path: 'memeooorr',
     hash: 'bafybeiawqqwkoeovm453mscwkxvmtnvaanhatlqh52cf5sdqavz6ldybae',
+    hash_history: {
+      [String(Math.floor(Date.now() / 1000))]: 'bafybeiawqqwkoeovm453mscwkxvmtnvaanhatlqh52cf5sdqavz6ldybae',
+    },
     agent_release: {
-      is_aea: false,
+      is_aea: true,
       repository: { owner: 'valory-xyz', name: 'meme-ooorr', version: 'v2.0.2' },
     },
+    agent_addresses: [agentInstanceAddress],
     home_chain: chain,
     chain_configs: {
       [chain]: {
@@ -140,14 +144,15 @@ export async function importServiceFromChain(
             cost_of_bond: '5000000000000000000000',
             fund_requirements: {
               '0x0000000000000000000000000000000000000000': {
-                agent: 5000000000000000,   // 0.005 ETH per agent EOA
-                safe: 1628500000000000,    // ~0.0016 ETH per service Safe
+                agent: '5000000000000000',   // 0.005 ETH per agent EOA
+                safe: '1628500000000000',    // ~0.0016 ETH per service Safe
               },
             },
           },
         },
       },
     },
+    description: '',
     env_variables: {
       MECH_MARKETPLACE_ADDRESS: { value: MECH_MARKETPLACE, provision_type: 'fixed' },
       MECH_REQUEST_PRICE: { value: '99', provision_type: 'fixed' },
