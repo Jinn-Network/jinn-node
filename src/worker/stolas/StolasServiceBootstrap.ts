@@ -67,16 +67,11 @@ const SAFE_ABI = [
   'function execTransaction(address to, uint256 value, bytes calldata data, uint8 operation, uint256 safeTxGas, uint256 baseGas, uint256 gasPrice, address gasToken, address payable refundReceiver, bytes memory signatures) public payable returns (bool success)',
 ];
 
-// configHash = keccak256(abi.encode([103], [(1, 5000e18)]))
-// Tied to agent ID 103 with 1 instance at 5000 OLAS bond — must be recomputed if agent ID changes
-const CONFIG_HASH = (() => {
-  const coder = ethers.AbiCoder.defaultAbiCoder();
-  const encoded = coder.encode(
-    ['uint32[]', 'tuple(uint32,uint96)[]'],
-    [[SERVICE_CONSTANTS.DEFAULT_AGENT_ID], [[1, ethers.parseEther('5000')]]]
-  );
-  return ethers.keccak256(encoded);
-})();
+// On-chain configHash — must be a real IPFS content hash (not a keccak256).
+// The middleware resolves this via gateway.autonolas.tech during service lifecycle operations.
+// Using the middleware-compatible hash from ServiceConfig.ts ensures stOLAS services
+// can be restaked/redeployed through the standard middleware flow.
+const CONFIG_HASH = SERVICE_CONSTANTS.DEFAULT_CONFIG_HASH;
 
 // ─── Interfaces ─────────────────────────────────────────────────────────────────
 

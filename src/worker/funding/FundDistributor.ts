@@ -79,8 +79,8 @@ async function readFundRequirements(serviceConfigId: string): Promise<FundRequir
     const config = JSON.parse(raw);
     const homeChain = config.home_chain || 'base';
     const reqs = config.chain_configs?.[homeChain]?.chain_data?.user_params?.fund_requirements?.[ETH_ADDRESS];
-    if (reqs && typeof reqs.agent === 'number' && typeof reqs.safe === 'number') {
-      return reqs;
+    if (reqs && reqs.agent != null && reqs.safe != null) {
+      return { agent: Number(reqs.agent), safe: Number(reqs.safe) };
     }
   } catch (err) {
     log.debug({ serviceConfigId, error: (err as Error).message }, 'Could not read fund_requirements');

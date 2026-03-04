@@ -41,6 +41,13 @@ export const SERVICE_CONSTANTS = {
   DEFAULT_SERVICE_HASH: "QmY3cVULHaiBavCWZEEgoVWmFJpo4gKWK42YFmyVESpp1r",
   DEFAULT_SERVICE_NFT: "bafybeiaakdeconw7j5z76fgghfdjmsr6tzejotxcwnvmp3nroaw3glgyve",
 
+  // On-chain configHash for service metadata (sha256 digest, stored as bytes32 on ServiceRegistry).
+  // This MUST be the hash of a JSON metadata file pinned on IPFS (resolvable at
+  // gateway.autonolas.tech/ipfs/f01701220{hash}). The middleware fetches this during
+  // service lifecycle operations.
+  // Derived from service #379 (middleware-created) which uses the same memeooorr package.
+  DEFAULT_CONFIG_HASH: "0xf13de04f843a1b740834efaf195ca7e997d2f12e1080e69a8abb07e8d51245af",
+
   // Staking configuration
   DEFAULT_STAKING_PROGRAM_ID: "0x66A92CDa5B319DCCcAC6c1cECbb690CA3Fb59488", // Jinn v2 staking (agent 103, DeliveryActivityChecker)
 
