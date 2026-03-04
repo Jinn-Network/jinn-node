@@ -240,14 +240,13 @@ export async function stolasBootstrap(
   }, 'Master EOA + Safe loaded');
 
   // Check Master EOA has ETH for gas (it signs and submits the Safe tx)
-  // Base L2 gas is cheap, but stOLAS involves multiple transactions (Safe exec + stake)
-  // so keep a comfortable 0.005 ETH margin
+  // Base L2 gas is cheap — 0.003 ETH is more than enough for stOLAS setup
   const balance = await provider.getBalance(masterWallet.address);
-  const minBalance = ethers.parseEther('0.005');
+  const minBalance = ethers.parseEther('0.003');
   if (balance < minBalance) {
     return {
       success: false,
-      error: `Master EOA ${masterWallet.address} has insufficient ETH: ${ethers.formatEther(balance)} ETH. Need at least 0.001 ETH for gas.`,
+      error: `Master EOA ${masterWallet.address} has insufficient ETH: ${ethers.formatEther(balance)} ETH. Need at least ${ethers.formatEther(minBalance)} ETH for gas.`,
     };
   }
 
@@ -419,7 +418,8 @@ export async function stolasBootstrap(
 
   // ── 8. Check Master Safe funding ──────────────────────────────────────
 
-  const minMasterSafeBalance = ethers.parseEther('0.007'); // agent target (0.005) + safe target (~0.0016) + buffer
+  // Full cost: stake tx gas (~0.002) + agent EOA (0.005) + service safe (~0.002) + mech deploy (~0.002) + buffer
+  const minMasterSafeBalance = ethers.parseEther('0.015');
   const masterSafeBalance = await provider.getBalance(masterSafeAddress);
 
   if (masterSafeBalance < minMasterSafeBalance) {

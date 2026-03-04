@@ -124,10 +124,10 @@ stOLAS requires only ETH — no OLAS:
 
 | Address | Amount | Purpose |
 |---------|--------|---------|
-| Master EOA | >= 0.001 ETH | Gas for Safe transaction |
-| Master Safe | >= 0.007 ETH | Agent EOA funding + mech deployment gas |
+| Master EOA | >= 0.003 ETH | Gas for Safe transaction |
+| Master Safe | >= 0.015 ETH | Stake tx gas + agent EOA funding + mech deployment |
 
-Total: ~0.01 ETH (~$25 on Base L2).
+Total: ~0.02 ETH (~$50 on Base L2).
 
 Check current balances:
 ```bash
@@ -142,8 +142,8 @@ async function main() {
   const safe = await p.getBalance(w.safes.base);
   console.log('Master EOA (' + w.address + '):', ethers.formatEther(eoa), 'ETH');
   console.log('Master Safe (' + w.safes.base + '):', ethers.formatEther(safe), 'ETH');
-  if (eoa < ethers.parseEther('0.001')) console.log('>>> Fund Master EOA with >= 0.001 ETH');
-  if (safe < ethers.parseEther('0.007')) console.log('>>> Fund Master Safe with >= 0.007 ETH');
+  if (eoa < ethers.parseEther('0.003')) console.log('>>> Fund Master EOA with >= 0.003 ETH');
+  if (safe < ethers.parseEther('0.015')) console.log('>>> Fund Master Safe with >= 0.015 ETH');
 }
 main();
 "
