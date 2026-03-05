@@ -16,6 +16,7 @@ import { processOnce as processJobOnce } from './orchestration/jobRunner.js';
 import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketplace_interact.js';
 import { shouldStop } from './cycleControl.js';
 import { checkAndDispatchScheduledVentures } from './ventures/ventureWatcher.js';
+import { acquireSafeLock } from './safeTxMutex.js';
 import { waitForGeminiQuota } from './llm/geminiQuota.js';
 import { recordIdleCycle, recordExecutionTime, updateFleetState } from './healthcheck.js';
 import { maybeDistributeFunds } from './funding/FundDistributor.js';
@@ -288,8 +289,9 @@ const dependencyRedispatchAttempts = new Map<string, number>();
 const dependencyCancelAttempts = new Map<string, number>();
 
 // Staking checkpoint: check every N cycles if epoch is overdue and call checkpoint()
-// At 30s base poll, 60 cycles = ~30 min. checkpoint() is a no-op if epoch hasn't ended.
-const WORKER_CHECKPOINT_CYCLES = config.worker.checkpointCycles;
+// maybeCallCheckpoint() is a single cheap RPC read that short-circuits if not overdue,
+// so there's no benefit to gating it behind many cycles. Default to every cycle.
+const WORKER_CHECKPOINT_CYCLES = parseInt(process.env.WORKER_CHECKPOINT_CYCLES || '1');
 
 // Staking heartbeat: submit marketplace requests to meet liveness requirement.
 // At 30s base poll, 16 cycles = ~8 min. Submits 1 request per check if deficit exists.
@@ -581,16 +583,22 @@ async function maybeCancelMissingDependency(params: {
       cancelled: true,
     };
 
-    const delivery = await (deliverViaSafe as any)({
-      chainConfig,
-      requestId: params.request.id,
-      resultContent,
-      targetMechAddress: mechAddress,
-      safeAddress,
-      privateKey,
-      rpcHttpUrl,
-      wait: true,
-    });
+    const releaseCancelLock = await acquireSafeLock(safeAddress);
+    let delivery;
+    try {
+      delivery = await (deliverViaSafe as any)({
+        chainConfig,
+        requestId: params.request.id,
+        resultContent,
+        targetMechAddress: mechAddress,
+        safeAddress,
+        privateKey,
+        rpcHttpUrl,
+        wait: true,
+      });
+    } finally {
+      releaseCancelLock();
+    }
 
     workerLogger.warn({
       requestId: params.request.id,
@@ -1813,6 +1821,7 @@ async function processOnce(): Promise<boolean> {
     const chainConfig = getMechChainConfig();
 
     if (mechAddress && safeAddress && privateKey) {
+      const releaseHbLock = await acquireSafeLock(safeAddress);
       try {
         await (deliverViaSafe as any)({
           chainConfig,
@@ -1827,6 +1836,8 @@ async function processOnce(): Promise<boolean> {
         workerLogger.info({ requestId: target.id }, 'Heartbeat delivered');
       } catch (deliveryErr: any) {
         workerLogger.warn({ requestId: target.id, error: deliveryErr.message }, 'Heartbeat delivery failed');
+      } finally {
+        releaseHbLock();
       }
     }
     executedJobsThisSession.set(target.id, Date.now());

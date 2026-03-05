@@ -17,6 +17,7 @@ import { join } from 'path';
 import { logger } from '../logging/index.js';
 import { createRpcProvider } from '../config/index.js';
 import { pushMetadataToIpfs } from '@jinn-network/mech-client-ts/dist/ipfs.js';
+import { acquireSafeLock } from './safeTxMutex.js';
 
 const requestLogger = logger.child({ component: 'MECH-MARKETPLACE-REQUESTER' });
 
@@ -234,74 +235,79 @@ export async function submitMarketplaceRequest(
       '0x',                  // bytes (payment data)
     ]);
 
-    // 7. Build and sign Safe transaction
-    const safe = new ethers.Contract(serviceSafeAddress, SAFE_ABI, agentWallet);
-    const safeNonce = await safe.nonce();
-    requestLogger.debug({ safeNonce: Number(safeNonce) }, 'Safe nonce');
+    // 7. Build and sign Safe transaction (under mutex to prevent nonce collisions)
+    const releaseLock = await acquireSafeLock(serviceSafeAddress);
+    try {
+      const safe = new ethers.Contract(serviceSafeAddress, SAFE_ABI, agentWallet);
+      const safeNonce = await safe.nonce();
+      requestLogger.debug({ safeNonce: Number(safeNonce) }, 'Safe nonce');
 
-    const txHash = await safe.getTransactionHash(
-      mechMarketplaceAddress,
-      finalPrice,
-      marketplaceCallData,
-      0,                        // operation (CALL)
-      0,                        // safeTxGas
-      0,                        // baseGas
-      0,                        // gasPrice
-      ethers.ZeroAddress,       // gasToken
-      ethers.ZeroAddress,       // refundReceiver
-      safeNonce,
-    );
+      const txHash = await safe.getTransactionHash(
+        mechMarketplaceAddress,
+        finalPrice,
+        marketplaceCallData,
+        0,                        // operation (CALL)
+        0,                        // safeTxGas
+        0,                        // baseGas
+        0,                        // gasPrice
+        ethers.ZeroAddress,       // gasToken
+        ethers.ZeroAddress,       // refundReceiver
+        safeNonce,
+      );
 
-    // Sign (eth_sign format — v + 4 for Safe)
-    const signature = await agentWallet.signMessage(ethers.getBytes(txHash));
-    const sigBytes = ethers.getBytes(signature);
-    const r = ethers.hexlify(sigBytes.slice(0, 32));
-    const s = ethers.hexlify(sigBytes.slice(32, 64));
-    const v = sigBytes[64] + 4;
-    const adjustedSignature = ethers.concat([r, s, new Uint8Array([v])]);
+      // Sign (eth_sign format — v + 4 for Safe)
+      const signature = await agentWallet.signMessage(ethers.getBytes(txHash));
+      const sigBytes = ethers.getBytes(signature);
+      const r = ethers.hexlify(sigBytes.slice(0, 32));
+      const s = ethers.hexlify(sigBytes.slice(32, 64));
+      const v = sigBytes[64] + 4;
+      const adjustedSignature = ethers.concat([r, s, new Uint8Array([v])]);
 
-    // 8. Execute Safe transaction
-    const tx = await safe.execTransaction(
-      mechMarketplaceAddress,
-      finalPrice,
-      marketplaceCallData,
-      0,                        // operation
-      0,                        // safeTxGas
-      0,                        // baseGas
-      0,                        // gasPrice
-      ethers.ZeroAddress,       // gasToken
-      ethers.ZeroAddress,       // refundReceiver
-      adjustedSignature,
-    );
+      // 8. Execute Safe transaction
+      const tx = await safe.execTransaction(
+        mechMarketplaceAddress,
+        finalPrice,
+        marketplaceCallData,
+        0,                        // operation
+        0,                        // safeTxGas
+        0,                        // baseGas
+        0,                        // gasPrice
+        ethers.ZeroAddress,       // gasToken
+        ethers.ZeroAddress,       // refundReceiver
+        adjustedSignature,
+      );
 
-    requestLogger.info({ transactionHash: tx.hash }, 'Transaction sent, waiting for confirmation');
-    const receipt = await tx.wait();
+      requestLogger.info({ transactionHash: tx.hash }, 'Transaction sent, waiting for confirmation');
+      const receipt = await tx.wait();
 
-    if (!receipt || receipt.status !== 1) {
+      if (!receipt || receipt.status !== 1) {
+        return {
+          success: false,
+          error: 'Transaction failed',
+          transactionHash: tx.hash,
+        };
+      }
+
+      // 9. Parse request IDs from MarketplaceRequest event
+      const requestIds = extractRequestIds(receipt);
+
+      requestLogger.info({
+        transactionHash: receipt.hash,
+        gasUsed: receipt.gasUsed.toString(),
+        blockNumber: receipt.blockNumber,
+        requestIds,
+      }, 'Marketplace request submitted successfully');
+
       return {
-        success: false,
-        error: 'Transaction failed',
-        transactionHash: tx.hash,
+        success: true,
+        transactionHash: receipt.hash,
+        requestIds,
+        gasUsed: receipt.gasUsed.toString(),
+        blockNumber: receipt.blockNumber,
       };
+    } finally {
+      releaseLock();
     }
-
-    // 9. Parse request IDs from MarketplaceRequest event
-    const requestIds = extractRequestIds(receipt);
-
-    requestLogger.info({
-      transactionHash: receipt.hash,
-      gasUsed: receipt.gasUsed.toString(),
-      blockNumber: receipt.blockNumber,
-      requestIds,
-    }, 'Marketplace request submitted successfully');
-
-    return {
-      success: true,
-      transactionHash: receipt.hash,
-      requestIds,
-      gasUsed: receipt.gasUsed.toString(),
-      blockNumber: receipt.blockNumber,
-    };
 
   } catch (error) {
     requestLogger.error({

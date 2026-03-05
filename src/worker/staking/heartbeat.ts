@@ -337,11 +337,11 @@ export async function maybeSubmitHeartbeat(
       return;
     }
 
-    // Don't submit if epoch is almost over (< 5 min) — let checkpoint handle it
-    if (epochSecondsRemaining < 300) {
-      log.info({ epochSecondsRemaining, deficit }, 'Epoch ending soon — skipping heartbeat');
-      return;
-    }
+    // NOTE: Do NOT skip heartbeats when the epoch is "ending" or overdue.
+    // checkpoint() hasn't been called yet, so nonces[1] (the baseline) hasn't
+    // updated — requests submitted now still count toward the CURRENT epoch.
+    // Skipping here causes a race condition: heartbeats stop but checkpoint
+    // fires later, freezing the count below the liveness target.
 
     // Submit only 1 request per call — the worker cycles frequently enough
     // and the on-chain baseline is authoritative, preventing overshoot.
@@ -418,10 +418,8 @@ export async function maybeSubmitHeartbeatForService(
       return;
     }
 
-    if (epochSecondsRemaining < 300) {
-      log.info({ serviceId, epochSecondsRemaining, deficit }, 'Epoch ending soon — skipping heartbeat');
-      return;
-    }
+    // NOTE: Do NOT skip heartbeats when the epoch is ending/overdue.
+    // checkpoint() hasn't fired yet — requests still count toward current epoch.
 
     log.info({
       deficit,

@@ -9,7 +9,7 @@ import { ensureUniversalTools, BASE_UNIVERSAL_TOOLS } from '../../toolPolicy.js'
 import { buildAnnotatedTools, normalizeToolArray, extractModelPolicyFromBlueprint } from '../../../shared/template-tools.js';
 import { blueprintStructureSchema } from '../../shared/blueprint-schema.js';
 import { validateInvariantsStrict } from '../../../worker/prompt/invariant-validator.js';
-import { validateModelAllowed, normalizeGeminiModel, DEFAULT_WORKER_MODEL } from '../../../shared/gemini-models.js';
+import { validateModelAllowed, normalizeGeminiModel, DEFAULT_WORKER_MODEL, isKnownValidModel, KNOWN_VALID_MODELS } from '../../../shared/gemini-models.js';
 import { assertValidJinnJobEnvMap } from '../../../shared/job-env.js';
 
 const dispatchExistingJobParamsBase = z.object({
@@ -230,6 +230,28 @@ export async function dispatchExistingJob(args: unknown) {
     ));
     if (!parentAllowedSet.has(normalizedRequested)) {
       return { content: [{ type: 'text' as const, text: JSON.stringify({ data: null, meta: { ok: false, code: 'UNAUTHORIZED_MODEL', message: `Model not allowed by workstream policy: ${modelToValidate}`, details: { requestedModel: modelToValidate, allowedModels: parentAllowedModels } } }) }] };
+    }
+  }
+
+  // 3. Fallback: reject unknown models when no explicit policy configured
+  const hasExplicitPolicy = Array.isArray(parentAllowedModels) && parentAllowedModels.length > 0;
+  if (!hasExplicitPolicy) {
+    const normalizedToCheck = normalizeGeminiModel(modelToValidate, DEFAULT_WORKER_MODEL).normalized;
+    if (!isKnownValidModel(normalizedToCheck)) {
+      return { content: [{ type: 'text' as const, text: JSON.stringify({
+        data: null,
+        meta: {
+          ok: false,
+          code: 'UNKNOWN_MODEL',
+          message: `Model '${modelToValidate}' is not a recognized Gemini model. Use one of the known-valid models.`,
+          details: {
+            requestedModel: modelToValidate,
+            normalizedModel: normalizedToCheck,
+            knownValidModels: Array.from(KNOWN_VALID_MODELS),
+            suggestion: DEFAULT_WORKER_MODEL,
+          },
+        },
+      }) }] };
     }
   }
 

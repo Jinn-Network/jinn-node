@@ -32,7 +32,8 @@ export async function maybeCallCheckpoint(stakingContract: string): Promise<void
   const now = Math.floor(Date.now() / 1000);
 
   if (now < nextCheckpoint) {
-    log.debug({ nextCheckpoint: new Date(nextCheckpoint * 1000).toISOString() }, 'Epoch not yet ended, skipping checkpoint');
+    const remainingSeconds = nextCheckpoint - now;
+    log.info({ nextCheckpoint: new Date(nextCheckpoint * 1000).toISOString(), remainingSeconds }, 'Epoch not yet ended, skipping checkpoint');
     return;
   }
 

@@ -67,6 +67,26 @@ const DEPRECATED_MODELS = new Set([
 ]);
 
 /**
+ * Canonical (normalized) model IDs confirmed to work against the current Gemini API.
+ * Used as a fallback gate when no explicit allowedModels policy is configured.
+ * Only normalized names belong here — aliases resolve via normalizeGeminiModel() first.
+ */
+export const KNOWN_VALID_MODELS = new Set([
+  'gemini-3-flash-preview',
+  'gemini-3-pro-preview',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash',
+]);
+
+/**
+ * Check if a normalized model ID is in the known-valid set.
+ * Input must already be normalized via normalizeGeminiModel().
+ */
+export function isKnownValidModel(normalizedModel: string): boolean {
+  return KNOWN_VALID_MODELS.has(normalizedModel);
+}
+
+/**
  * Check if a model matches any deprecated pattern (e.g., gemini-2.0-flash-thinking-exp-*)
  */
 function matchesDeprecatedPattern(model: string): boolean {
@@ -168,4 +188,34 @@ export function normalizeGeminiModel(
     normalized: stripped,
     changed: false,
   };
+}
+
+export type ModelSelectionResult = {
+  selected: string;
+  reason: 'requested' | 'policy_fallback';
+};
+
+/**
+ * Select a Gemini model with policy enforcement.
+ * Used by the worker execution layer — silently falls back to the policy default
+ * rather than rejecting (contrast with the hard-reject gate in dispatch tools).
+ */
+export function selectGeminiModelWithPolicy(
+  requestedModel: string,
+  policy: { allowedModels: string[]; defaultModel: string },
+  systemDefault: string = DEFAULT_WORKER_MODEL,
+): ModelSelectionResult {
+  const normalized = normalizeGeminiModel(requestedModel, systemDefault).normalized;
+
+  if (policy.allowedModels.length > 0) {
+    const allowedSet = new Set(policy.allowedModels.map(m =>
+      normalizeGeminiModel(m, systemDefault).normalized
+    ));
+    if (allowedSet.has(normalized)) return { selected: normalized, reason: 'requested' };
+    return { selected: normalizeGeminiModel(policy.defaultModel, systemDefault).normalized, reason: 'policy_fallback' };
+  }
+
+  // No explicit policy — use KNOWN_VALID_MODELS as fallback
+  if (isKnownValidModel(normalized)) return { selected: normalized, reason: 'requested' };
+  return { selected: normalizeGeminiModel(policy.defaultModel, systemDefault).normalized, reason: 'policy_fallback' };
 }

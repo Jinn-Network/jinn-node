@@ -7,7 +7,7 @@ import { validateInvariantsStrict } from '../../../worker/prompt/invariant-valid
 import { buildAnnotatedTools, normalizeToolArray, extractModelPolicyFromBlueprint } from '../../../shared/template-tools.js';
 import { blueprintStructureSchema } from '../../shared/blueprint-schema.js';
 import { BASE_UNIVERSAL_TOOLS } from '../../toolPolicy.js';
-import { validateModelAllowed, normalizeGeminiModel, DEFAULT_WORKER_MODEL, AVAILABLE_MODELS } from '../../../shared/gemini-models.js';
+import { validateModelAllowed, normalizeGeminiModel, DEFAULT_WORKER_MODEL, AVAILABLE_MODELS, isKnownValidModel, KNOWN_VALID_MODELS } from '../../../shared/gemini-models.js';
 import { config } from '../../../config/index.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -478,6 +478,34 @@ export async function dispatchNewJob(args: unknown) {
                 details: {
                   requestedModel: modelToUse,
                   allowedModels: parentAllowedModels,
+                },
+              },
+            }),
+          }],
+        };
+      }
+    }
+
+    // 4. Fallback: reject unknown models when no explicit policy configured
+    const hasExplicitPolicy = modelPolicy.allowedModels.length > 0 ||
+      (Array.isArray(parentAllowedModels) && parentAllowedModels.length > 0);
+    if (!hasExplicitPolicy) {
+      const normalizedToCheck = normalizeGeminiModel(modelToUse, DEFAULT_WORKER_MODEL).normalized;
+      if (!isKnownValidModel(normalizedToCheck)) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              data: null,
+              meta: {
+                ok: false,
+                code: 'UNKNOWN_MODEL',
+                message: `Model '${modelToUse}' is not a recognized Gemini model. Use one of the known-valid models.`,
+                details: {
+                  requestedModel: modelToUse,
+                  normalizedModel: normalizedToCheck,
+                  knownValidModels: Array.from(KNOWN_VALID_MODELS),
+                  suggestion: DEFAULT_WORKER_MODEL,
                 },
               },
             }),

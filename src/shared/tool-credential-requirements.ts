@@ -14,6 +14,7 @@ export const CREDENTIAL_PROVIDER_ALLOWLIST = [
   'supabase',
   'fireflies',
   'railway',
+  'moltbook',
 ] as const;
 
 export type CredentialProvider = (typeof CREDENTIAL_PROVIDER_ALLOWLIST)[number];
@@ -38,6 +39,7 @@ export const CREDENTIAL_META_TOOLS = [
   'railway_deployment',
   'ventures_registry',
   'services_registry',
+  'moltbook',
 ] as const;
 
 /**
@@ -78,12 +80,25 @@ export const TOOL_CREDENTIAL_REQUIREMENTS = {
   search_services: ['supabase'],
   service_registry: ['supabase'],
 
+  // Moltbook tools
+  moltbook_search: ['moltbook'],
+  moltbook_get_feed: ['moltbook'],
+  moltbook_get_submolt: ['moltbook'],
+  moltbook_list_submolts: ['moltbook'],
+  moltbook_subscribe: ['moltbook'],
+  moltbook_create_post: ['moltbook'],
+  moltbook_get_post: ['moltbook'],
+  moltbook_create_comment: ['moltbook'],
+  moltbook_upvote: ['moltbook'],
+  moltbook_get_profile: ['moltbook'],
+
   // Meta-tools
   ventures_registry: ['supabase'],
   services_registry: ['supabase'],
   telegram_messaging: ['telegram'],
   fireflies_meetings: ['fireflies'],
   railway_deployment: ['railway'],
+  moltbook: ['moltbook'],
 } as const satisfies Record<string, readonly CredentialProvider[]>;
 
 // Legacy alias used by existing tests/imports.

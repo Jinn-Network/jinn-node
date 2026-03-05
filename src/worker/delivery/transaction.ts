@@ -7,6 +7,7 @@ import { Web3 } from 'web3';
 import { workerLogger } from '../../logging/index.js';
 import { getMechAddress, getServiceSafeAddress, getServicePrivateKey, getMechChainConfig } from '../../env/operate-profile.js';
 import { getActiveMechAddress } from '../rotation/ActiveServiceContext.js';
+import { acquireSafeLock } from '../safeTxMutex.js';
 import type { UnclaimedRequest, AgentExecutionResult, FinalStatus, IpfsMetadata, RecognitionPhaseResult, ReflectionResult } from '../types.js';
 import { buildDeliveryPayload } from './payload.js';
 import { checkDeliveryStatusViaPonder } from './ponderVerification.js';
@@ -571,7 +572,13 @@ export async function deliverViaSafeTransaction(
 
       try {
         workerLogger.info({ requestId: context.requestId, attempt }, '[DELIVERY_DEBUG] Calling deliverViaSafe');
-        delivery = await (deliverViaSafe as any)(payload);
+        // Acquire per-Safe mutex so delivery and dispatch never overlap nonces
+        const releaseDeliveryLock = await acquireSafeLock(safeAddress);
+        try {
+          delivery = await (deliverViaSafe as any)(payload);
+        } finally {
+          releaseDeliveryLock();
+        }
         workerLogger.info({ requestId: context.requestId, txHash: delivery?.tx_hash, status: delivery?.status }, '[DELIVERY_DEBUG] deliverViaSafe returned');
 
         // Track the transaction hash immediately after submission

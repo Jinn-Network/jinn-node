@@ -471,6 +471,9 @@ export const VALID_JOB_TOOLS: ReadonlySet<string> = new Set([
   'twitter_post_tweet',
   'twitter_get_mentions',
   'twitter_get_timeline',
+  // Moltbook (moltbook.ts → getCredential('moltbook'))
+  'moltbook',
+  ...MOLTBOOK_TOOLS,
 ]);
 
 /**
