@@ -151,17 +151,22 @@ export class ServiceRotator {
         targetService = stakedServices.find(s => s.serviceConfigId === currentStillNeeds.serviceConfigId)!;
         reason = `staying on service #${currentStillNeeds.serviceId} (needs ${currentStillNeeds.activitiesNeeded} more)`;
       } else {
-        // Current is satisfied — pick the one with the most deficit
+        // Pick the service with the largest deficit.
+        // If there is no current service yet, this is an initial selection.
         needsWork.sort((a, b) => b.activitiesNeeded - a.activitiesNeeded);
         const best = needsWork[0];
         targetService = stakedServices.find(s => s.serviceConfigId === best.serviceConfigId)!;
-        reason = `current satisfied, switching to service #${best.serviceId} (needs ${best.activitiesNeeded} more)`;
+        reason = this.currentServiceConfigId
+          ? `current satisfied, switching to service #${best.serviceId} (needs ${best.activitiesNeeded} more)`
+          : `initial selection: service #${best.serviceId} (needs ${best.activitiesNeeded} more)`;
       }
     } else {
       // All services are eligible — stay on current or pick first
       const currentInStaked = stakedServices.find(s => s.serviceConfigId === this.currentServiceConfigId);
       targetService = currentInStaked ?? stakedServices[0];
-      reason = 'all services eligible for epoch, staying on current';
+      reason = this.currentServiceConfigId
+        ? 'all services eligible for epoch, staying on current'
+        : 'all services eligible for epoch, selecting initial service';
 
       rotationLogger.info({
         serviceCount: stakedServices.length,

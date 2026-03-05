@@ -6,34 +6,76 @@ import { workerLogger } from '../../logging/index.js';
 import type { IpfsMetadata } from '../types.js';
 import { config } from '../../config/index.js';
 
+function buildIpfsHashCandidates(ipfsHash: string): string[] {
+  const hash = ipfsHash.toLowerCase();
+
+  // Some request payloads are indexed as dag-pb (f01701220...) but stored as raw (f01551220...).
+  // Try raw first for this case to avoid consistent gateway 500s on protobuf decode.
+  if (hash.startsWith('f01701220') && hash.length > 9) {
+    const digest = hash.slice(9);
+    return [`f01551220${digest}`, hash];
+  }
+
+  if (hash.startsWith('f01551220') && hash.length > 9) {
+    const digest = hash.slice(9);
+    return [hash, `f01701220${digest}`];
+  }
+
+  return [hash];
+}
+
 /**
  * Fetch IPFS metadata from gateway
  */
 export async function fetchIpfsMetadata(ipfsHash?: string): Promise<IpfsMetadata | null> {
   if (!ipfsHash) return null;
   try {
-    const hash = String(ipfsHash).replace(/^0x/, '');
+    const hash = String(ipfsHash).replace(/^0x/, '').toLowerCase();
+    const hashCandidates = buildIpfsHashCandidates(hash);
     // Use configured IPFS gateway or fallback to Autonolas
     const gatewayBase = config.services.ipfsGatewayUrl || 'https://gateway.autonolas.tech/ipfs/';
-    const url = gatewayBase.endsWith('/') ? `${gatewayBase}${hash}` : `${gatewayBase}/${hash}`;
-
     const timeoutMs = config.services.ipfsFetchTimeoutMs ?? 7000;
-    workerLogger.info({ url, hash, timeout: timeoutMs }, 'Fetching IPFS metadata');
+    let json: any = null;
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    for (let i = 0; i < hashCandidates.length; i += 1) {
+      const candidate = hashCandidates[i];
+      const url = gatewayBase.endsWith('/') ? `${gatewayBase}${candidate}` : `${gatewayBase}/${candidate}`;
 
-    const res = await fetch(url, { method: 'GET', signal: controller.signal });
-    clearTimeout(timer);
+      workerLogger.info(
+        { url, hash, candidate, timeout: timeoutMs, attempt: i + 1, maxAttempts: hashCandidates.length },
+        'Fetching IPFS metadata'
+      );
 
-    workerLogger.info({ status: res.status, statusText: res.statusText }, 'IPFS fetch response');
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, { method: 'GET', signal: controller.signal });
+        workerLogger.info(
+          { status: res.status, statusText: res.statusText, candidate, attempt: i + 1 },
+          'IPFS fetch response'
+        );
 
-    if (!res.ok) {
-      workerLogger.warn({ status: res.status, statusText: res.statusText, url }, 'IPFS fetch returned non-OK status');
-      return null;
+        if (!res.ok) {
+          workerLogger.warn(
+            { status: res.status, statusText: res.statusText, url, candidate, attempt: i + 1 },
+            'IPFS fetch returned non-OK status'
+          );
+          continue;
+        }
+
+        json = await res.json();
+        if (candidate !== hash) {
+          workerLogger.info({ requestedHash: hash, resolvedHash: candidate }, 'Resolved request metadata via CID codec fallback');
+        }
+        break;
+      } finally {
+        clearTimeout(timer);
+      }
     }
 
-    const json = await res.json();
+    if (!json) {
+      return null;
+    }
 
     // Blueprint is at root level (new architecture)
     // Fall back to additionalContext.blueprint for backward compatibility

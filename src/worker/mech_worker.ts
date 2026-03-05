@@ -19,7 +19,7 @@ import { checkAndDispatchScheduledVentures } from './ventures/ventureWatcher.js'
 import { waitForGeminiQuota } from './llm/geminiQuota.js';
 import { recordIdleCycle, recordExecutionTime, updateFleetState } from './healthcheck.js';
 import { maybeDistributeFunds } from './funding/FundDistributor.js';
-import { getMechAddressesForStakingContract } from './filters/stakingFilter.js';
+import { getMechAddressesForMultipleContracts, parseStakingContracts } from './filters/stakingFilter.js';
 import {
   getWorkerCredentialInfo,
   getWorkerOperatorCapabilityInfo,
@@ -349,6 +349,24 @@ interface MechFilterConfig {
   stakingContract?: string; // only set for 'staking' mode
 }
 
+// Legacy staking pool where heartbeat delivery should be skipped.
+const HEARTBEAT_SKIP_STAKING_CONTRACTS = new Set<string>([
+  '0x0dfafbf570e9e813507aae18aa08dfba0abc5139',
+]);
+
+function shouldSkipHeartbeatForStakingContract(stakingContract: string | null | undefined): boolean {
+  if (!stakingContract) return false;
+  return HEARTBEAT_SKIP_STAKING_CONTRACTS.has(stakingContract.toLowerCase());
+}
+
+function getActiveStakingContractForService(runtimeResolvedConfig: ResolvedServiceConfig | null): string | null {
+  if (runtimeResolvedConfig?.stakingContract) {
+    return runtimeResolvedConfig.stakingContract;
+  }
+  const configuredContracts = parseStakingContracts(config.staking.contract || '');
+  return configuredContracts[0] || null;
+}
+
 // Cache for staking filter addresses (async initialization)
 let cachedStakingAddresses: string[] | null = null;
 let stakingAddressesFetchedAt: number = 0;
@@ -365,7 +383,7 @@ async function getMechFilterConfig(): Promise<MechFilterConfig> {
   const explicitMode = config.worker.mechFilterMode;
   // Fall through to runtime-resolved staking contract (same pattern as epoch gate)
   const runtimeResolved = await getRuntimeResolvedConfig();
-  const stakingContract = config.staking.contract || runtimeResolved?.stakingContract || undefined;
+  const stakingContractRaw = config.staking.contract || runtimeResolved?.stakingContract || undefined;
   const filterList = config.filtering.mechFilterList || undefined;
 
   // Deprecation warning for legacy WORKER_MECH_FILTER_LIST
@@ -377,26 +395,30 @@ async function getMechFilterConfig(): Promise<MechFilterConfig> {
   }
 
   // Mode 1: Staking-based filtering (new recommended approach)
-  if (explicitMode === 'staking' || (stakingContract && !explicitMode)) {
-    if (!stakingContract) {
+  // Supports comma-separated contracts: WORKER_STAKING_CONTRACT=0xAAA,0xBBB
+  if (explicitMode === 'staking' || (stakingContractRaw && !explicitMode)) {
+    if (!stakingContractRaw) {
       workerLogger.error('WORKER_MECH_FILTER_MODE=staking requires WORKER_STAKING_CONTRACT');
       return { mode: 'single', addresses: [] };
     }
 
-    // Fetch mech addresses from staking contract
-    const addresses = await getMechAddressesForStakingContract(stakingContract);
+    // Parse comma-separated staking contracts
+    const contracts = parseStakingContracts(stakingContractRaw);
+
+    // Fetch mech addresses from all staking contracts in parallel
+    const addresses = await getMechAddressesForMultipleContracts(contracts);
 
     if (addresses.length === 0) {
       workerLogger.warn({
-        stakingContract,
-        note: 'No mechs found staked in this contract - will not match any requests'
+        stakingContracts: contracts,
+        note: 'No mechs found staked in any contract - will not match any requests'
       }, 'Staking filter returned no addresses');
     }
 
     return {
       mode: 'staking',
       addresses,
-      stakingContract: stakingContract.toLowerCase(),
+      stakingContract: contracts[0],
     };
   }
 
@@ -901,8 +923,9 @@ async function filterUnclaimed(requests: UnclaimedRequest[]): Promise<UnclaimedR
             const isDelivered = deliveryMech !== ZERO_ADDRESS;
 
             if (!isDelivered) {
-              if (responseTimeout) {
-                chunkRequests[j].responseTimeout = Number(responseTimeout);
+              const timeoutValue = Number(responseTimeout);
+              if (Number.isFinite(timeoutValue)) {
+                chunkRequests[j].responseTimeout = timeoutValue;
               }
               filtered.push(chunkRequests[j]);
             } else {
@@ -929,6 +952,38 @@ async function filterUnclaimed(requests: UnclaimedRequest[]): Promise<UnclaimedR
     workerLogger.warn({ error: serializeError(e) }, 'Error checking marketplace status, falling back to Ponder status');
     return notDelivered;
   }
+}
+
+type DeliverabilityCheckReason =
+  | 'claimable'
+  | 'priority_window_active'
+  | 'unknown_response_timeout';
+
+function isClaimableByOwnMechNow(
+  request: UnclaimedRequest,
+  ownMech: string,
+  nowSec: number,
+): { claimable: boolean; reason: DeliverabilityCheckReason; secondsRemaining?: number } {
+  // Priority mech can always deliver.
+  if (request.mech.toLowerCase() === ownMech.toLowerCase()) {
+    return { claimable: true, reason: 'claimable' };
+  }
+
+  // If timeout is unknown, fail closed to avoid claiming work we likely can't deliver.
+  if (typeof request.responseTimeout !== 'number' || !Number.isFinite(request.responseTimeout)) {
+    return { claimable: false, reason: 'unknown_response_timeout' };
+  }
+
+  // After timeout, any mech can deliver.
+  if (nowSec > request.responseTimeout) {
+    return { claimable: true, reason: 'claimable' };
+  }
+
+  return {
+    claimable: false,
+    reason: 'priority_window_active',
+    secondsRemaining: Math.max(0, request.responseTimeout - nowSec),
+  };
 }
 
 /**
@@ -1458,7 +1513,7 @@ async function processOnce(): Promise<boolean> {
   // Staking target gate: stop claiming if request target met for this epoch
   // Use resolved config (on-chain derived) with env var override
   const runtimeResolvedConfig = await getRuntimeResolvedConfig();
-  const stakingContract = config.staking.contract || runtimeResolvedConfig?.stakingContract || null;
+  const stakingContract = getActiveStakingContractForService(runtimeResolvedConfig);
   if (!targetIdEnv && stakingContract && runtimeResolvedConfig) {
     const gate = await checkEpochGate(stakingContract, runtimeResolvedConfig.serviceId, runtimeResolvedConfig.marketplace);
     if (gate.targetMet) {
@@ -1621,11 +1676,59 @@ async function processOnce(): Promise<boolean> {
     candidates = nonHeartbeat;
   }
 
+  if (shouldSkipHeartbeatForStakingContract(stakingContract)) {
+    const nonHeartbeat = candidates.filter(c => c.jobName !== '__heartbeat__');
+    if (nonHeartbeat.length !== candidates.length) {
+      workerLogger.info({
+        stakingContract,
+        skippedHeartbeats: candidates.length - nonHeartbeat.length,
+      }, 'Skipping heartbeat requests on legacy staking contract');
+    }
+    candidates = nonHeartbeat;
+  }
+
   if (candidates.length === 0) {
     consecutiveStuckCycles = 0;
     lastStuckRequestIds = [];
     workerLogger.info('No eligible requests after heartbeat-leader filter');
     return false;
+  }
+
+  // Deliverability guard: skip requests that our mech cannot deliver yet.
+  // This avoids claiming requests that will result in no-op marketplace deliveries.
+  if (!targetIdEnv) {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const nonClaimableInPriorityWindow: string[] = [];
+    const nonClaimableUnknownTimeout: string[] = [];
+    const deliverableCandidates = candidates.filter(request => {
+      const verdict = isClaimableByOwnMechNow(request, workerAddress, nowSec);
+      if (verdict.claimable) return true;
+
+      if (verdict.reason === 'priority_window_active') {
+        nonClaimableInPriorityWindow.push(request.id);
+      } else {
+        nonClaimableUnknownTimeout.push(request.id);
+      }
+      return false;
+    });
+
+    if (deliverableCandidates.length !== candidates.length) {
+      workerLogger.info({
+        claimableNow: deliverableCandidates.length,
+        skippedPriorityWindow: nonClaimableInPriorityWindow.length,
+        skippedUnknownTimeout: nonClaimableUnknownTimeout.length,
+        skippedPriorityWindowRequestIds: nonClaimableInPriorityWindow.slice(0, 10),
+        skippedUnknownTimeoutRequestIds: nonClaimableUnknownTimeout.slice(0, 10),
+      }, 'Skipping requests we cannot deliver yet');
+    }
+
+    candidates = deliverableCandidates;
+    if (candidates.length === 0) {
+      consecutiveStuckCycles = 0;
+      lastStuckRequestIds = [];
+      workerLogger.info('No eligible requests after deliverability guard');
+      return false;
+    }
   }
 
   const eligibleCandidates = candidates.filter(c => !executedJobsThisSession.has(c.id));
@@ -1661,16 +1764,17 @@ async function processOnce(): Promise<boolean> {
     // The startup probe discovers global credentials; the per-job reprobe resolves
     // venture-scoped credentials (requestId → workstream → venture → credentials).
     if (jobRequiresCredentials(c.enabledTools)) {
+      const required = getRequiredCredentials(c.enabledTools ?? []);
       try {
         const jobCredInfo = await reprobeWithRequestId(c.id);
         if (!isJobEligibleForWorker(c.enabledTools, jobCredInfo.providers)) {
-          const required = getRequiredCredentials(c.enabledTools ?? []);
           workerLogger.info(
             { requestId: c.id, required, available: [...jobCredInfo.providers] },
             'Skipping — venture lacks required credentials',
           );
           continue;
         }
+
       } catch (err) {
         workerLogger.warn(
           { requestId: c.id, error: err instanceof Error ? err.message : String(err) },
@@ -1692,6 +1796,15 @@ async function processOnce(): Promise<boolean> {
   // Check if this is a heartbeat request — deliver immediately without agent execution
   // Uses jobName from Ponder index (reliable) instead of IPFS metadata fetch (can fail)
   if (target.jobName === '__heartbeat__') {
+    if (shouldSkipHeartbeatForStakingContract(stakingContract)) {
+      workerLogger.info(
+        { requestId: target.id, stakingContract },
+        'Skipping claimed heartbeat request on legacy staking contract'
+      );
+      executedJobsThisSession.set(target.id, Date.now());
+      return false;
+    }
+
     workerLogger.info({ requestId: target.id }, 'Heartbeat request — auto-delivering');
     const mechAddress = getMechAddress();
     const safeAddress = getServiceSafeAddress();
@@ -1723,8 +1836,8 @@ async function processOnce(): Promise<boolean> {
   // Pre-execution guard: skip non-own-mech requests still within priority window.
   // After responseTimeout, any mech can deliver — but during the window, only the
   // priority mech can, so executing would waste LLM credits.
-  const ownMech = getMechAddress();
-  if (ownMech && target.mech.toLowerCase() !== ownMech.toLowerCase()) {
+  const ownMech = workerAddress;
+  if (target.mech.toLowerCase() !== ownMech.toLowerCase()) {
     const now = Math.floor(Date.now() / 1000);
     if (target.responseTimeout && now <= target.responseTimeout) {
       workerLogger.info({
@@ -1972,7 +2085,7 @@ async function main() {
       // Call staking checkpoint if epoch is overdue (permissionless, any EOA can trigger)
       {
         const runtimeResolvedConfig = await getRuntimeResolvedConfig();
-        const stakingContract = config.staking.contract || runtimeResolvedConfig?.stakingContract || null;
+        const stakingContract = getActiveStakingContractForService(runtimeResolvedConfig);
         cyclesSinceLastCheckpoint++;
         if (stakingContract && cyclesSinceLastCheckpoint >= WORKER_CHECKPOINT_CYCLES) {
           cyclesSinceLastCheckpoint = 0;

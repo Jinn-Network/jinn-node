@@ -112,6 +112,21 @@ async function detectRequestBasedChecker(
 // Cached staking multisig per service — resolved from on-chain getServiceInfo()
 const resolvedMultisigByService = new Map<number, string>();
 
+async function getStakingMultisig(
+  stakingContract: string,
+  serviceId: number,
+  provider: ethers.JsonRpcProvider,
+): Promise<string> {
+  const cached = resolvedMultisigByService.get(serviceId);
+  if (cached) return cached;
+
+  const staking = new ethers.Contract(stakingContract, STAKING_ABI, provider);
+  const serviceInfo = await staking.getServiceInfo(serviceId);
+  const multisig: string = serviceInfo.multisig;
+  resolvedMultisigByService.set(serviceId, multisig);
+  return multisig;
+}
+
 /**
  * Calculate how many more activities we need this epoch.
  *
@@ -298,15 +313,7 @@ export async function maybeSubmitHeartbeat(
 
   // Detect checker type — skip heartbeat for delivery-based (v2) checkers
   const provider = createRpcProvider(secrets.rpcUrl);
-
-  // We need a multisig for detection. Resolve from staking contract if not cached.
-  let multisig = resolvedMultisigByService.get(serviceId);
-  if (!multisig) {
-    const staking = new ethers.Contract(stakingContract, STAKING_ABI, provider);
-    const serviceInfo = await staking.getServiceInfo(serviceId);
-    multisig = serviceInfo.multisig;
-    resolvedMultisigByService.set(serviceId, multisig);
-  }
+  const multisig = await getStakingMultisig(stakingContract, serviceId, provider);
 
   const isRequestBased = await detectRequestBasedChecker(stakingContract, marketplaceAddress, provider, multisig);
   if (!isRequestBased) {
@@ -395,6 +402,15 @@ export async function maybeSubmitHeartbeatForService(
   }
 
   try {
+    // Detect checker type — skip heartbeat for delivery-based (v2) checkers
+    const provider = createRpcProvider(secrets.rpcUrl);
+    const detectionMultisig = await getStakingMultisig(stakingContract, serviceId, provider);
+    const isRequestBased = await detectRequestBasedChecker(stakingContract, marketplaceAddress, provider, detectionMultisig);
+    if (!isRequestBased) {
+      log.debug({ stakingContract, serviceId }, 'Delivery-based checker (v2) — skipping heartbeat for service');
+      return;
+    }
+
     const { deficit, current, target, epochSecondsRemaining, multisig } = await getActivityDeficit(stakingContract, serviceId, marketplaceAddress);
 
     if (deficit <= 0) {

@@ -165,6 +165,41 @@ export async function getMechAddressesForStakingContract(
 }
 
 /**
+ * Query multiple staking contracts in parallel and merge all mech addresses.
+ *
+ * Each contract is queried independently (leveraging existing per-contract cache).
+ * Results are deduplicated and returned as a flat array.
+ *
+ * @param contracts - Array of staking contract addresses
+ * @param forceRefresh - If true, bypass cache for all contracts
+ * @returns Deduplicated array of mech addresses (lowercase) from all contracts
+ */
+export async function getMechAddressesForMultipleContracts(
+  contracts: string[],
+  forceRefresh: boolean = false
+): Promise<string[]> {
+  if (contracts.length === 0) return [];
+
+  // Single contract — fast path (no extra allocation)
+  if (contracts.length === 1) {
+    return getMechAddressesForStakingContract(contracts[0], forceRefresh);
+  }
+
+  const results = await Promise.all(
+    contracts.map(c => getMechAddressesForStakingContract(c, forceRefresh))
+  );
+  const merged = [...new Set(results.flat())];
+
+  workerLogger.info({
+    contractCount: contracts.length,
+    contracts: contracts.map(c => c.toLowerCase()),
+    totalMechs: merged.length,
+  }, 'Merged mech addresses from multiple staking contracts');
+
+  return merged;
+}
+
+/**
  * Clear the staking filter cache.
  * Useful for testing or when staking state changes are known to have occurred.
  */
@@ -187,20 +222,20 @@ export function getStakingFilterCacheStatus(): { size: number; entries: { contra
 }
 
 /**
- * Pick a random mech address from the set staked in the configured staking contract.
+ * Pick a random mech address from the set staked in the configured staking contract(s).
  *
- * Uses WORKER_STAKING_CONTRACT env var if set, otherwise defaults to the Jinn
- * staking contract. Falls back to `fallbackMech` if the query fails or returns
- * no results.
+ * Supports comma-separated WORKER_STAKING_CONTRACT values.
+ * Falls back to `fallbackMech` if the query fails or returns no results.
  *
  * The underlying getMechAddressesForStakingContract() has a 5-minute TTL cache,
  * so this adds negligible overhead per dispatch.
  */
 export async function getRandomStakedMech(fallbackMech: string): Promise<string> {
-  const stakingContract = config.staking.contract || DEFAULT_JINN_STAKING_CONTRACT;
+  const raw = config.staking.contract || DEFAULT_JINN_STAKING_CONTRACT;
+  const contracts = parseStakingContracts(raw);
 
   try {
-    const mechs = await getMechAddressesForStakingContract(stakingContract);
+    const mechs = await getMechAddressesForMultipleContracts(contracts);
     if (mechs.length === 0) {
       workerLogger.debug({ fallbackMech }, 'No staked mechs found, using fallback');
       return fallbackMech;
@@ -212,4 +247,12 @@ export async function getRandomStakedMech(fallbackMech: string): Promise<string>
     workerLogger.warn({ error: e?.message, fallbackMech }, 'Failed to query staked mechs, using fallback');
     return fallbackMech;
   }
+}
+
+/**
+ * Parse a staking contract config value into an array of addresses.
+ * Supports comma-separated values: "0xABC,0xDEF" → ["0xabc", "0xdef"]
+ */
+export function parseStakingContracts(value: string): string[] {
+  return value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 }

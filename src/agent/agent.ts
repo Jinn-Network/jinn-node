@@ -1281,7 +1281,18 @@ export class Agent {
     // Always generate settings if we have universal tools, even if no job-specific tools
     if (this.enabledTools.length === 0 && (this.universalTools as readonly string[]).length === 0) return;
     try {
-      const templateFileName = config.dev.useTsxMcp
+      const useTsxTemplate = config.dev.useTsxMcp;
+      if (!useTsxTemplate) {
+        const compiledMcpEntry = join(this.agentRoot, 'mcp', 'server.js');
+        if (!existsSync(compiledMcpEntry)) {
+          throw new Error(
+            `Compiled MCP entry missing: ${compiledMcpEntry}\n` +
+            'Either run the compiled build with mcp/server.js present, or run in source mode with USE_TSX_MCP=1.',
+          );
+        }
+      }
+
+      const templateFileName = useTsxTemplate
         ? 'settings.template.dev.json'
         : 'settings.template.json';
       const templatePath = join(this.agentRoot, templateFileName);
