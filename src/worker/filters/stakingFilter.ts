@@ -44,7 +44,7 @@ export async function getMechAddressesForStakingContract(
   // Check cache unless force refresh
   if (!forceRefresh) {
     const cached = cache.get(cacheKey);
-    const refreshMs = parseInt(process.env.WORKER_STAKING_REFRESH_MS || '') || DEFAULT_CACHE_TTL_MS;
+    const refreshMs = config.worker.stakingRefreshMs || DEFAULT_CACHE_TTL_MS;
     if (cached && Date.now() - cached.fetchedAt < refreshMs) {
       workerLogger.debug({
         stakingContract: normalizedContract,

@@ -125,7 +125,7 @@ export async function importServiceFromChain(
       [String(Math.floor(Date.now() / 1000))]: 'bafybeiawqqwkoeovm453mscwkxvmtnvaanhatlqh52cf5sdqavz6ldybae',
     },
     agent_release: {
-      is_aea: true,
+      is_aea: false,
       repository: { owner: 'valory-xyz', name: 'meme-ooorr', version: 'v2.0.2' },
     },
     agent_addresses: [agentInstanceAddress],

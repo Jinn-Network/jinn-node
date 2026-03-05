@@ -398,6 +398,30 @@ export const REFLECTION_EXCLUDED_TOOLS = [
 /**
  * Complete set of valid tool names that can appear in enabledTools from IPFS metadata.
  * Unknown tools are dropped with a warning to prevent arbitrary tool injection.
+ *
+ * ── Credential bridge (x402) tools ──────────────────────────────────
+ * The following tools require credential bridge access and are NOT
+ * available to external untrusted operators:
+ *
+ *  • Blog (umami/supabase): blog_get_stats, blog_get_top_pages,
+ *    blog_get_referrers, blog_get_metrics, blog_get_pageviews,
+ *    blog_get_performance_summary, blog_create_post, blog_list_posts,
+ *    blog_get_post, blog_delete_post
+ *  • Registry (supabase): venture_mint, venture_query, venture_update,
+ *    venture_delete, template_create, template_query, template_update,
+ *    template_delete, service_registry
+ *  • Telegram: telegram_messaging (meta-tool)
+ *  • Fireflies: fireflies_meetings (meta-tool)
+ *  • Railway: railway_deployment (meta-tool)
+ *  • Twitter: twitter_post_tweet, twitter_get_mentions, twitter_get_timeline
+ *  • OpenAI: embed_text
+ *  • Civitai: civitai_generate_image
+ *  • Schedule: read_dispatch_schedule, update_dispatch_schedule
+ *
+ * When authoring blueprints, do NOT mark credentialled tools as
+ * `required: true` — this blocks the entire workstream for external
+ * operators. Use `required: false` instead so they remain available
+ * when a trusted operator processes the job.
  */
 export const VALID_JOB_TOOLS: ReadonlySet<string> = new Set([
   // Universal tools (always available)

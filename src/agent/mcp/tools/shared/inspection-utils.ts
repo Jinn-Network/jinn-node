@@ -44,7 +44,7 @@ import { mcpLogger } from '../../../../logging/index.js';
 
 // --- MCP-adapted IPFS fetch ---
 
-const IPFS_GATEWAY_URL = process.env.IPFS_GATEWAY_URL || 'https://gateway.autonolas.tech/ipfs/';
+const IPFS_GATEWAY_URL = config.services.ipfsGatewayUrl;
 const DEFAULT_TIMEOUT_MS = 7000;
 
 /**

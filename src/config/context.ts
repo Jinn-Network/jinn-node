@@ -104,9 +104,13 @@ export function writeContextToEnv(): void {
     // Array values serialized as JSON
     if (ctx.completedChildRequestIds) {
         process.env.JINN_CTX_COMPLETED_CHILDREN = JSON.stringify(ctx.completedChildRequestIds);
-        process.env.JINN_CTX_CHILD_WORK_REVIEWED = ctx.childWorkReviewed ? 'true' : 'false';
     } else {
         delete process.env.JINN_CTX_COMPLETED_CHILDREN;
+    }
+
+    if (ctx.childWorkReviewed !== undefined) {
+        process.env.JINN_CTX_CHILD_WORK_REVIEWED = ctx.childWorkReviewed ? 'true' : 'false';
+    } else {
         delete process.env.JINN_CTX_CHILD_WORK_REVIEWED;
     }
 
@@ -156,6 +160,8 @@ export function readContextFromEnv(): JobContext {
         availableTools: parseJsonArray('JINN_CTX_AVAILABLE_TOOLS'),
         blueprintInvariantIds: parseJsonArray('JINN_CTX_BLUEPRINT_INVARIANT_IDS'),
         allowedModels: parseJsonArray('JINN_CTX_ALLOWED_MODELS'),
-        childWorkReviewed: process.env.JINN_CTX_CHILD_WORK_REVIEWED === 'true',
+        childWorkReviewed: process.env.JINN_CTX_CHILD_WORK_REVIEWED !== undefined
+            ? process.env.JINN_CTX_CHILD_WORK_REVIEWED === 'true'
+            : undefined,
     };
 }

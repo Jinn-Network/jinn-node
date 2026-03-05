@@ -6,6 +6,21 @@ import {
   RAILWAY_TOOLS,
 } from '../agent/toolPolicy.js';
 
+/**
+ * Tool specification in blueprint tools array.
+ *
+ * IMPORTANT — Credential access and `required`:
+ * Setting `required: true` means the tool MUST be available for the job to run.
+ * Credentialled tools (blog_*, telegram_*, fireflies_*, ventures_registry, etc.)
+ * go through the x402 credential bridge and are NOT accessible to external
+ * untrusted operators. If a credentialled tool is marked `required: true`,
+ * the entire venture/template workstream becomes unavailable to external operators.
+ *
+ * Rule of thumb: only mark non-credentialled tools (web_fetch, google_web_search,
+ * create_artifact, process_branch, write_file, etc.) as `required: true`.
+ * Credentialled tools should be `required: false` — they'll still be available
+ * when an operator with credentials picks up the job.
+ */
 export type TemplateToolSpec = {
   name: string;
   required?: boolean;
@@ -119,6 +134,20 @@ function expandMetaTools(tools: string[]): string[] {
   return expanded;
 }
 
+/**
+ * Parse a blueprint tools array into required vs available tool lists.
+ *
+ * - Bare strings (e.g. "web_fetch") → availableTools only
+ * - Objects with `required: false` → availableTools only
+ * - Objects with `required: true` → both requiredTools AND availableTools
+ *
+ * ⚠️  Credentialled tools (those requiring x402 gateway access — blog_*,
+ * telegram_*, fireflies_*, venture/template CRUD, etc.) should NOT be
+ * marked as `required: true` unless the template is exclusively for
+ * trusted internal operators. Setting a credentialled tool as required
+ * blocks the entire workstream for external untrusted operators who
+ * lack credential bridge access.
+ */
 export function parseAnnotatedTools(tools: unknown): TemplateToolPolicy {
   if (!Array.isArray(tools)) {
     return { requiredTools: [], availableTools: [] };

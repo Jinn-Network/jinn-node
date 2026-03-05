@@ -166,9 +166,24 @@ The defaults include:
 - `chain.chain_id: 8453` — Base mainnet
 - `services.ponder_url` — Jinn's indexer endpoint
 - `services.control_api_url` — Jinn's control API endpoint
-- `staking.contract` — Jinn staking contract on Base
+- `staking.contract` — Jinn staking contract(s) on Base
 - `worker.mech_filter_mode: staking` — Multi-operator mode
 - `filtering.workstreams` — Can be customized if needed
+
+#### Multi-Staking Contract Support
+
+`staking.contract` supports **comma-separated** addresses. The worker queries each contract in parallel and merges all staked mech addresses into one filter pool:
+
+```yaml
+staking:
+  # Single contract (default)
+  contract: "0x66A92CDa5B319DCCcAC6c1cECbb690CA3Fb59488"
+
+  # Multiple contracts — worker picks up requests for mechs in ANY of these pools
+  contract: "0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139,0x66A92CDa5B319DCCcAC6c1cECbb690CA3Fb59488"
+```
+
+Each contract's mech list is cached independently (5-minute TTL). This is useful when services span different staking programs (e.g., Pearl vs stOLAS).
 
 To customize, edit `jinn.yaml` after first run. Legacy env var names (e.g., `WORKSTREAM_FILTER`, `CHAIN_ID`) also work as overrides.
 

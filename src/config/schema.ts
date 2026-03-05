@@ -29,10 +29,12 @@ const boolCoerce = z.union([z.boolean(), z.string(), z.number()])
 // Section schemas
 // ============================================================================
 
+/** Blockchain network settings. */
 export const chainSchema = z.object({
     chain_id: z.coerce.number().int().default(8453),
 });
 
+/** Worker polling, cycle counts, and operational flags. */
 export const workerSchema = z.object({
     poll_base_ms: z.coerce.number().int().positive().default(30000),
     poll_max_ms: z.coerce.number().int().positive().default(300000),
@@ -46,23 +48,29 @@ export const workerSchema = z.object({
     activity_poll_ms: z.coerce.number().int().positive().default(60000),
     activity_cache_ttl_ms: z.coerce.number().int().positive().default(60000),
     staking_refresh_ms: z.coerce.number().int().positive().default(300000),
+    /** Which mechs to claim from: 'any'=all, 'list'=explicit list, 'single'=own only, 'staking'=same staking contract */
     mech_filter_mode: z.enum(['any', 'list', 'single', 'staking']).default('staking'),
     auto_restake: boolCoerce.default(true),
     tx_confirmations: z.coerce.number().int().positive().default(3),
     job_delay_ms: z.coerce.number().int().nonnegative().default(0),
+    /** 0 = run forever; >0 = exit after N poll cycles */
     max_cycles: z.coerce.number().int().nonnegative().default(0),
+    /** 0 = disabled; >0 = exit if no new work claimed for N cycles */
     stuck_exit_cycles: z.coerce.number().int().nonnegative().default(0),
     enable_venture_watcher: boolCoerce.default(false),
     enable_auto_repost: boolCoerce.default(false),
+    /** If true, only process heartbeat/buzz jobs — skip real workstreams */
     buzz_only: boolCoerce.default(false),
 });
 
+/** OLAS staking contract and program settings. */
 export const stakingSchema = z.object({
     contract: z.string().default('0x66A92CDa5B319DCCcAC6c1cECbb690CA3Fb59488'),
     interval_ms_override: z.coerce.number().int().positive().optional(),
     program: z.string().default(''),
 });
 
+/** Job filtering — workstream/venture scoping and earning limits. */
 export const filteringSchema = z.object({
     workstreams: z.array(z.string()).default([]),
     ventures: z.array(z.string()).default([]),
@@ -75,6 +83,7 @@ export const filteringSchema = z.object({
     allowlist_config_path: z.string().default(''),
 });
 
+/** Agent subprocess settings — sandboxing, output limits, repetition detection. */
 export const agentSchema = z.object({
     sandbox: z.enum(['sandbox-exec', 'docker', 'podman', 'false']).default('sandbox-exec'),
     max_stdout_size: z.coerce.number().int().positive().default(5242880),
@@ -87,6 +96,7 @@ export const agentSchema = z.object({
     telemetry_dir: z.string().default(''),
 });
 
+/** Job dependency resolution — staleness, redispatch, and failure thresholds. */
 export const dependenciesSchema = z.object({
     stale_ms: z.coerce.number().int().positive().default(7200000),
     redispatch_cooldown_ms: z.coerce.number().int().positive().default(3600000),
@@ -96,10 +106,12 @@ export const dependenciesSchema = z.object({
     autofail: boolCoerce.default(true),
 });
 
+/** Staking heartbeat throttling. */
 export const heartbeatSchema = z.object({
     min_interval_sec: z.coerce.number().int().positive().default(60),
 });
 
+/** External service URLs and connection settings. */
 export const servicesSchema = z.object({
     ponder_url: z.string().default('https://indexer.jinn.network/graphql'),
     ponder_port: z.coerce.number().int().positive().default(42069),
@@ -111,8 +123,12 @@ export const servicesSchema = z.object({
     use_control_api: boolCoerce.default(true),
     ipfs_gateway_url: z.string().default('https://gateway.autonolas.tech/ipfs/'),
     ipfs_fetch_timeout_ms: z.coerce.number().int().positive().default(30000),
+    healthcheck_port: z.coerce.number().int().positive().default(8080),
+    ponder_index_poll_count: z.coerce.number().int().positive().default(3),
+    ponder_index_poll_delay_ms: z.coerce.number().int().positive().default(500),
 });
 
+/** Git and GitHub integration settings. */
 export const gitSchema = z.object({
     default_base_branch: z.string().default('main'),
     remote_name: z.string().default('origin'),
@@ -125,6 +141,7 @@ export const gitSchema = z.object({
     author_email: z.string().default(''),
 });
 
+/** Logging output configuration. */
 export const loggingSchema = z.object({
     level: z.enum(['error', 'warn', 'info', 'debug', 'trace', 'fatal']).default('info'),
     format: z.enum(['json', 'pretty']).default('pretty'),
@@ -132,6 +149,7 @@ export const loggingSchema = z.object({
     destination: z.string().default('stdout'),
 });
 
+/** Prompt builder feature flags — controls which context providers are active. */
 export const blueprintSchema = z.object({
     enable_system: boolCoerce.default(true),
     enable_context_assertions: boolCoerce.default(true),
@@ -144,6 +162,7 @@ export const blueprintSchema = z.object({
     log_providers: boolCoerce.default(false),
 });
 
+/** LLM quota checking and backoff settings. */
 export const llmSchema = z.object({
     quota_check_model: z.string().default(''),
     quota_check_timeout_ms: z.coerce.number().int().positive().optional(),
@@ -151,11 +170,13 @@ export const llmSchema = z.object({
     quota_max_backoff_ms: z.coerce.number().int().positive().optional(),
 });
 
+/** Umami analytics integration. */
 export const blogSchema = z.object({
     umami_host: z.string().default(''),
     umami_website_id: z.string().default(''),
 });
 
+/** Development and testing flags — not for production operators. */
 export const devSchema = z.object({
     node_env: z.enum(['development', 'production', 'test']).default('development'),
     runtime_environment: z.enum(['default', 'test', 'review']).default('default'),
@@ -168,6 +189,7 @@ export const devSchema = z.object({
     worker_id: z.string().default(''),
 });
 
+/** Playwright browser automation settings (used by web-scraping tools). */
 export const playwrightSchema = z.object({
     channel: z.string().default(''),
     fast: boolCoerce.default(false),
@@ -203,3 +225,25 @@ export const configSchema = z.object({
  * The loader transforms these to camelCase for the public TypeScript API.
  */
 export type RawNodeConfig = z.infer<typeof configSchema>;
+
+// ============================================================================
+// Derived camelCase type
+// ============================================================================
+
+/** Convert a snake_case string literal to camelCase at the type level. */
+type SnakeToCamel<S extends string> = S extends `${infer T}_${infer U}`
+    ? `${T}${Capitalize<SnakeToCamel<U>>}`
+    : S;
+
+/** Recursively transform all keys of T from snake_case to camelCase. */
+type CamelCaseKeys<T> = T extends readonly (infer U)[]
+    ? CamelCaseKeys<U>[]
+    : T extends object
+    ? { [K in keyof T as K extends string ? SnakeToCamel<K> : K]: CamelCaseKeys<T[K]> }
+    : T;
+
+/**
+ * Public API config type with camelCase keys — derived from the Zod schema.
+ * Never manually duplicated; always in sync with RawNodeConfig.
+ */
+export type NodeConfig = CamelCaseKeys<RawNodeConfig>;

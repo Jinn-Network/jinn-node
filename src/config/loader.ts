@@ -12,7 +12,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import YAML from 'yaml';
-import { configSchema, type RawNodeConfig } from './schema.js';
+import { configSchema, type RawNodeConfig, type NodeConfig } from './schema.js';
 import { resolveEnvOverrides } from './aliases.js';
 import { writeDefaultConfigIfMissing } from './defaults.js';
 
@@ -55,149 +55,7 @@ function deepFreeze<T extends Record<string, any>>(obj: T): Readonly<T> {
     return obj;
 }
 
-// ============================================================================
-// camelCase config type
-// ============================================================================
-
-/**
- * The public API config type with camelCase keys.
- * Generated from the snake_case RawNodeConfig via transform.
- */
-export interface NodeConfig {
-    chain: {
-        chainId: number;
-    };
-    worker: {
-        pollBaseMs: number;
-        pollMaxMs: number;
-        pollBackoffFactor: number;
-        checkpointCycles: number;
-        heartbeatCycles: number;
-        ventureWatcherCycles: number;
-        fundCheckCycles: number;
-        repostCheckCycles: number;
-        multiService: boolean;
-        activityPollMs: number;
-        activityCacheTtlMs: number;
-        stakingRefreshMs: number;
-        mechFilterMode: 'any' | 'list' | 'single' | 'staking';
-        autoRestake: boolean;
-        txConfirmations: number;
-        jobDelayMs: number;
-        maxCycles: number;
-        stuckExitCycles: number;
-        enableVentureWatcher: boolean;
-        enableAutoRepost: boolean;
-        buzzOnly: boolean;
-    };
-    staking: {
-        contract: string;
-        intervalMsOverride?: number;
-        program: string;
-    };
-    filtering: {
-        workstreams: string[];
-        ventures: string[];
-        ventureTemplateIds: string[];
-        earningSchedule: string;
-        earningMaxJobs: number;
-        mechFilterList: string;
-        priorityMech: string;
-        targetRequestId: string;
-        allowlistConfigPath: string;
-    };
-    agent: {
-        sandbox: 'sandbox-exec' | 'docker' | 'podman' | 'false';
-        maxStdoutSize: number;
-        maxChunkSize: number;
-        repetitionWindow: number;
-        repetitionThreshold: number;
-        maxIdenticalChunks: number;
-        maxPromptArgBytes: number;
-        additionalIncludeDirs: string;
-        telemetryDir: string;
-    };
-    dependencies: {
-        staleMs: number;
-        redispatchCooldownMs: number;
-        missingFailMs: number;
-        cancelCooldownMs: number;
-        redispatch: boolean;
-        autofail: boolean;
-    };
-    heartbeat: {
-        minIntervalSec: number;
-    };
-    services: {
-        ponderUrl: string;
-        ponderPort: number;
-        ponderStartBlock?: number;
-        ponderEndBlock?: number;
-        controlApiUrl: string;
-        controlApiPort?: number;
-
-        useControlApi: boolean;
-        ipfsGatewayUrl: string;
-        ipfsFetchTimeoutMs: number;
-    };
-    git: {
-        defaultBaseBranch: string;
-        remoteName: string;
-        githubApiUrl: string;
-        githubRepository: string;
-        sshHostAlias: string;
-        workspaceDir: string;
-        repoRoot: string;
-        authorName: string;
-        authorEmail: string;
-    };
-    logging: {
-        level: string;
-        format: string;
-        mcpLevel: string;
-        destination: string;
-    };
-    blueprint: {
-        enableSystem: boolean;
-        enableContextAssertions: boolean;
-        enableRecognition: boolean;
-        enableJobContext: boolean;
-        enableProgress: boolean;
-        enableBeads: boolean;
-        enableContextPhases: boolean;
-        debug: boolean;
-        logProviders: boolean;
-    };
-    llm: {
-        quotaCheckModel: string;
-        quotaCheckTimeoutMs?: number;
-        quotaBackoffMs?: number;
-        quotaMaxBackoffMs?: number;
-    };
-    blog: {
-        umamiHost: string;
-        umamiWebsiteId: string;
-    };
-    dev: {
-        nodeEnv: string;
-        runtimeEnvironment: string;
-        dryRun: boolean;
-        disableStsChecks: boolean;
-
-        mcpDebugMechClient: boolean;
-        useTsxMcp: boolean;
-        enableTransactionExecutor: boolean;
-        workerId: string;
-    };
-    playwright: {
-        channel: string;
-        fast: boolean;
-        headless: boolean;
-        keepOpen: boolean;
-        profileDir: string;
-    };
-}
-
+export type { NodeConfig } from './schema.js';
 export type FrozenNodeConfig = Readonly<NodeConfig>;
 
 // ============================================================================

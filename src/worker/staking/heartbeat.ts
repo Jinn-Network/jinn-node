@@ -272,7 +272,7 @@ async function submitHeartbeatWithCredentials(
 }
 
 // Minimum seconds between heartbeat submissions to avoid gas waste
-const HEARTBEAT_MIN_INTERVAL_SEC = parseInt(process.env.HEARTBEAT_MIN_INTERVAL_SEC || '60');
+const HEARTBEAT_MIN_INTERVAL_SEC = config.heartbeat.minIntervalSec;
 
 const lastHeartbeatTimestampByService = new Map<number, number>();
 const lastHeartbeatTimestampBySigner = new Map<string, number>();

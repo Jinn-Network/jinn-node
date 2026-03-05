@@ -997,8 +997,8 @@ export async function dispatchForTimeoutRecovery(
 
 // Ponder indexing lag tolerance: poll up to N times before deciding children are incomplete
 // Reduced from 10x1000ms since we now self-exclude from sibling check (only need to wait for near-simultaneous siblings)
-const PONDER_INDEX_POLL_COUNT = Number(process.env.PONDER_INDEX_POLL_COUNT ?? 3);
-const PONDER_INDEX_POLL_DELAY_MS = Number(process.env.PONDER_INDEX_POLL_DELAY_MS ?? 500);
+const PONDER_INDEX_POLL_COUNT = config.services.ponderIndexPollCount;
+const PONDER_INDEX_POLL_DELAY_MS = config.services.ponderIndexPollDelayMs;
 
 /**
  * Determine if parent should be dispatched

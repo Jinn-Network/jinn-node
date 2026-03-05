@@ -19,6 +19,8 @@ interface AliasEntry {
     path: string;
     /** Lower priority = checked first. Canonical names have priority 0. */
     priority: number;
+    /** If true, split comma-separated env value into an array. */
+    isArray?: boolean;
 }
 
 /**
@@ -59,9 +61,9 @@ const ALIAS_TABLE: AliasEntry[] = [
     { env: 'STAKING_PROGRAM', path: 'staking.program', priority: 0 },
 
     // filtering
-    { env: 'WORKSTREAM_FILTER', path: 'filtering.workstreams', priority: 0 },
-    { env: 'VENTURE_FILTER', path: 'filtering.ventures', priority: 0 },
-    { env: 'VENTURE_TEMPLATE_IDS', path: 'filtering.venture_template_ids', priority: 0 },
+    { env: 'WORKSTREAM_FILTER', path: 'filtering.workstreams', priority: 0, isArray: true },
+    { env: 'VENTURE_FILTER', path: 'filtering.ventures', priority: 0, isArray: true },
+    { env: 'VENTURE_TEMPLATE_IDS', path: 'filtering.venture_template_ids', priority: 0, isArray: true },
     { env: 'EARNING_SCHEDULE', path: 'filtering.earning_schedule', priority: 0 },
     { env: 'EARNING_MAX_JOBS', path: 'filtering.earning_max_jobs', priority: 0 },
     { env: 'WORKER_MECH_FILTER_LIST', path: 'filtering.mech_filter_list', priority: 0 },
@@ -102,6 +104,9 @@ const ALIAS_TABLE: AliasEntry[] = [
     { env: 'USE_CONTROL_API', path: 'services.use_control_api', priority: 0 },
     { env: 'IPFS_GATEWAY_URL', path: 'services.ipfs_gateway_url', priority: 0 },
     { env: 'IPFS_FETCH_TIMEOUT_MS', path: 'services.ipfs_fetch_timeout_ms', priority: 0 },
+    { env: 'HEALTHCHECK_PORT', path: 'services.healthcheck_port', priority: 0 },
+    { env: 'PONDER_INDEX_POLL_COUNT', path: 'services.ponder_index_poll_count', priority: 0 },
+    { env: 'PONDER_INDEX_POLL_DELAY_MS', path: 'services.ponder_index_poll_delay_ms', priority: 0 },
 
     // git
     { env: 'CODE_METADATA_DEFAULT_BASE_BRANCH', path: 'git.default_base_branch', priority: 0 },
@@ -164,7 +169,7 @@ const ALIAS_TABLE: AliasEntry[] = [
 /**
  * Set a value at a dot-path in a nested object, creating intermediate objects as needed.
  */
-function setPath(obj: Record<string, any>, path: string, value: string): void {
+function setPath(obj: Record<string, any>, path: string, value: string, isArray?: boolean): void {
     const parts = path.split('.');
     let current = obj;
     for (let i = 0; i < parts.length - 1; i++) {
@@ -176,8 +181,7 @@ function setPath(obj: Record<string, any>, path: string, value: string): void {
     const lastKey = parts[parts.length - 1];
     // Only set if not already set (canonical wins over legacy)
     if (!(lastKey in current)) {
-        // For array fields, split comma-separated strings
-        if (path.endsWith('workstreams') || path.endsWith('ventures') || path.endsWith('venture_template_ids')) {
+        if (isArray) {
             current[lastKey] = value.split(',').map(s => s.trim()).filter(Boolean);
         } else {
             current[lastKey] = value;
@@ -198,7 +202,7 @@ export function resolveEnvOverrides(env: Record<string, string | undefined>): Pa
     for (const entry of sorted) {
         const value = env[entry.env];
         if (value !== undefined && value !== '') {
-            setPath(result, entry.path, value);
+            setPath(result, entry.path, value, entry.isArray);
         }
     }
 
