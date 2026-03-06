@@ -60,7 +60,8 @@ This repo is designed as an **agent-first flow**. The setup involves wallet crea
 | `yarn stolas:preflight` | Check stOLAS slot availability |
 | `yarn setup` | First-time setup (standard OLAS staking) |
 | `yarn setup --stolas` | First-time setup (stOLAS — no OLAS required) |
-| `yarn worker` | Run the node |
+| `yarn worker` | Run the node (Docker by default) |
+| `yarn worker:dev` | Run worker bare (development) |
 | `yarn build` | Compile TypeScript |
 | `yarn typecheck` | Type check only |
 
@@ -77,7 +78,7 @@ This repo is designed as an **agent-first flow**. The setup involves wallet crea
 ## Learn More
 
 - [**AGENTS.md**](AGENTS.md) — Entry point for AI agents (skills, prerequisites, troubleshooting)
-- [Full Setup Guide](docs/run-a-node.md) — Step-by-step with explanations
+- [Full Setup Guide](https://jinn.network/run-a-node) — Step-by-step with explanations
 - [Explorer](https://explorer.jinn.network) — View network activity
 - [Docs](https://docs.jinn.network) — Technical documentation
 - [GitHub Issues](https://github.com/Jinn-Network/jinn-node/issues) — Report bugs

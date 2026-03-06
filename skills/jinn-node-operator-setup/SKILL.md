@@ -185,9 +185,16 @@ yarn tsx scripts/mech/fix-all-delivery-rates.ts 99
 
 ```bash
 cd jinn-node
-yarn worker --single    # Single job execution to verify
-yarn worker             # Full polling loop
+yarn worker --single    # Single job to verify setup works
+yarn worker             # Start worker (detached, auto-restart)
 ```
+
+After `yarn worker`, the node is running in the background. Use:
+- `docker compose logs -f` — follow logs
+- `docker compose ps` — check health
+- `docker compose down` — stop
+
+> **Note:** `yarn worker` uses Docker Compose by default. If Docker is not installed, it falls back to bare mode. Use `yarn worker:dev` for development without Docker. See [`references/docker-production.md`](references/docker-production.md) for details.
 
 ### 8. Optional: add more services
 
@@ -213,6 +220,7 @@ User: "I want to set up a jinn node"
 7. `yarn setup --stolas` → service created, mech deployed
 8. Verify: `yarn wallet:info` shows balances, service staked, delivery rate 99
 9. `yarn worker --single` → first job completes
+10. `yarn worker` → node running in background with auto-restart
 
 ## Troubleshooting
 
@@ -227,6 +235,7 @@ See [`troubleshooting.md`](../jinn-node-support-triage/references/troubleshootin
 - Service is staked (staking state = 1).
 - Mech address is present in service config.
 - Mech delivery rate is 99 (`assert-delivery-rates.ts` passes).
-- Worker starts and reaches polling loop.
+- `yarn worker --single` completes successfully.
+- `yarn worker` starts detached worker with auto-restart (or bare mode if no Docker).
 - Operator has confirmed mnemonic backup.
 - Operator has been informed about key backup location and `OPERATE_PASSWORD` requirement.

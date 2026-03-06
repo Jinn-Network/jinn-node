@@ -25,9 +25,10 @@ Wait for explicit acknowledgement before proceeding.
 1. **Local setup:** `jinn-node-operator-setup`
    - **Default path:** stOLAS (no OLAS required, ~0.01 ETH total)
    - **Fallback:** Standard OLAS staking if stOLAS slots are full (requires ~10,000 OLAS)
-2. **Verify:** `yarn worker --single` (optional local validation)
-3. **Deploy:** `jinn-node-railway-deploy` (optional, for 24/7 operation)
-4. **Ongoing:** wallet-ops, staking-ops, support-triage as needed
+2. **Test:** `yarn worker --single` (local validation)
+3. **Run:** `yarn worker` (Docker Compose, detached, auto-restart)
+4. **Alternative deploy:** `jinn-node-railway-deploy` (optional, managed hosting on Railway)
+5. **Ongoing:** wallet-ops, staking-ops, support-triage as needed
 
 ## Global Rules
 
@@ -85,8 +86,12 @@ For diagnostics collection: use the `jinn-node-support-triage` skill.
 | `yarn stolas:preflight` | Check stOLAS slot availability |
 | `yarn setup` | Initial service setup (standard OLAS) |
 | `yarn setup --stolas` | Initial service setup (stOLAS, no OLAS needed) |
-| `yarn worker` | Run worker (continuous) |
+| `yarn worker` | Run worker (Docker by default, detached) |
 | `yarn worker --single` | Test with one job |
+| `yarn worker:dev` | Run worker bare (development, no Docker) |
+| `docker compose logs -f` | Follow worker logs |
+| `docker compose ps` | Check worker health |
+| `docker compose down` | Stop the worker |
 | `yarn wallet:info` | Show addresses + balances |
 | `yarn wallet:backup` | Backup .operate directory |
 | `yarn support:bundle` | Collect safe diagnostics bundle |
