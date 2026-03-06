@@ -61,29 +61,24 @@ cd jinn-node
 cp .env.example .env
 ```
 
-#### Search for existing configuration
+#### Collect configuration
 
-Look for existing `.env` files that may contain reusable values:
+Ask the operator for each required value. Do **not** scan the filesystem for env files unless the operator explicitly asks you to.
+
+**Required secrets** (set in `.env`):
+- `RPC_URL` — Base network RPC endpoint (e.g. Alchemy, Infura, QuickNode)
+- `OPERATE_PASSWORD` — encrypts the wallet keystore (min 8 chars)
+- Gemini auth (see below)
+
+#### Gemini authentication
+
+Check for existing Gemini OAuth credentials:
 ```bash
-find ~ -maxdepth 3 -name ".env" -type f 2>/dev/null | head -5
+ls ~/.gemini/oauth_creds.json 2>/dev/null
 ```
 
-Search found files for: `RPC_URL`, `OPERATE_PASSWORD`, `GITHUB_TOKEN`, `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GEMINI_API_KEY`. Present found values to operator for confirmation before reusing.
-
-Collect and set **secrets only** in `.env`:
-- `RPC_URL` — Base network RPC endpoint
-- `OPERATE_PASSWORD` — encrypts the wallet keystore (min 8 chars)
-- Gemini auth: `GEMINI_API_KEY` (simplest) or Gemini CLI OAuth (`npx @google/gemini-cli auth login`)
-
-#### Gemini authentication detection
-
-Check for existing Gemini auth before asking for an API key:
-- OAuth: check for `~/.gemini/oauth_creds.json`
-- API key: check for `GEMINI_API_KEY` in found env files
-
 **If OAuth found:** Recommend OAuth (no API costs with Google One AI Premium).
-**If API key found:** Offer to reuse it.
-**If neither found:** Ask if the operator has Google One AI Premium. If yes, run `npx @google/gemini-cli auth login`. If no, get API key from https://aistudio.google.com/apikey.
+**If not found:** Ask the operator if they have Google One AI Premium. If yes, run `npx @google/gemini-cli auth login`. If no, ask for a `GEMINI_API_KEY` from https://aistudio.google.com/apikey.
 
 Strongly encouraged:
 - `GITHUB_TOKEN` — required for most coding ventures. Without it, explicitly warn operator.
@@ -213,7 +208,7 @@ User: "I want to set up a jinn node"
 
 1. Disclose security gate → operator acknowledges
 2. Check prerequisites → Python 3.12 found, install 3.11 via pyenv
-3. Clone repo, `cp .env.example .env` → found existing `RPC_URL` in `~/.env`, operator confirms
+3. Clone repo, `cp .env.example .env` → ask operator for RPC_URL, password, Gemini auth
 4. `yarn install`
 5. `yarn stolas:preflight` → 12 slots available
 6. Fund Master EOA with ~0.005 ETH → operator confirms
