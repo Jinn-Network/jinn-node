@@ -2,48 +2,41 @@
 
 stOLAS uses the ExternalStakingDistributor so operators stake without providing OLAS. LemonTree depositors fund the capital. Only ETH is needed for gas.
 
-## 1. Ensure wallet exists
-
-If no `.operate/` directory exists, create the wallet first:
-
-```bash
-cd jinn-node
-yarn setup 2>&1
-```
-
-This creates the Master EOA + Master Safe, then exits requesting funding. **Capture the mnemonic** (see Step 5 in SKILL.md). Fund the Master EOA with ~0.005 ETH and rerun until the Master Safe is created.
-
-If `.operate/wallets/ethereum.json` already exists, skip to step 2.
-
-## 2. Check balances
-
-```bash
-cd jinn-node
-yarn wallet:info
-```
-
-Both Master EOA and Master Safe need ETH on Base for gas. The setup flow will print exact amounts if funding is insufficient — relay those to the operator.
-
-## 3. Run stOLAS setup
+## 1. Run stOLAS setup
 
 ```bash
 cd jinn-node
 yarn setup --stolas 2>&1
 ```
 
-This will:
-1. Load Master EOA + Master Safe from `.operate/`
-2. Print identity info — relay to operator for verification
-3. Generate new agent EOA
-4. Preflight check (distributor + slots)
-5. Route `stake()` through Master Safe → creates service on-chain
-6. Discover serviceId + Safe
-7. Store agent key + **back up key to `~/.jinn/key-backups/`** + import config
-8. Fund agent EOA from Master Safe
-9. Deploy mech via service Safe
-10. Update config with mech address
+The `--stolas` flag handles the entire flow end-to-end:
+
+1. Create Master EOA + Master Safe (if they don't exist)
+2. **Capture the mnemonic** — relay to operator (see Step 5 in SKILL.md)
+3. Exit requesting funding if Master EOA needs ETH
+4. Operator funds Master EOA with ~0.005 ETH and Master Safe with ~0.015 ETH
+5. Rerun `yarn setup --stolas 2>&1` — continues from where it left off
+6. Preflight check (distributor + slots)
+7. Generate new agent EOA
+8. Route `stake()` through Master Safe → creates service on-chain
+9. Discover serviceId + Safe
+10. Store agent key + **back up key to `~/.jinn/key-backups/`** + import config
+11. Fund agent EOA from Master Safe
+12. Deploy mech via service Safe
+13. Update config with mech address
+
+> **Important:** Always use `yarn setup --stolas` — never `yarn setup` without the flag. The `--stolas` flag handles wallet and Safe creation itself. Running `yarn setup` (standard) would attempt OLAS staking.
 
 > **Key backup:** Encrypted with `OPERATE_PASSWORD`. Inform the operator to store both the backup file and the password securely.
+
+## 2. Funding loop
+
+The setup may exit multiple times requesting funding. Each time:
+1. Note the address and amount printed
+2. Fund the address
+3. Rerun `yarn setup --stolas 2>&1`
+
+## 3. If mech deployment fails
 
 If mech deployment fails (insufficient Master Safe ETH):
 ```bash
