@@ -25,6 +25,7 @@
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| `Cannot connect to the Docker daemon` | Docker installed but daemon not running | Start Docker: `open -a Docker` (macOS) or `sudo systemctl start docker` (Linux), then retry |
 | Worker cannot reach Ponder | Wrong or unavailable endpoint | Verify `PONDER_GRAPHQL_URL` |
 | Worker cannot reach Control API | Wrong or unavailable endpoint | Verify `CONTROL_API_URL` |
 | Credentialed tools fail | Wrong gateway URL or ACL missing | Verify `X402_GATEWAY_URL`, gateway health, ACL grants |

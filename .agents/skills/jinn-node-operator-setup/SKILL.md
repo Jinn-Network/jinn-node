@@ -189,7 +189,7 @@ After `yarn worker`, the node is running in the background. Use:
 - `docker compose ps` — check health
 - `docker compose down` — stop
 
-> **Note:** `yarn worker` uses Docker Compose by default. If Docker is not installed, it falls back to bare mode. Use `yarn worker:dev` for development without Docker. See [`references/docker-production.md`](references/docker-production.md) for details.
+> **Note:** `yarn worker` uses Docker Compose by default. If Docker is not installed, it falls back to bare mode. If Docker is installed but the daemon is not running, start it (`open -a Docker` on macOS, `sudo systemctl start docker` on Linux) and retry. Use `yarn worker:dev` for development without Docker. See [`references/docker-production.md`](references/docker-production.md) for details.
 
 ### 8. Optional: add more services
 

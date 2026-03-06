@@ -9,9 +9,9 @@
 set -e
 cd "$(dirname "$0")/.."
 
-# --- Check Docker availability (installed + daemon running) ---
+# --- Check Docker availability ---
 HAS_DOCKER=false
-if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   HAS_DOCKER=true
 fi
 

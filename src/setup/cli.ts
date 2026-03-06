@@ -480,6 +480,19 @@ async function main() {
     }
     printStep('done', 'Master EOA + Safe ready');
 
+    // Clean up ghost service config created by walletOnly bootstrap.
+    // The middleware persists a service config as a side effect of wallet/Safe creation,
+    // but it has no real on-chain service (ID = -1, staking = "no_staking").
+    // If left in .operate/services/, the worker will try to load it and crash.
+    if (walletResult.serviceConfigId) {
+      const ghostConfigDir = join(basePath, '.operate', 'services', walletResult.serviceConfigId);
+      if (existsSync(ghostConfigDir)) {
+        const { rm } = await import('fs/promises');
+        await rm(ghostConfigDir, { recursive: true });
+        setupLogger.info({ serviceConfigId: walletResult.serviceConfigId }, 'Removed ghost service config from walletOnly bootstrap');
+      }
+    }
+
     printStep('active', 'Loading Master Safe + generating agent key...');
     printStep('active', 'Routing stake() through Master Safe...');
     const result = await stolasBootstrap({
