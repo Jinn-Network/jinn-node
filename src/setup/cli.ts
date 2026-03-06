@@ -454,31 +454,31 @@ async function main() {
 
     const basePath = isolatedEnv?.tempDir || process.cwd();
 
-    // ── Ensure wallet exists (first-time setup) ─────────────────────────
-    const walletDir = join(basePath, '.operate', 'wallets');
-    if (!existsSync(join(walletDir, 'ethereum.txt')) || !existsSync(join(walletDir, 'ethereum.json'))) {
-      printStep('active', 'No wallet found — creating Master EOA + Safe (no OLAS required)...');
+    // ── Ensure wallet + Safe exist (idempotent) ─────────────────────────
+    // Always run the standard bootstrap — it skips wallet/Safe if they
+    // already exist, creates them if missing, and exits at the walletOnly
+    // checkpoint after Safe creation. This fixes the rerun bug where wallet
+    // files existed but the Safe hadn't been created yet.
+    printStep('active', 'Ensuring Master EOA + Safe exist...');
+    const walletBootstrapConfig: SimplifiedBootstrapConfig = {
+      chain: chain as any,
+      operatePassword,
+      rpcUrl,
+      attended: attendedMode,
+      deployMech: false,
+      stakingProgram: 'no_staking',
+      walletOnly: true,
+      middlewarePath: isolatedEnv?.middlewareDir,
+      workingDirectory: isolatedEnv?.tempDir,
+    };
 
-      const walletBootstrapConfig: SimplifiedBootstrapConfig = {
-        chain: chain as any,
-        operatePassword,
-        rpcUrl,
-        attended: attendedMode,
-        deployMech: false,
-        stakingProgram: 'no_staking',
-        walletOnly: true,
-        middlewarePath: isolatedEnv?.middlewareDir,
-        workingDirectory: isolatedEnv?.tempDir,
-      };
-
-      const walletBootstrap = new SimplifiedServiceBootstrap(walletBootstrapConfig);
-      const walletResult = await walletBootstrap.bootstrap();
-      if (!walletResult.success) {
-        printError(`Wallet creation failed: ${walletResult.error}`);
-        process.exit(1);
-      }
-      printStep('done', 'Wallet created — continuing with stOLAS bootstrap');
+    const walletBootstrap = new SimplifiedServiceBootstrap(walletBootstrapConfig);
+    const walletResult = await walletBootstrap.bootstrap();
+    if (!walletResult.success) {
+      printError(walletResult.error || 'Wallet/Safe creation failed');
+      process.exit(1);
     }
+    printStep('done', 'Master EOA + Safe ready');
 
     printStep('active', 'Loading Master Safe + generating agent key...');
     printStep('active', 'Routing stake() through Master Safe...');
