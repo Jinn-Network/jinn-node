@@ -160,14 +160,17 @@ yarn setup --stolas 2>&1
 
 This will:
 1. Load Master EOA + Master Safe from `.operate/`
-2. Generate new agent EOA
-3. Preflight check (distributor + slots)
-4. Route `stake()` through Master Safe → creates service on-chain
-5. Discover serviceId + Safe
-6. Store agent key + import config to `.operate/services/`
-7. Fund agent EOA from Master Safe
-8. Deploy mech via service Safe
-9. Update config with mech address
+2. Print identity info (Master EOA, Master Safe, chain) — relay this to the operator for verification
+3. Generate new agent EOA
+4. Preflight check (distributor + slots)
+5. Route `stake()` through Master Safe → creates service on-chain
+6. Discover serviceId + Safe
+7. Store agent key + **back up key to `~/.jinn/key-backups/`** + import config to `.operate/services/`
+8. Fund agent EOA from Master Safe
+9. Deploy mech via service Safe
+10. Update config with mech address
+
+> **Key backup:** The backup file is printed in the output (e.g. `~/.jinn/key-backups/0x71E9...5AAe3_2026-03-06T09-17-15.json`). This backup is encrypted with `OPERATE_PASSWORD` — without the password, the key cannot be recovered. Inform the operator to store both the backup file and the password securely.
 
 If mech deployment fails (insufficient Master Safe ETH), setup will succeed but print instructions to deploy the mech separately:
 ```bash
@@ -197,6 +200,18 @@ When setup exits for funding:
 
 On first wallet creation, extract and show the mnemonic from setup output immediately.
 Require explicit operator confirmation they saved it before continuing.
+
+### 5b. Key backup verification
+
+After setup completes, verify the key backup exists:
+
+```bash
+ls -la ~/.jinn/key-backups/
+```
+
+Inform the operator:
+
+> Your agent key has been backed up to `~/.jinn/key-backups/`. This backup is encrypted with your `OPERATE_PASSWORD`. Store both the backup file and the password securely — without the password, the key cannot be recovered.
 
 ### 6. Verify setup
 
@@ -251,9 +266,11 @@ See `references/setup-failures.md`.
 ## Exit criteria
 
 - `.operate/` exists and contains service config + keys.
+- `~/.jinn/key-backups/` contains at least one backup file per agent key.
 - `yarn wallet:info` returns valid addresses and balances.
 - `yarn service:list` shows at least one service.
 - Service is staked (staking state = 1).
 - Mech address is present in service config.
 - Worker starts and reaches polling loop.
 - Operator has confirmed mnemonic backup.
+- Operator has been informed about key backup location and `OPERATE_PASSWORD` requirement.

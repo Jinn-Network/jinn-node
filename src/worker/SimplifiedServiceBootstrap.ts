@@ -31,6 +31,7 @@ import { createDefaultServiceConfig, SERVICE_CONSTANTS } from './config/ServiceC
 import { enableMechMarketplaceInConfig, DEFAULT_MECH_DELIVERY_RATE } from './config/MechConfig.js';
 import { printFundingRequirements } from '../setup/display.js';
 import { config } from '../config/index.js';
+import { backupAllKeys } from '../env/keystore-backup.js';
 
 const bootstrapLogger = logger.child({ component: "SIMPLIFIED-BOOTSTRAP" });
 
@@ -572,6 +573,14 @@ ${'='.repeat(80)}
     ) || masterSafe;
 
     await this.waitForDeployment(serviceConfigId);
+
+    // Back up all keys created by the middleware during this flow
+    try {
+      const middlewarePath = this.operateWrapper!.getMiddlewarePath();
+      await backupAllKeys({ operateBasePath: middlewarePath });
+    } catch {
+      bootstrapLogger.warn('Post-bootstrap key backup scan failed (non-fatal)');
+    }
 
     return {
       success: true,

@@ -14,6 +14,7 @@ import { ethers } from 'ethers';
 import { createRpcProvider } from '../../config/index.js';
 import { logger } from '../../logging/index.js';
 import { SERVICE_CONSTANTS } from '../config/ServiceConfig.js';
+import { backupKeystore } from '../../env/keystore-backup.js';
 
 const importLogger = logger.child({ component: 'SERVICE-IMPORTER' });
 
@@ -173,6 +174,18 @@ export async function importServiceFromChain(
 
   const keysPath = join(servicePath, 'keys.json');
   await fs.writeFile(keysPath, JSON.stringify([{ private_key: encryptedKeystore }]));
+
+  // Back up key to ~/.jinn/key-backups/ (non-fatal)
+  try {
+    await backupKeystore({
+      address: agentInstanceAddress,
+      encryptedKeystore,
+      operateBasePath,
+      context: `import-${serviceId}`,
+    });
+  } catch {
+    importLogger.warn({ agentInstanceAddress, serviceId }, 'Key backup failed (non-fatal)');
+  }
 
   importLogger.info({
     serviceConfigId,

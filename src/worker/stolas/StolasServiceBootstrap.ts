@@ -37,6 +37,7 @@ import { importServiceFromChain, type ImportServiceResult } from './ServiceImpor
 import { deployMechViaSafe, buildMechToConfigValue } from './StolasMechDeployer.js';
 import { maybeDistributeFunds, type FundTransfer } from '../funding/FundDistributor.js';
 import type { ServiceInfo } from '../ServiceConfigReader.js';
+import { backupKeystore } from '../../env/keystore-backup.js';
 
 const stolasLogger = logger.child({ component: 'STOLAS-BOOTSTRAP' });
 
@@ -239,16 +240,44 @@ export async function stolasBootstrap(
     masterSafe: masterSafeAddress,
   }, 'Master EOA + Safe loaded');
 
-  // Check Master EOA has ETH for gas (it signs and submits the Safe tx)
+  // ── Funding gate: check BOTH balances before any side-effects ─────────
+  // Fail fast before generating keys or making on-chain transactions.
+
+  // Master EOA needs ETH for gas (it signs and submits the Safe tx)
   // Base L2 gas is cheap — 0.003 ETH is more than enough for stOLAS setup
-  const balance = await provider.getBalance(masterWallet.address);
-  const minBalance = ethers.parseEther('0.003');
-  if (balance < minBalance) {
+  const masterEoaBalance = await provider.getBalance(masterWallet.address);
+  const minEoaBalance = ethers.parseEther('0.003');
+  if (masterEoaBalance < minEoaBalance) {
     return {
       success: false,
-      error: `Master EOA ${masterWallet.address} has insufficient ETH: ${ethers.formatEther(balance)} ETH. Need at least ${ethers.formatEther(minBalance)} ETH for gas.`,
+      error: `Master EOA ${masterWallet.address} has insufficient ETH: ${ethers.formatEther(masterEoaBalance)} ETH. Need at least ${ethers.formatEther(minEoaBalance)} ETH for gas.`,
     };
   }
+
+  // Master Safe needs ETH for agent funding (~0.005) + mech deploy gas (~0.002) + buffer
+  const masterSafeBalance = await provider.getBalance(masterSafeAddress);
+  const minMasterSafeBalance = ethers.parseEther('0.015');
+  if (masterSafeBalance < minMasterSafeBalance) {
+    return {
+      success: false,
+      error: `Master Safe ${masterSafeAddress} has insufficient ETH: ${ethers.formatEther(masterSafeBalance)} ETH. Need at least ${ethers.formatEther(minMasterSafeBalance)} ETH for agent funding + mech deployment.`,
+    };
+  }
+
+  stolasLogger.info({
+    masterEoa: { balance: ethers.formatEther(masterEoaBalance) },
+    masterSafe: { balance: ethers.formatEther(masterSafeBalance) },
+  }, 'Funding checks passed');
+
+  // ── Identity output ────────────────────────────────────────────────────────
+  // Print the identity clearly so the agent (or operator) can verify.
+  // No interactive prompt — agents run `yarn setup --stolas 2>&1` and read
+  // terminal output; a readline prompt would hang the session.
+
+  console.log(`\n🔑 Identity`);
+  console.log(`   Master EOA:  ${masterWallet.address}  (${ethers.formatEther(masterEoaBalance)} ETH)`);
+  console.log(`   Master Safe: ${masterSafeAddress}  (${ethers.formatEther(masterSafeBalance)} ETH)`);
+  console.log(`   Chain:       ${chain}\n`);
 
   // ── 2. Generate new agent EOA ─────────────────────────────────────────────
 
@@ -264,6 +293,18 @@ export async function stolasBootstrap(
   try {
     const result = await storeAgentKey(operateBasePath, agentWallet, operatePassword);
     encryptedKeystore = result.encryptedKeystore;
+
+    // Back up the key to ~/.jinn/key-backups/ (non-fatal)
+    try {
+      await backupKeystore({
+        address: agentWallet.address,
+        encryptedKeystore,
+        operateBasePath,
+        context: 'stolas-bootstrap',
+      });
+    } catch (backupErr: any) {
+      stolasLogger.warn({ error: backupErr.message }, 'Key backup failed (non-fatal, continuing)');
+    }
   } catch (err: any) {
     return {
       success: false,
@@ -416,30 +457,8 @@ export async function stolasBootstrap(
     agentInstance: agentWallet.address,
   }, 'Service created and imported, proceeding to mech deployment');
 
-  // ── 8. Check Master Safe funding ──────────────────────────────────────
-
-  // Full cost: stake tx gas (~0.002) + agent EOA (0.005) + service safe (~0.002) + mech deploy (~0.002) + buffer
-  const minMasterSafeBalance = ethers.parseEther('0.015');
-  const masterSafeBalance = await provider.getBalance(masterSafeAddress);
-
-  if (masterSafeBalance < minMasterSafeBalance) {
-    stolasLogger.warn({
-      masterSafe: masterSafeAddress,
-      balance: ethers.formatEther(masterSafeBalance),
-      required: ethers.formatEther(minMasterSafeBalance),
-    }, 'Master Safe has insufficient ETH for agent funding + mech deployment');
-
-    return {
-      success: true,
-      serviceId,
-      serviceConfigId: imported.serviceConfigId,
-      multisig: imported.multisig,
-      masterSafeAddress,
-      masterEoaAddress: masterWallet.address,
-      agentInstanceAddress: agentWallet.address,
-      mechDeployError: `Master Safe needs ETH for mech deployment. Send >= 0.01 ETH to ${masterSafeAddress} and rerun with: npx tsx scripts/deploy-mech.ts --service-config-id=${imported.serviceConfigId}`,
-    };
-  }
+  // ── 8. Fund agent EOA + deploy mech ───────────────────────────────────
+  // Master Safe balance was pre-checked in step 1, so we proceed directly.
 
   // ── 9. Fund agent EOA via Master Safe (FundDistributor) ───────────────
 
