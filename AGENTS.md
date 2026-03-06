@@ -14,11 +14,11 @@ Wait for explicit acknowledgement before proceeding.
 
 | I want to... | Use this skill |
 |---|---|
-| Set up a new node (first time) | [`jinn-node-operator-setup`](skills/jinn-node-operator-setup/SKILL.md) |
-| Deploy my node to Railway | [`jinn-node-railway-deploy`](skills/jinn-node-railway-deploy/SKILL.md) |
-| Manage wallet (backup, withdraw, recover) | [`jinn-node-wallet-ops`](skills/jinn-node-wallet-ops/SKILL.md) |
-| Claim staking rewards | [`jinn-node-staking-ops`](skills/jinn-node-staking-ops/SKILL.md) |
-| Diagnose and fix issues | [`jinn-node-support-triage`](skills/jinn-node-support-triage/SKILL.md) |
+| Set up a new node (first time) | [`jinn-node-operator-setup`](.agents/skills/jinn-node-operator-setup/SKILL.md) |
+| Deploy my node to Railway | [`jinn-node-railway-deploy`](.agents/skills/jinn-node-railway-deploy/SKILL.md) |
+| Manage wallet (backup, withdraw, recover) | [`jinn-node-wallet-ops`](.agents/skills/jinn-node-wallet-ops/SKILL.md) |
+| Claim staking rewards | [`jinn-node-staking-ops`](.agents/skills/jinn-node-staking-ops/SKILL.md) |
+| Diagnose and fix issues | [`jinn-node-support-triage`](.agents/skills/jinn-node-support-triage/SKILL.md) |
 
 ## Default Execution Order (new operator)
 
@@ -35,7 +35,7 @@ Wait for explicit acknowledgement before proceeding.
 1. **Railway deploys happen after local setup** — `.operate/` must exist and be valid first.
 2. **Sensitive operations require explicit confirmation** — mnemonic/key export, destructive recovery, non-dry-run fund movements.
 3. **GitHub token is strongly encouraged** — without `GITHUB_TOKEN`, most coding jobs fail.
-4. **Configuration lives in jinn.yaml** — auto-generated on first run with correct defaults. Don't create manually. See [`variables.md`](skills/jinn-node-railway-deploy/references/variables.md) for the full variable contract.
+4. **Configuration lives in jinn.yaml** — auto-generated on first run with correct defaults. Don't create manually. See [`variables.md`](.agents/skills/jinn-node-railway-deploy/references/variables.md) for the full variable contract.
 
 ## Prerequisites
 
@@ -75,7 +75,7 @@ Primary onboarding venture:
 
 ## Troubleshooting
 
-See [`troubleshooting.md`](skills/jinn-node-support-triage/references/troubleshooting.md) for the canonical symptom-fix matrix covering prerequisites, setup, runtime, stOLAS, and Railway failures.
+See [`troubleshooting.md`](.agents/skills/jinn-node-support-triage/references/troubleshooting.md) for the canonical symptom-fix matrix covering prerequisites, setup, runtime, stOLAS, and Railway failures.
 
 For diagnostics collection: use the `jinn-node-support-triage` skill.
 

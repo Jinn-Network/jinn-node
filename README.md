@@ -77,7 +77,7 @@ This repo is designed as an **agent-first flow**. The setup involves wallet crea
 
 ## Learn More
 
-- [**AGENTS.md**](AGENTS.md) — Entry point for AI agents (skills, prerequisites, troubleshooting)
+- [**AGENTS.md**](AGENTS.md) — Entry point for AI agents (auto-loaded by Claude Code, Gemini CLI, Codex)
 - [Full Setup Guide](https://jinn.network/run-a-node) — Step-by-step with explanations
 - [Explorer](https://explorer.jinn.network) — View network activity
 - [Docs](https://docs.jinn.network) — Technical documentation
