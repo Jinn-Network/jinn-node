@@ -58,7 +58,7 @@ pyenv versions 2>/dev/null | grep -E "3\.(10|11)"
 
 ```bash
 cd jinn-node
-cp .env.example .env
+[ -f .env ] || cp .env.example .env
 ```
 
 #### Collect configuration
