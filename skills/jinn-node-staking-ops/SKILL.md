@@ -1,9 +1,11 @@
 ---
 name: jinn-node-staking-ops
-description: Execute jinn-node staking reward operations, including L1 dispenser incentive claims and L2 service reward claims, with dry-run-first and funding prechecks.
+description: Claim L1/L2 staking rewards and migrate between staking contracts with dry-run-first flow. Use when user says "claim rewards", "staking rewards", "claim incentives", "migrate staking", or "claim OLAS".
 allowed-tools: Bash, Read
 user-invocable: true
 metadata:
+  author: Jinn Network
+  version: 1.0.0
   openclaw:
     requires:
       bins: [node, yarn]

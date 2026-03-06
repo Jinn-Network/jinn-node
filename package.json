@@ -88,6 +88,7 @@
     "rewards:summary": "tsx scripts/service/rewards.ts",
     "staking:claim-incentives": "sh -c 'tsx scripts/staking/claim-incentives.ts \"$@\"' --",
     "staking:claim-rewards": "sh -c 'tsx scripts/staking/claim-service-rewards.ts \"$@\"' --",
+    "stolas:preflight": "tsx scripts/staking/stolas-preflight.ts",
     "staking:migrate": "sh -c 'tsx scripts/wallet/restake.ts --target \"$@\"' --",
     "deploy:railway": "sh -c 'bash scripts/deploy-railway.sh \"$@\"' --",
     "support:bundle": "FORCE_STDERR=true tsx scripts/support-bundle.ts"

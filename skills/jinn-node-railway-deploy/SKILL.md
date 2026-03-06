@@ -1,9 +1,11 @@
 ---
 name: jinn-node-railway-deploy
-description: Deploy a jinn-node worker to Railway after local setup, including volume mount, .operate/.gemini import, environment variable setup, canary gateway override, and live health verification.
+description: Deploy a jinn-node worker to Railway with volume mount, credential import, and health verification. Use when user says "deploy to Railway", "railway setup", "deploy worker", "run on Railway", or "move to cloud". Requires local setup complete first.
 allowed-tools: Bash, Read, Edit, Write, Glob
 user-invocable: true
 metadata:
+  author: Jinn Network
+  version: 1.0.0
   openclaw:
     requires:
       bins: [railway, tar]

@@ -1,9 +1,11 @@
 ---
 name: jinn-node-wallet-ops
-description: Operate and recover jinn-node wallets safely, including backup, key export, withdraw, unstake, restake evicted services, and full recovery with mandatory dry-run and confirmation gates.
+description: Manage jinn-node wallets — backup, key export, withdraw, unstake, restake, and emergency recovery with mandatory dry-run gates. Use when user says "check wallet", "withdraw funds", "export keys", "backup wallet", "unstake", or "recover wallet".
 allowed-tools: Bash, Read
 user-invocable: true
 metadata:
+  author: Jinn Network
+  version: 1.0.0
   openclaw:
     requires:
       bins: [node, yarn]
@@ -58,6 +60,14 @@ yarn wallet:withdraw --to <address> --dry-run
 yarn wallet:withdraw --to <address>
 ```
 
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--to` | (required) | Destination address |
+| `--asset` | `all` | `ETH`, `OLAS`, or `all` |
+| `--dry-run` | off | Preview without executing |
+
+Keeps 0.001 ETH in the Safe for future gas.
+
 ### Restake evicted services
 
 ```bash
@@ -81,6 +91,11 @@ yarn wallet:unstake
 
 72-hour staking cooldown applies.
 
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--service-id` | (from config) | Service ID to unstake |
+| `--dry-run` | off | Preview without executing |
+
 ### Full recovery (destructive)
 
 ```bash
@@ -88,6 +103,14 @@ cd jinn-node
 yarn wallet:recover --to <address> --dry-run
 yarn wallet:recover --to <address>
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--to` | (required) | Destination address for all funds |
+| `--dry-run` | off | Preview without executing |
+| `--skip-terminate` | off | Skip termination (if already unstaked) |
+
+**WARNING**: Recovery terminates the service. You must re-run `yarn setup` to re-stake.
 
 ## Required env
 

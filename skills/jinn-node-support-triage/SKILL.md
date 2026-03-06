@@ -1,9 +1,11 @@
 ---
 name: jinn-node-support-triage
-description: Collect a safe support bundle and perform first-line troubleshooting for jinn-node operator issues (setup, runtime, and connectivity) before escalation.
+description: Collect diagnostics and troubleshoot jinn-node operator issues covering setup, runtime, and connectivity failures. Use when user says "something is broken", "worker not running", "setup failed", "debug jinn", "node won't start", or reports any error.
 allowed-tools: Bash, Read
 user-invocable: true
 metadata:
+  author: Jinn Network
+  version: 1.0.0
   openclaw:
     requires:
       bins: [node, yarn]
