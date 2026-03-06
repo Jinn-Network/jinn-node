@@ -100,75 +100,17 @@ poetry env use python3.11
 
 ---
 
-## Phase 1: Environment Configuration
+## Setup, Environment & Worker
 
-### What to tell the human
+For the full step-by-step setup workflow, use the **operator setup skill**:
 
-Only **3 things** require human input. Everything else is auto-configured via `jinn.yaml` (generated on first run).
+→ [`skills/jinn-node-operator-setup/SKILL.md`](skills/jinn-node-operator-setup/SKILL.md)
 
-#### 1. RPC URL (required)
-
-**Recommended:** Use the Jinn RPC proxy at `https://rpc.jinn.network`. This requires an `RPC_PROXY_TOKEN` — ask the Jinn team for one if the operator doesn't have it.
-
-```bash
-RPC_URL=https://rpc.jinn.network
-RPC_PROXY_TOKEN=<token from Jinn team>
-```
-
-**How auth works:** The proxy expects a `Authorization: Bearer <token>` header. The frontend (viem) handles this natively. jinn-node (ethers.js) uses `ethers.FetchRequest` to attach the header when `RPC_PROXY_TOKEN` is set — see `src/config/index.ts`.
-
-**Fallback:** If the operator has their own RPC, they can set `RPC_URL` directly (e.g. Alchemy, Tenderly) and leave `RPC_PROXY_TOKEN` unset.
-
-#### 2. OPERATE_PASSWORD (required)
-
-This password encrypts the wallet that will be created for the node. Explain:
-
-> "Choose a strong password (minimum 8 characters). This encrypts your node's wallet — you'll need it to access your private keys later. Store it somewhere safe alongside your seed phrase."
-
-Generate a suggestion if they want one, or let them choose their own. Write it to `.env`.
-
-#### 3. LLM Authentication (required)
-
-The worker uses Gemini to execute jobs. The human needs ONE of these:
-
-- **Option A: `GEMINI_API_KEY`** (simplest) — Get an API key from [Google AI Studio](https://aistudio.google.com/apikey). Set it in `.env`.
-- **Option B: Gemini CLI login** — Run `npx @google/gemini-cli auth login` (requires a browser on the machine). No env var needed after login.
-- **Option C: `GEMINI_OAUTH_CREDENTIALS`** — JSON array of OAuth creds (advanced, for credential rotation).
-
-Recommend Option A for simplicity. If the human's machine has no browser (headless server), Option A is the only practical choice.
-
-### Setting up .env (secrets only)
-
-```bash
-cd jinn-node
-cp .env.example .env
-```
-
-Then write ONLY the secrets that need human input:
-
-```bash
-# These values need human input — replace them:
-RPC_URL=https://rpc.jinn.network
-RPC_PROXY_TOKEN=<token from Jinn team>
-OPERATE_PASSWORD=<the human's chosen password>
-GEMINI_API_KEY=<the human's API key>  # if using Option A
-```
-
-**Optional secrets** (ask, but the human can skip):
-- `GITHUB_TOKEN` — Strongly recommended if the node will work on code tasks. Personal access token from github.com/settings/tokens.
-- `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` — Commit identity for code tasks.
+This covers: prerequisites, `.env` configuration, `yarn setup` / `yarn setup --stolas`, mnemonic capture, key backup, funding loops, delivery rate verification, and initial worker run.
 
 ### Configuration (jinn.yaml)
 
 `jinn.yaml` is auto-generated on first run with correct defaults for the Jinn network. **Do not create it manually.**
-
-The defaults include:
-- `chain.chain_id: 8453` — Base mainnet
-- `services.ponder_url` — Jinn's indexer endpoint
-- `services.control_api_url` — Jinn's control API endpoint
-- `staking.contract` — Jinn staking contract(s) on Base
-- `worker.mech_filter_mode: staking` — Multi-operator mode
-- `filtering.workstreams` — Can be customized if needed
 
 #### Multi-Staking Contract Support
 
@@ -183,197 +125,9 @@ staking:
   contract: "0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139,0x66A92CDa5B319DCCcAC6c1cECbb690CA3Fb59488"
 ```
 
-Each contract's mech list is cached independently (5-minute TTL). This is useful when services span different staking programs (e.g., Pearl vs stOLAS).
+Each contract's mech list is cached independently (5-minute TTL). To customize, edit `jinn.yaml` after first run. Legacy env var names also work as overrides.
 
-To customize, edit `jinn.yaml` after first run. Legacy env var names (e.g., `WORKSTREAM_FILTER`, `CHAIN_ID`) also work as overrides.
-
----
-
-## Phase 2: Install Dependencies
-
-```bash
-cd jinn-node
-yarn install
-```
-
-This also installs Python dependencies via Poetry automatically. If `poetry install` fails separately, check the Python version (must be 3.10 or 3.11).
-
----
-
-## Phase 3: Run Setup
-
-> **Recommended:** Use stOLAS setup (`yarn setup --stolas`) — no OLAS required, only ~0.01 ETH for gas. See [Phase 3b](#phase-3b-stolas-setup-no-olas-required) for details. If stOLAS slots are full, fall back to the standard setup below.
-
-### CRITICAL — Mnemonic Capture Protocol
-
-When `yarn setup` creates a new wallet, it prints the seed phrase **exactly once** as a single line to stdout:
-
-```
-Please save the mnemonic phrase for the Master EOA: word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12
-```
-
-**You MUST:**
-1. Run `yarn setup` and capture ALL stdout output.
-2. Search the output for the line starting with `Please save the mnemonic phrase`.
-3. Extract the 12 (or 24) words.
-4. Present them to the human prominently — make it unmissable:
-
-> **YOUR WALLET SEED PHRASE — SAVE THIS NOW**
->
-> These 12 words are the master key to your node's wallet. Anyone with these words can access your funds. Write them down on paper and store them securely. They will NOT be shown again.
->
-> ```
-> word1 word2 word3 word4
-> word5 word6 word7 word8
-> word9 word10 word11 word12
-> ```
->
-> Your wallet address: 0x...
->
-> Have you saved your seed phrase securely?
-
-5. Wait for the human to confirm before proceeding.
-
-**On subsequent runs**, the wallet already exists and the mnemonic is NOT printed. If the human missed it and needs their keys, use `yarn wallet:export-keys` (see [Wallet Management](#wallet-management)).
-
-### Running Setup
-
-```bash
-cd jinn-node
-yarn setup 2>&1
-```
-
-Setup runs through these steps automatically:
-1. Preflight checks (Poetry, Tendermint, dependencies)
-2. Configuration validation (env vars)
-3. Wallet creation (Master EOA) — **capture mnemonic here**
-4. Funding check — **setup will exit here if unfunded (this is normal)**
-5. Safe creation
-6. Second funding check — **may exit again for Safe + OLAS funding**
-7. Service deployment
-8. Mech deployment
-9. Staking registration
-
-### Expected "Failures" That Are Actually Normal
-
-**"Funding required before safe creation. Please fund and rerun."** — This is the standard flow, not an error. Setup detected the wallet needs ETH to proceed. Extract the address and amount from the output (look for the `FUNDING REQUIRED` box) and tell the human:
-
-> Your node needs a small amount of ETH on Base to create its Safe wallet.
->
-> Send **[amount] ETH** to: `[address]`
->
-> This is your node's Master EOA address on the Base network. You can send ETH from any exchange (Coinbase, Binance, etc.) or wallet that supports Base. After sending, wait for the transaction to confirm (usually ~2 seconds on Base), then I'll rerun the setup.
-
-After the human confirms funding, rerun `yarn setup`. It will detect the existing wallet (no new mnemonic) and continue.
-
-**"Funding required before deployment."** — Same pattern, but now it needs both ETH and OLAS tokens in the Safe. The output will show multiple funding requirements — relay them all to the human.
-
-**`.operate directory not found` warnings** — Ignore these. They are first-run noise from the config resolver checking multiple possible locations. They do not indicate a problem.
-
-### Post-Setup: Verify Delivery Rate
-
-After setup completes (mech is deployed and staked), verify your mech's `maxDeliveryRate` is set to 99. Without this, a baseMech (service 112) will deliver garbage responses to your requests after the priority window expires.
-
-```bash
-cd jinn-node
-RPC_URL=<your-rpc-url> yarn tsx scripts/mech/assert-delivery-rates.ts
-```
-
-If any mech shows a rate other than 99, fix it:
-
-```bash
-cd jinn-node
-OPERATE_PASSWORD=<password> \
-RPC_URL=<your-rpc-url> \
-yarn tsx scripts/mech/fix-all-delivery-rates.ts 99
-```
-
-**Note:** stOLAS setup (`yarn setup --stolas`) sets this automatically. Standard setup may require manual correction.
-
-**Why 99?** The baseMech's threshold is 100. Requests with `deliveryRate < 100` are ignored by it. The mech factory defaults to `5000000000000` which is well above the threshold, causing the baseMech to scoop expired requests and deliver empty responses.
-
-### Funding Requirements (Typical)
-
-The full setup on Base mainnet typically requires:
-- **~0.005 ETH** on the Master EOA (for gas to create the Safe)
-- **~0.01 ETH** in the Master Safe (for operational gas)
-- **~10,000 OLAS** in the Master Safe (5,000 OLAS security deposit + 5,000 OLAS agent bond for the Jinn staking contract)
-
-OLAS can be purchased on Uniswap (Base) or bridged from Ethereum mainnet.
-
-**Alternative: stOLAS setup (no OLAS required)** — See [Phase 3b: stOLAS Setup](#phase-3b-stolas-setup-no-olas-required).
-
----
-
-## Phase 3b: stOLAS Setup (No OLAS Required)
-
-If the operator does not have 10,000 OLAS, they can use the **stOLAS** path. stOLAS uses the ExternalStakingDistributor — LemonTree depositors provide the OLAS capital, and operators only need ETH for gas.
-
-### Prerequisites
-
-- Phases 1-2 completed (`.env` configured, dependencies installed)
-- **~0.02 ETH** on the Master EOA (gas for wallet creation + `stake()` transaction)
-- **~0.01 ETH** in the Master Safe (for agent funding + mech deployment gas)
-
-### Run stOLAS Setup
-
-```bash
-cd jinn-node
-yarn setup --stolas
-```
-
-This will:
-1. Create Master EOA + Master Safe if first run (wallet-only bootstrap, no OLAS needed)
-2. Load Master EOA + Master Safe from `.operate/`
-3. Generate a new agent EOA for this service
-4. Preflight check (distributor configured, staking slots available)
-5. Route `stake()` through Master Safe (creates service + Safe on-chain)
-6. Discover serviceId + Safe from chain events
-7. Store agent key in `.operate/keys/`
-8. Import service config to `.operate/services/`
-9. Check Master Safe has enough ETH for mech deployment
-10. Fund agent EOA from Master Safe (via FundDistributor)
-11. Deploy mech contract via service Safe
-12. Update config with mech address
-
-If step 9 fails (insufficient Master Safe ETH), setup returns with instructions to fund the Master Safe and run:
-```bash
-npx tsx scripts/deploy-mech.ts --service-config-id=<id>
-```
-
-### What's Different from Standard Setup
-
-| | Standard | stOLAS |
-|--|---------|--------|
-| OLAS required | ~10,000 OLAS | 0 OLAS |
-| ETH required | ~0.015 ETH | ~0.03 ETH (Master EOA + Master Safe) |
-| Who provides capital | Operator | LemonTree depositors |
-| Reward split | 100% to operator | 5% operator, 10% protocol, 85% depositors |
-| Setup command | `yarn setup` | `yarn setup --stolas` |
-| maxDeliveryRate | Manual fix required | Automatically set to 99 |
-
-### Post-Setup
-
-After stOLAS setup completes, continue with [Phase 4: Run the Worker](#phase-4-run-the-worker) as usual. The worker doesn't know or care how the service was staked.
-
----
-
-## Phase 4: Run the Worker
-
-After setup completes successfully:
-
-```bash
-cd jinn-node
-yarn worker
-```
-
-The worker will:
-1. Connect to the Ponder indexer
-2. Poll for unclaimed requests from any mech staked in the Jinn staking contract
-3. Claim and execute jobs using Gemini
-4. Deliver results on-chain
-
-**Multi-operator note:** The worker uses `staking` filter mode by default, so it sees requests dispatched to ANY mech in the Jinn staking contract — not just its own. Each request has a 61-second priority window for the original mech, after which any staked mech can deliver. In practice, the agent execution takes minutes, so the priority window is always expired by delivery time.
+**Multi-operator note:** The worker uses `staking` filter mode by default, so it sees requests dispatched to ANY mech in the Jinn staking contract — not just its own. Each request has a 61-second priority window for the original mech, after which any staked mech can deliver.
 
 ---
 
@@ -401,8 +155,7 @@ If the operator wants to run their worker 24/7 without keeping a local machine o
 
    | Variable | Description |
    |----------|-------------|
-   | `RPC_URL` | Base chain RPC endpoint (`https://rpc.jinn.network`) |
-   | `RPC_PROXY_TOKEN` | Bearer token for rpc.jinn.network (omit if using direct RPC) |
+   | `RPC_URL` | Base chain RPC endpoint |
    | `CHAIN_ID` | `8453` |
    | `OPERATE_PASSWORD` | Decrypts `.operate/` keystore |
    | `GEMINI_API_KEY` | Gemini API key |
@@ -410,7 +163,7 @@ If the operator wants to run their worker 24/7 without keeping a local machine o
    | `GIT_AUTHOR_NAME` | Git commit identity |
    | `GIT_AUTHOR_EMAIL` | Git commit identity |
 
-   Configuration values (chain ID, service URLs, polling intervals, etc.) are in `jinn.yaml`, which is auto-generated on first run. For Railway, `jinn.yaml` lives on the persistent volume.
+   If your RPC requires auth (e.g. `RPC_PROXY_TOKEN`), add that too. Configuration values are in `jinn.yaml`, which is auto-generated on first run. For Railway, `jinn.yaml` lives on the persistent volume.
 
 6. **Import `.operate/` into the volume.** Use `railway shell` to access the running container, then copy your local `.operate/` directory contents into `/home/jinn/.operate/`. Alternatively, use `railway volume` commands or the Railway CLI.
 
@@ -597,5 +350,3 @@ When reporting an issue, also describe:
 | Worker can't connect to Ponder | Network issue or wrong URL | Check `jinn.yaml` has correct `services.ponder_url` (default is correct for Jinn network) |
 | Agent execution fails | LLM auth expired or invalid | Re-authenticate Gemini or check `GEMINI_API_KEY` |
 | Git clone fails during job | Missing `GITHUB_TOKEN` or SSH keys | Set `GITHUB_TOKEN` in `.env` for HTTPS clone access |
-
-If this file and a skill diverge, follow the skill.

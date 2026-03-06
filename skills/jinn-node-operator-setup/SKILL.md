@@ -53,7 +53,7 @@ cp .env.example .env
 ```
 
 Collect and set **secrets only** in `.env`:
-- `RPC_URL` — Base network RPC endpoint (Alchemy, Infura, or QuickNode recommended)
+- `RPC_URL` — Base network RPC endpoint
 - `OPERATE_PASSWORD` — encrypts the wallet keystore (min 8 chars)
 - Gemini auth: `GEMINI_API_KEY` (simplest) or Gemini CLI OAuth (`npx @google/gemini-cli auth login`)
 
@@ -120,16 +120,8 @@ If stOLAS is **available**, proceed:
 
 #### 4c. Fund for stOLAS
 
-stOLAS requires only ETH — no OLAS:
+stOLAS requires only ETH — no OLAS. Check current balances:
 
-| Address | Amount | Purpose |
-|---------|--------|---------|
-| Master EOA | >= 0.003 ETH | Gas for Safe transaction |
-| Master Safe | >= 0.015 ETH | Stake tx gas + agent EOA funding + mech deployment |
-
-Total: ~0.02 ETH (~$50 on Base L2).
-
-Check current balances:
 ```bash
 cd jinn-node
 npx tsx -e "
@@ -142,14 +134,12 @@ async function main() {
   const safe = await p.getBalance(w.safes.base);
   console.log('Master EOA (' + w.address + '):', ethers.formatEther(eoa), 'ETH');
   console.log('Master Safe (' + w.safes.base + '):', ethers.formatEther(safe), 'ETH');
-  if (eoa < ethers.parseEther('0.003')) console.log('>>> Fund Master EOA with >= 0.003 ETH');
-  if (safe < ethers.parseEther('0.015')) console.log('>>> Fund Master Safe with >= 0.015 ETH');
 }
 main();
 "
 ```
 
-Ask operator to fund if needed. After funding:
+Both need ETH on Base for gas. The setup flow will print exact amounts if funding is insufficient — relay those to the operator. After funding:
 
 #### 4d. Run stOLAS setup
 
@@ -228,6 +218,24 @@ Expected:
 - Service staked (status = Staked)
 - Mech address present in config
 
+### 6b. Verify delivery rate
+
+After setup, verify the mech's `maxDeliveryRate` is set to 99. Without this, a baseMech may deliver garbage responses to your requests.
+
+```bash
+cd jinn-node
+yarn tsx scripts/mech/assert-delivery-rates.ts
+```
+
+If any mech shows a rate other than 99, fix it:
+
+```bash
+cd jinn-node
+yarn tsx scripts/mech/fix-all-delivery-rates.ts 99
+```
+
+> **Note:** stOLAS setup sets this automatically. Standard setup may require manual correction.
+
 ### 7. Run the worker
 
 ```bash
@@ -257,7 +265,7 @@ See `references/setup-failures.md`.
 |---------|-------|-----|
 | `stOLAS distributor not configured` | ExternalStakingDistributor not set up for this staking contract | Contact Jinn team or use standard setup (Step 4-alt) |
 | `All staking slots occupied` | Max services reached in the staking contract | Wait for slots to free up or use standard setup (Step 4-alt) |
-| `Master EOA has insufficient ETH` | Not enough gas for Safe transaction | Fund Master EOA with >= 0.001 ETH on Base |
+| `Master EOA has insufficient ETH` | Not enough gas for Safe transaction | Fund Master EOA on Base |
 | `Master Safe needs ETH for mech deployment` | Mech deploy deferred | Fund Master Safe, then run `npx tsx scripts/deploy-mech.ts --service-config-id=<id>` |
 | `stake() via Master Safe reverted` | Safe nonce issue or contract error | Check Master Safe is owner of the service, check on-chain state |
 | `Service created but config import failed` | `.operate/services/` write error | Check disk permissions, manually import with `ServiceImporter` |
@@ -271,6 +279,7 @@ See `references/setup-failures.md`.
 - `yarn service:list` shows at least one service.
 - Service is staked (staking state = 1).
 - Mech address is present in service config.
+- Mech delivery rate is 99 (`assert-delivery-rates.ts` passes).
 - Worker starts and reaches polling loop.
 - Operator has confirmed mnemonic backup.
 - Operator has been informed about key backup location and `OPERATE_PASSWORD` requirement.
