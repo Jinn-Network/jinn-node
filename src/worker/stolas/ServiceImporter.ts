@@ -145,7 +145,7 @@ export async function importServiceFromChain(
             cost_of_bond: '5000000000000000000000',
             fund_requirements: {
               '0x0000000000000000000000000000000000000000': {
-                agent: '5000000000000000',   // 0.005 ETH per agent EOA
+                agent: '2000000000000000',   // 0.002 ETH per agent EOA
                 safe: '1628500000000000',    // ~0.0016 ETH per service Safe
               },
             },

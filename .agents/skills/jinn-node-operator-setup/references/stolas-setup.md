@@ -14,7 +14,7 @@ The `--stolas` flag handles the entire flow end-to-end:
 1. Create Master EOA + Master Safe (if they don't exist)
 2. **Capture the mnemonic** — relay to operator (see Step 5 in SKILL.md)
 3. Exit requesting funding if Master EOA needs ETH
-4. Operator funds Master EOA with ~0.005 ETH and Master Safe with ~0.015 ETH
+4. Operator funds Master EOA with ~0.01 ETH (excess automatically transfers to Master Safe)
 5. Rerun `yarn setup --stolas 2>&1` — continues from where it left off
 6. Preflight check (distributor + slots)
 7. Generate new agent EOA
@@ -29,11 +29,13 @@ The `--stolas` flag handles the entire flow end-to-end:
 
 > **Key backup:** Encrypted with `OPERATE_PASSWORD`. Inform the operator to store both the backup file and the password securely.
 
-## 2. Funding loop
+## 2. Funding
 
-The setup may exit multiple times requesting funding. Each time:
-1. Note the address and amount printed
-2. Fund the address
+The operator only needs to fund **one address**: the Master EOA with ~0.01 ETH. During Safe creation, excess ETH automatically transfers to the Master Safe via `transfer_excess_assets`. The stOLAS bootstrap then cascades funds: Safe → Agent EOA → mech deployment.
+
+If the setup exits requesting funding:
+1. Note the Master EOA address printed
+2. Send ~0.01 ETH to it
 3. Rerun `yarn setup --stolas 2>&1`
 
 ## 3. If mech deployment fails

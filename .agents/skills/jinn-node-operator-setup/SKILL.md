@@ -211,7 +211,7 @@ User: "I want to set up a jinn node"
 3. Clone repo, `cp .env.example .env` → ask operator for RPC_URL, password, Gemini auth
 4. `yarn install`
 5. `yarn stolas:preflight` → 12 slots available
-6. Fund Master EOA with ~0.005 ETH → operator confirms
+6. Fund Master EOA with ~0.01 ETH (covers everything — excess cascades to Safe) → operator confirms
 7. `yarn setup --stolas` → service created, mech deployed
 8. Verify: `yarn wallet:info` shows balances, service staked, delivery rate 99
 9. `yarn worker --single` → first job completes

@@ -36,10 +36,10 @@ const TOPUP_THRESHOLD_FRACTION = 0.5;
 const DEFAULT_RESERVE_WEI = ethers.parseEther('0.002');
 
 /** Minimum ETH to keep in Master EOA (needs gas for Safe txns) */
-const EOA_RESERVE_WEI = ethers.parseEther('0.005');
+const EOA_RESERVE_WEI = ethers.parseEther('0.002');
 
 /** Target balance for Master Safe when topping up from Master EOA */
-const MASTER_SAFE_TARGET_WEI = ethers.parseEther('0.02');
+const MASTER_SAFE_TARGET_WEI = ethers.parseEther('0.008');
 
 /** Minimum fund target per address — overrides low config.json values */
 const MIN_FUND_TARGET_WEI = ethers.parseEther('0.002');
