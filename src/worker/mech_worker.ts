@@ -2094,16 +2094,20 @@ async function main() {
       }
 
       // Call staking checkpoint if epoch is overdue (permissionless, any EOA can trigger)
+      // Checkpoint is per-contract — call each contract from the comma-separated list
       {
         const runtimeResolvedConfig = await getRuntimeResolvedConfig();
         const stakingContract = getActiveStakingContractForService(runtimeResolvedConfig);
+        const checkpointContracts = stakingContract ? [stakingContract] : [];
         cyclesSinceLastCheckpoint++;
-        if (stakingContract && cyclesSinceLastCheckpoint >= WORKER_CHECKPOINT_CYCLES) {
+        if (checkpointContracts.length > 0 && cyclesSinceLastCheckpoint >= WORKER_CHECKPOINT_CYCLES) {
           cyclesSinceLastCheckpoint = 0;
-          try {
-            await maybeCallCheckpoint(stakingContract);
-          } catch (e: any) {
-            workerLogger.warn({ error: serializeError(e) }, 'Staking checkpoint call failed (non-fatal)');
+          for (const sc of checkpointContracts) {
+            try {
+              await maybeCallCheckpoint(sc);
+            } catch (e: any) {
+              workerLogger.warn({ error: serializeError(e), stakingContract: sc }, 'Staking checkpoint call failed (non-fatal)');
+            }
           }
         }
 
@@ -2146,17 +2150,18 @@ async function main() {
                 workerLogger.warn({ serviceId: service.serviceId, error: serializeError(e) }, 'Staking heartbeat failed for service (non-fatal)');
               }
             }
-          } else if (stakingContract && runtimeResolvedConfig) {
-            // Single-service fallback
+          } else if (checkpointContracts.length > 0 && runtimeResolvedConfig) {
+            // Single-service fallback — use the runtime-resolved contract or first from env
+            const heartbeatContract = runtimeResolvedConfig.stakingContract || checkpointContracts[0];
             try {
               const gate = await checkEpochGate(
-                stakingContract,
+                heartbeatContract,
                 runtimeResolvedConfig.serviceId,
                 runtimeResolvedConfig.marketplace
               );
               if (!gate.targetMet) {
                 await maybeSubmitHeartbeat(
-                  stakingContract,
+                  heartbeatContract,
                   runtimeResolvedConfig.serviceId,
                   runtimeResolvedConfig.marketplace
                 );

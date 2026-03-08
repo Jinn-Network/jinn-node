@@ -8,22 +8,18 @@
  * API base: https://www.moltbook.com/api/v1
  * Rate limits: 100 req/min, 1 post/30 min, 50 comments/hr
  *
- * Environment variables:
- * - MOLTBOOK_API_KEY: Bot API key from Moltbook developer registration
+ * Credentials: API key fetched via credential bridge (provider: 'moltbook')
  */
 
 import { z } from 'zod';
-import { secrets } from '../../../config/index.js';
+import { getCredential } from '../../shared/credential-client.js';
 
 // ============================================
 // Helper Functions
 // ============================================
 
-function getMoltbookConfig() {
-    const apiKey = secrets.moltbookApiKey;
-    if (!apiKey) {
-        throw new Error('Missing required environment variable: MOLTBOOK_API_KEY');
-    }
+async function getMoltbookConfig() {
+    const apiKey = await getCredential('moltbook');
     return { apiKey };
 }
 
@@ -230,7 +226,7 @@ export async function moltbookSearch(args: unknown) {
         const parsed = moltbookSearchParams.safeParse(args);
         if (!parsed.success) return formatMcpError('VALIDATION_ERROR', parsed.error.message);
 
-        const config = getMoltbookConfig();
+        const config = await getMoltbookConfig();
         const { query, limit } = parsed.data;
         const params = new URLSearchParams({ q: query });
         if (limit) params.set('limit', String(limit));
@@ -247,7 +243,7 @@ export async function moltbookGetFeed(args: unknown) {
         const parsed = moltbookGetFeedParams.safeParse(args);
         if (!parsed.success) return formatMcpError('VALIDATION_ERROR', parsed.error.message);
 
-        const config = getMoltbookConfig();
+        const config = await getMoltbookConfig();
         const { sort, limit } = parsed.data;
         const params = new URLSearchParams();
         if (sort) params.set('sort', sort);
@@ -266,7 +262,7 @@ export async function moltbookGetSubmolt(args: unknown) {
         const parsed = moltbookGetSubmoltParams.safeParse(args);
         if (!parsed.success) return formatMcpError('VALIDATION_ERROR', parsed.error.message);
 
-        const config = getMoltbookConfig();
+        const config = await getMoltbookConfig();
         const result = await moltbookApiCall<unknown>('GET', `/submolts/${encodeURIComponent(parsed.data.name)}`, config.apiKey);
         return formatMcpResponse(result);
     } catch (error: unknown) {
@@ -279,7 +275,7 @@ export async function moltbookListSubmolts(args: unknown) {
         const parsed = moltbookListSubmoltsParams.safeParse(args);
         if (!parsed.success) return formatMcpError('VALIDATION_ERROR', parsed.error.message);
 
-        const config = getMoltbookConfig();
+        const config = await getMoltbookConfig();
         const params = new URLSearchParams();
         if (parsed.data.limit) params.set('limit', String(parsed.data.limit));
 
@@ -296,7 +292,7 @@ export async function moltbookSubscribe(args: unknown) {
         const parsed = moltbookSubscribeParams.safeParse(args);
         if (!parsed.success) return formatMcpError('VALIDATION_ERROR', parsed.error.message);
 
-        const config = getMoltbookConfig();
+        const config = await getMoltbookConfig();
         const result = await moltbookApiCall<unknown>('POST', `/submolts/${encodeURIComponent(parsed.data.name)}/subscribe`, config.apiKey);
         return formatMcpResponse(result);
     } catch (error: unknown) {
@@ -309,7 +305,7 @@ export async function moltbookCreatePost(args: unknown) {
         const parsed = moltbookCreatePostParams.safeParse(args);
         if (!parsed.success) return formatMcpError('VALIDATION_ERROR', parsed.error.message);
 
-        const config = getMoltbookConfig();
+        const config = await getMoltbookConfig();
         const { title, content, url, submolt } = parsed.data;
 
         const result = await moltbookApiCall<unknown>('POST', '/posts', config.apiKey, {
@@ -329,7 +325,7 @@ export async function moltbookGetPost(args: unknown) {
         const parsed = moltbookGetPostParams.safeParse(args);
         if (!parsed.success) return formatMcpError('VALIDATION_ERROR', parsed.error.message);
 
-        const config = getMoltbookConfig();
+        const config = await getMoltbookConfig();
         const result = await moltbookApiCall<unknown>('GET', `/posts/${encodeURIComponent(parsed.data.id)}`, config.apiKey);
         return formatMcpResponse(result);
     } catch (error: unknown) {
@@ -342,7 +338,7 @@ export async function moltbookCreateComment(args: unknown) {
         const parsed = moltbookCreateCommentParams.safeParse(args);
         if (!parsed.success) return formatMcpError('VALIDATION_ERROR', parsed.error.message);
 
-        const config = getMoltbookConfig();
+        const config = await getMoltbookConfig();
         const { post_id, content, parent_id } = parsed.data;
 
         const result = await moltbookApiCall<unknown>('POST', `/posts/${encodeURIComponent(post_id)}/comments`, config.apiKey, {
@@ -360,7 +356,7 @@ export async function moltbookUpvote(args: unknown) {
         const parsed = moltbookUpvoteParams.safeParse(args);
         if (!parsed.success) return formatMcpError('VALIDATION_ERROR', parsed.error.message);
 
-        const config = getMoltbookConfig();
+        const config = await getMoltbookConfig();
         const { target_type, target_id } = parsed.data;
 
         const path = target_type === 'post'
@@ -379,7 +375,7 @@ export async function moltbookGetProfile(args: unknown) {
         const parsed = moltbookGetProfileParams.safeParse(args);
         if (!parsed.success) return formatMcpError('VALIDATION_ERROR', parsed.error.message);
 
-        const config = getMoltbookConfig();
+        const config = await getMoltbookConfig();
         const result = await moltbookApiCall<unknown>('GET', '/agents/me', config.apiKey);
         return formatMcpResponse(result);
     } catch (error: unknown) {

@@ -88,8 +88,11 @@ ENV NODE_ENV=production \
 # Healthcheck endpoint (healthcheck defined in docker-compose.yml)
 EXPOSE 8080
 
-# Run as non-root
-USER jinn
+# Note: USER jinn is intentionally omitted here.
+# Railway volumes retain their original ownership (root). Since the persistent
+# volume is mounted at /root and contains .operate/ keystores, the container
+# must run as root to read/write them. The jinn user is available for future
+# migration when volumes are re-created at /home/jinn.
 
 # Default command (Railway overrides via startCommand in railway.toml).
 # dumb-init wraps the process for proper signal forwarding in plain Docker.
