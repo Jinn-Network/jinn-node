@@ -23,6 +23,7 @@ fi
 
 # --- Docker mode ---
 # Build image if needed (quiet, only on first run or after changes)
+echo "[worker] Building Docker image (first run may take a minute)..."
 docker compose build --quiet 2>/dev/null || true
 
 if [ $# -eq 0 ]; then
