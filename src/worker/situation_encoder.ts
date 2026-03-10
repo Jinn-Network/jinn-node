@@ -4,9 +4,9 @@ export const SITUATION_ARTIFACT_VERSION = "sit-enc-v1.1";
 import { ExtractedArtifact } from './artifacts.js';
 import { workerLogger } from '../logging/index.js';
 import { extractPromptSections } from './recognition_helpers.js';
-import { getPonderGraphqlUrl } from '../config/index.js';
+import { config } from '../config/index.js';
 
-const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
+const PONDER_GRAPHQL_URL = config.services.ponderUrl;
 
 interface SituationEncoderInput {
   requestId: string;

@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { workerLogger } from '../logging/index.js';
 import { getMasterSafe, getServiceSafeAddress } from '../env/operate-profile.js';
+import { config } from '../config/index.js';
 
 const DEFAULT_HEALTHCHECK_PORT = 8080;
 // Railway sets PORT env var for the exposed service port
@@ -107,11 +108,9 @@ export function updateFleetState(state: FleetStateInfo): void {
 }
 
 export function startHealthcheckServer(): void {
-  // Priority: HEALTHCHECK_PORT > Railway's PORT > default 8080
+  // Priority: Railway's PORT (platform-injected) > config.services.healthcheckPort (default 8080)
   const railwayPort = getRailwayPort();
-  const port = process.env.HEALTHCHECK_PORT
-    ? parseInt(process.env.HEALTHCHECK_PORT, 10)
-    : (railwayPort || DEFAULT_HEALTHCHECK_PORT);
+  const port = railwayPort || config.services.healthcheckPort;
 
   const server = createServer((req, res) => {
     // Handle CORS

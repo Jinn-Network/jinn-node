@@ -18,8 +18,7 @@ import type {
 } from '../../types.js';
 import { workerLogger } from '../../../../logging/index.js';
 import { serializeError } from '../../../logging/errors.js';
-import { getOptionalIpfsGatewayUrl } from '../../../../config/index.js';
-import { getPonderGraphqlUrl } from '../../../../agent/mcp/tools/shared/env.js';
+import { config } from '../../../../config/index.js';
 import { graphQLRequest } from '../../../../http/client.js';
 import { fetchAllChildren, type ChildJobData } from './fetchChildren.js';
 import { isChildIntegrated, batchFetchBranches } from '../../../git/integration.js';
@@ -198,7 +197,7 @@ export class JobContextProvider implements ContextProvider {
           }>;
         };
       }>({
-        url: getPonderGraphqlUrl(),
+        url: config.services.ponderUrl,
         query: `
           query GetChildDeliveries($jobDefIds: [String!]!) {
             requests(
@@ -266,7 +265,7 @@ async function fetchDeliveryPayload(
   deliveryHash: string,
   requestId: string
 ): Promise<{ structuredSummary?: string; output?: string } | null> {
-  const gatewayBase = (getOptionalIpfsGatewayUrl() || 'https://gateway.autonolas.tech/ipfs/').replace(/\/+$/, '');
+  const gatewayBase = (config.services.ipfsGatewayUrl || 'https://gateway.autonolas.tech/ipfs/').replace(/\/+$/, '');
 
   const dirCid = reconstructDeliveryCid(deliveryHash);
   if (!dirCid) {

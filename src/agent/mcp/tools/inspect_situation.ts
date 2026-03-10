@@ -4,7 +4,7 @@ import { Client } from 'pg';
 import fetch from 'cross-fetch';
 import type { Situation, SituationNodeEmbeddingRecord } from '../../../types/situation.js';
 import { mcpLogger } from '../../../logging/index.js';
-import { getPonderGraphqlUrl } from './shared/env.js';
+import { config } from '../../../config/index.js';
 
 export const inspectSituationParams = z.object({
   request_id: z.string().min(1, 'request_id is required'),
@@ -17,8 +17,8 @@ export const inspectSituationSchema = {
   inputSchema: inspectSituationParams.shape,
 };
 
-const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
-const IPFS_GATEWAY_BASE = (process.env.IPFS_GATEWAY_URL || 'https://gateway.autonolas.tech/ipfs/').replace(/\/+$/, '/');
+const PONDER_GRAPHQL_URL = config.services.ponderUrl;
+const IPFS_GATEWAY_BASE = config.services.ipfsGatewayUrl.replace(/\/+$/, '/');
 
 function getDatabaseUrl(): string | null {
   const candidates = [

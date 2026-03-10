@@ -6,7 +6,7 @@
  * approach (completedChildRuns + hierarchy) with a single clean query.
  */
 
-import { getPonderGraphqlUrl } from '../../../../config/index.js';
+import { config } from '../../../../config/index.js';
 import { workerLogger } from '../../../../logging/index.js';
 
 /**
@@ -54,7 +54,7 @@ export async function fetchAllChildren(parentJobDefId: string): Promise<ChildJob
         return [];
     }
 
-    const ponderUrl = getPonderGraphqlUrl();
+    const ponderUrl = config.services.ponderUrl;
 
     const query = `
     query GetAllChildren($parentJobDefId: String!) {

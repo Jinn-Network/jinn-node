@@ -1,48 +1,21 @@
+/**
+ * Worker Configuration (Legacy bridge)
+ *
+ * This module provides a WorkerConfig interface for backwards compatibility.
+ * New code should import { config, secrets } from '../config/index.js' directly.
+ *
+ * @deprecated Use config.chain.*, config.worker.*, config.dev.*, secrets.* directly.
+ */
+
 import { z } from 'zod';
 import dotenv from 'dotenv';
 import { configLogger } from '../logging/index.js';
-
-import {
-  getRequiredRpcUrl,
-  getRequiredChainId,
-  getOptionalWorkerPrivateKey,
-  getRequiredWorkerPrivateKey,
-  getOptionalWalletStoragePath,
-  getOptionalTestRpcUrl,
-  getDisableStsChecks,
-  getOptionalSupabaseUrl,
-  getOptionalSupabaseServiceRoleKey,
-  getEnableTransactionExecutor,
-  getOptionalWorkerId,
-  getWorkerTxConfirmations,
-} from '../config/index.js';
-
-// ============================================================================
-// Re-exports for backward compatibility
-// ============================================================================
-
-export {
-  getRequiredRpcUrl,
-  getRequiredChainId,
-  getOptionalWorkerPrivateKey,
-  getRequiredWorkerPrivateKey,
-  getOptionalWalletStoragePath,
-  getOptionalTestRpcUrl,
-  getDisableStsChecks,
-  getOptionalSupabaseUrl,
-  getOptionalSupabaseServiceRoleKey,
-  getEnableTransactionExecutor,
-  getOptionalWorkerId,
-  getWorkerTxConfirmations,
-};
-
-// ============================================================================
-// Legacy exports for backward compatibility during migration
-// ============================================================================
+import { config as nodeConfig, secrets } from '../config/index.js';
+import { getServicePrivateKey } from '../env/operate-profile.js';
 
 /**
  * Legacy WorkerConfig type
- * @deprecated Import specific getters from '../config/index.js' instead
+ * @deprecated Use config.* and secrets.* from '../config/index.js' directly.
  */
 export interface WorkerConfig {
   WORKER_PRIVATE_KEY?: string;
@@ -60,39 +33,33 @@ export interface WorkerConfig {
 
 /**
  * Legacy config object
- * @deprecated Use specific getters instead: getRequiredRpcUrl(), getRequiredChainId(), etc.
+ * @deprecated Use config.chain.*, config.worker.*, config.dev.*, secrets.* directly.
  */
-export const config: WorkerConfig = {
-  get WORKER_PRIVATE_KEY() { return getOptionalWorkerPrivateKey(); },
-  get CHAIN_ID() { return getRequiredChainId(); },
-  get RPC_URL() { return getRequiredRpcUrl(); },
-  get JINN_WALLET_STORAGE_PATH() { return getOptionalWalletStoragePath(); },
-  get TEST_RPC_URL() { return getOptionalTestRpcUrl(); },
-  get DISABLE_STS_CHECKS() { return getDisableStsChecks(); },
-  get SUPABASE_URL() { return getOptionalSupabaseUrl(); },
-  get SUPABASE_SERVICE_ROLE_KEY() { return getOptionalSupabaseServiceRoleKey(); },
-  get ENABLE_TRANSACTION_EXECUTOR() { return getEnableTransactionExecutor(); },
-  get WORKER_ID() { return getOptionalWorkerId(); },
-  get WORKER_TX_CONFIRMATIONS() { return getWorkerTxConfirmations(); },
+export const workerConfig: WorkerConfig = {
+  get WORKER_PRIVATE_KEY() { return getServicePrivateKey() || undefined; },
+  get CHAIN_ID() { return nodeConfig.chain.chainId; },
+  get RPC_URL() { return secrets.rpcUrl || ''; },
+  get JINN_WALLET_STORAGE_PATH() { return process.env.JINN_WALLET_STORAGE_PATH; },
+  get TEST_RPC_URL() { return secrets.testRpcUrl; },
+  get DISABLE_STS_CHECKS() { return nodeConfig.dev.disableStsChecks; },
+  get SUPABASE_URL() { return secrets.supabaseUrl; },
+  get SUPABASE_SERVICE_ROLE_KEY() { return secrets.supabaseServiceRoleKey; },
+  get ENABLE_TRANSACTION_EXECUTOR() { return nodeConfig.dev.enableTransactionExecutor; },
+  get WORKER_ID() { return nodeConfig.dev.workerId; },
+  get WORKER_TX_CONFIRMATIONS() { return nodeConfig.worker.txConfirmations; },
 };
-
-// Legacy parseWorkerConfig function removed - configuration is now loaded automatically via getters
 
 /**
  * Legacy helper: Get optional string from environment
- * @deprecated Use getOptional*() getters from '../config/index.js' instead
  */
 export function getOptionalString(key: string, defaultValue?: string): string | undefined {
-  // TODO(JINN-234): Migrate callers to use specific getters from config/index.ts
   return process.env[key] ?? defaultValue;
 }
 
 /**
  * Legacy helper: Get required string from environment
- * @deprecated Use getRequired*() getters from '../config/index.js' instead
  */
 export function getRequiredString(key: string): string {
-  // TODO(JINN-234): Migrate callers to use specific getters from config/index.ts
   const value = process.env[key];
   if (value === undefined) {
     throw new Error(`Missing required environment variable ${key}`);
@@ -102,10 +69,8 @@ export function getRequiredString(key: string): string {
 
 /**
  * Legacy helper: Get optional number from environment
- * @deprecated Use getOptional*() getters from '../config/index.js' instead
  */
 export function getOptionalNumber(key: string, defaultValue?: number): number | undefined {
-  // TODO(JINN-234): Migrate callers to use specific getters from config/index.ts
   const value = process.env[key];
   if (value === undefined) {
     return defaultValue;

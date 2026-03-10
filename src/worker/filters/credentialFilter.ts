@@ -9,6 +9,7 @@
  * independently from bridge capabilities.
  */
 
+import { config, secrets } from '../../config/index.js';
 import { workerLogger } from '../../logging/index.js';
 import { getServicePrivateKey } from '../../env/operate-profile.js';
 import {
@@ -102,6 +103,14 @@ export interface WorkerOperatorCapabilityInfo {
   isTrusted: boolean;
 }
 
+export interface CredentialProviderAvailability {
+  provider: string;
+  ok: boolean;
+  status: number;
+  code?: string;
+  error?: string;
+}
+
 const GITHUB_CAPABILITY = 'github';
 
 /**
@@ -115,7 +124,7 @@ const GITHUB_CAPABILITY = 'github';
  * Returns empty providers on any failure (bridge down, no URL, no key).
  */
 export async function probeCredentialBridge(requestId?: string): Promise<WorkerCredentialInfo> {
-  const bridgeUrl = process.env.X402_GATEWAY_URL;
+  const bridgeUrl = secrets.x402GatewayUrl;
   if (!bridgeUrl) {
     return { providers: new Set(), isTrusted: false };
   }
@@ -135,7 +144,7 @@ export async function probeCredentialBridge(requestId?: string): Promise<WorkerC
   try {
     const signer = createPrivateKeyHttpSigner(
       privateKey as `0x${string}`,
-      resolveChainId(process.env.CHAIN_ID || process.env.CHAIN_CONFIG || 'base'),
+      resolveChainId(String(config.chain.chainId)),
     );
     const body: { requestId?: string } = {};
     if (requestId) body.requestId = requestId;
@@ -189,12 +198,12 @@ export async function probeCredentialBridge(requestId?: string): Promise<WorkerC
  * and succeeds against ${GITHUB_API_URL}/user.
  */
 export async function probeOperatorCapabilities(): Promise<WorkerOperatorCapabilityInfo> {
-  const token = process.env.GITHUB_TOKEN;
+  const token = secrets.githubToken;
   if (!token) {
     return { capabilities: new Set(), isTrusted: false };
   }
 
-  const githubApiUrl = (process.env.GITHUB_API_URL || 'https://api.github.com').replace(/\/$/, '');
+  const githubApiUrl = config.git.githubApiUrl.replace(/\/$/, '');
   const url = `${githubApiUrl}/user`;
 
   try {
@@ -278,6 +287,117 @@ export async function getWorkerOperatorCapabilityInfo(): Promise<WorkerOperatorC
  */
 export async function reprobeWithRequestId(requestId: string): Promise<WorkerCredentialInfo> {
   return probeCredentialBridge(requestId);
+}
+
+/**
+ * Strong per-provider credential probe.
+ *
+ * Unlike capabilities probe, this calls /credentials/{provider} for each required
+ * provider with the requestId context to verify credential fetch actually works.
+ */
+export async function probeCredentialProvidersForRequest(
+  requestId: string,
+  providers: string[],
+): Promise<CredentialProviderAvailability[]> {
+  const uniqueProviders = [...new Set(providers.map((p) => p.trim()).filter(Boolean))];
+  if (uniqueProviders.length === 0) return [];
+
+  const bridgeUrl = secrets.x402GatewayUrl;
+  if (!bridgeUrl) {
+    return uniqueProviders.map((provider) => ({
+      provider,
+      ok: false,
+      status: 0,
+      error: 'X402_GATEWAY_URL not set',
+    }));
+  }
+
+  let privateKey: string | undefined;
+  try {
+    privateKey = getServicePrivateKey();
+  } catch {
+    return uniqueProviders.map((provider) => ({
+      provider,
+      ok: false,
+      status: 0,
+      error: 'Worker private key unavailable',
+    }));
+  }
+  if (!privateKey) {
+    return uniqueProviders.map((provider) => ({
+      provider,
+      ok: false,
+      status: 0,
+      error: 'Worker private key unavailable',
+    }));
+  }
+
+  const signer = createPrivateKeyHttpSigner(
+    privateKey as `0x${string}`,
+    resolveChainId(String(config.chain.chainId)),
+  );
+  const requestSlug = requestId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32) || 'unknown';
+  const normalizedBridge = bridgeUrl.replace(/\/$/, '');
+  const body = JSON.stringify({ requestId });
+  const results: CredentialProviderAvailability[] = [];
+
+  for (const provider of uniqueProviders) {
+    const providerSlug = provider.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 20) || 'provider';
+    const url = `${normalizedBridge}/credentials/${provider}`;
+    try {
+      const request = await signRequestWithErc8128({
+        signer,
+        input: url,
+        init: {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': `preflight-${providerSlug}-${requestSlug}`.slice(0, 64),
+          },
+          body,
+          signal: AbortSignal.timeout(10_000),
+        },
+        signOptions: {
+          label: 'eth',
+          binding: 'request-bound',
+          replay: 'non-replayable',
+          ttlSeconds: 60,
+        },
+      });
+
+      const response = await fetch(request);
+      if (response.ok) {
+        results.push({ provider, ok: true, status: response.status });
+        continue;
+      }
+
+      let code: string | undefined;
+      let error: string | undefined;
+      try {
+        const payload = await response.json() as { code?: unknown; error?: unknown };
+        if (typeof payload.code === 'string') code = payload.code;
+        if (typeof payload.error === 'string') error = payload.error;
+      } catch {
+        // no-op: leave undefined and populate generic fallback below
+      }
+      results.push({
+        provider,
+        ok: false,
+        status: response.status,
+        code,
+        error: error || `HTTP ${response.status}`,
+      });
+    } catch (err) {
+      results.push({
+        provider,
+        ok: false,
+        status: 0,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return results;
 }
 
 /** Reset cached credential info (called on service rotation + tests). */

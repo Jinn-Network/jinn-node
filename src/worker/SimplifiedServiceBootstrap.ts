@@ -30,6 +30,8 @@ import { join } from 'path';
 import { createDefaultServiceConfig, SERVICE_CONSTANTS } from './config/ServiceConfig.js';
 import { enableMechMarketplaceInConfig, DEFAULT_MECH_DELIVERY_RATE } from './config/MechConfig.js';
 import { printFundingRequirements } from '../setup/display.js';
+import { config } from '../config/index.js';
+import { backupAllKeys } from '../env/keystore-backup.js';
 
 const bootstrapLogger = logger.child({ component: "SIMPLIFIED-BOOTSTRAP" });
 
@@ -81,6 +83,11 @@ export interface SimplifiedBootstrapConfig {
    * Defaults to true unless JINN_REUSE_SERVICE_CONFIG is set to false.
    */
   reuseExistingService?: boolean;
+  /**
+   * When true, stop after creating wallet + Safe (skip service creation and deployment).
+   * Used by stOLAS flow to bootstrap wallet infrastructure without requiring OLAS.
+   */
+  walletOnly?: boolean;
 }
 
 export interface SimplifiedBootstrapResult {
@@ -101,7 +108,7 @@ export class SimplifiedServiceBootstrap {
 
   constructor(config: SimplifiedBootstrapConfig) {
     this.config = config;
-    
+
     const envAttended = typeof process.env.ATTENDED === 'string'
       ? process.env.ATTENDED.toLowerCase() === 'true'
       : undefined;
@@ -110,7 +117,7 @@ export class SimplifiedServiceBootstrap {
       ? process.env.JINN_REUSE_SERVICE_CONFIG.toLowerCase() !== 'false'
       : undefined;
     this.reuseExistingService = config.reuseExistingService ?? envReuse ?? true;
-    
+
     // Validate required config
     if (!config.operatePassword) {
       throw new Error('operatePassword is required (prevents password prompt)');
@@ -118,10 +125,10 @@ export class SimplifiedServiceBootstrap {
     if (!config.rpcUrl) {
       throw new Error('rpcUrl is required');
     }
-    
-    bootstrapLogger.info({ 
+
+    bootstrapLogger.info({
       chain: config.chain,
-      deployMech: config.deployMech || false 
+      deployMech: config.deployMech || false
     }, "SimplifiedServiceBootstrap initialized");
   }
 
@@ -231,16 +238,16 @@ export class SimplifiedServiceBootstrap {
     try {
       // Step 1: Create operate wrapper with configured ATTENDED mode
       await this.initializeWrapper();
-      
+
       // Step 2: Create service config
       const { serviceConfig, configPath } = await this.createServiceConfig();
-      
+
       // Step 3: Show user intro (what to expect)
       this.printIntro();
-      
+
       // Step 4: Run HTTP-based flow (daemon + API)
       return await this.runHttpFlow(serviceConfig, configPath);
-      
+
     } catch (error) {
       bootstrapLogger.error({ error }, "Bootstrap failed");
       return {
@@ -320,12 +327,12 @@ export class SimplifiedServiceBootstrap {
     if (effectiveRpcUrl && serviceConfig.configurations[this.config.chain]) {
       serviceConfig.configurations[this.config.chain].rpc = effectiveRpcUrl;
     }
-    
+
     if (serviceConfig.configurations[this.config.chain]) {
       const stakingProgram = this.config.stakingProgram || 'custom_staking';
       if (stakingProgram === 'custom_staking') {
         serviceConfig.configurations[this.config.chain].staking_program_id =
-          this.config.customStakingAddress || '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139';
+          this.config.customStakingAddress || SERVICE_CONSTANTS.DEFAULT_STAKING_PROGRAM_ID;
         serviceConfig.configurations[this.config.chain].use_staking = true;
       } else {
         serviceConfig.configurations[this.config.chain].staking_program_id = 'no_staking';
@@ -338,7 +345,7 @@ export class SimplifiedServiceBootstrap {
         use_staking: serviceConfig.configurations[this.config.chain].use_staking
       }, "Configured staking in service config");
     }
-    
+
     // Add mech configuration if requested
     if (this.config.deployMech) {
       const mechPrice = this.config.mechRequestPrice || DEFAULT_MECH_DELIVERY_RATE;
@@ -349,7 +356,7 @@ export class SimplifiedServiceBootstrap {
         mechPrice
       );
     }
-    
+
     // Write to temp file
     const configPath = join(tmpdir(), `jinn-simplified-bootstrap-${Date.now()}.json`);
     writeFileSync(configPath, JSON.stringify(serviceConfig, null, 2));
@@ -513,6 +520,19 @@ ${'='.repeat(80)}
       masterSafe = safeResult.safeAddress;
     }
 
+    // walletOnly mode: return after wallet + Safe creation (skip service deployment).
+    // Used by stOLAS to bootstrap wallet infrastructure without requiring OLAS.
+    if (this.config.walletOnly) {
+      bootstrapLogger.info({ walletAddress, masterSafe }, 'walletOnly mode — returning after wallet + Safe creation');
+      return {
+        success: true,
+        serviceConfigId,
+        serviceSafeAddress: masterSafe,
+        configPath,
+        fundingRequirements: {},
+      };
+    }
+
     const fundingResultAfterSafe = await this.operateWrapper.getFundingRequirements(serviceConfigId);
     if (!fundingResultAfterSafe.success) {
       throw new Error(`Failed to fetch funding requirements: ${fundingResultAfterSafe.error}`);
@@ -553,6 +573,14 @@ ${'='.repeat(80)}
     ) || masterSafe;
 
     await this.waitForDeployment(serviceConfigId);
+
+    // Back up all keys created by the middleware during this flow
+    try {
+      const middlewarePath = this.operateWrapper!.getMiddlewarePath();
+      await backupAllKeys({ operateBasePath: middlewarePath });
+    } catch {
+      bootstrapLogger.warn('Post-bootstrap key backup scan failed (non-fatal)');
+    }
 
     return {
       success: true,
@@ -631,7 +659,7 @@ ${'='.repeat(80)}
 
     // Use the new display utility
     if (requirements.length > 0) {
-      printFundingRequirements(requirements);
+      printFundingRequirements(requirements, this.config.chain);
     }
   }
 

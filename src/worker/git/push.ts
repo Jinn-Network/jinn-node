@@ -7,6 +7,7 @@ import { appendFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { workerLogger } from '../../logging/index.js';
+import { secrets } from '../../config/index.js';
 import { getRepoRoot } from '../../shared/repo_utils.js';
 import type { CodeMetadata } from '../../agent/shared/code_metadata.js';
 import { DEFAULT_REMOTE_NAME, GIT_PUSH_TIMEOUT_MS } from '../constants.js';
@@ -17,7 +18,7 @@ import { serializeError } from '../logging/errors.js';
  * This enables git push to authenticate with the token
  */
 function configureGitCredentials(repoRoot: string): void {
-  const token = process.env.GITHUB_TOKEN;
+  const token = secrets.githubToken;
   if (!token) {
     workerLogger.debug('No GITHUB_TOKEN available for git credential configuration');
     return;

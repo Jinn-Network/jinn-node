@@ -1,6 +1,6 @@
 import { graphQLRequest } from '../../../../http/client.js';
 import { mcpLogger } from '../../../../logging/index.js';
-import { getPonderGraphqlUrl } from './env.js';
+import { config } from '../../../../config/index.js';
 
 export interface JobHierarchyItem {
     jobId: string;
@@ -173,7 +173,7 @@ export async function fetchJobHierarchy(rootJobId: string, maxDepth: number = 3)
     hierarchy: JobHierarchyItem[];
     errors: Array<{ jobId: string, level: number, error: string }>;
 }> {
-    const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
+    const PONDER_GRAPHQL_URL = config.services.ponderUrl;
     const visited = new Set<string>();
     const hierarchy: JobHierarchyItem[] = [];
     const errors: Array<{ jobId: string, level: number, error: string }> = [];

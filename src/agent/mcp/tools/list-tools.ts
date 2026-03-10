@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { graphQLRequest } from '../../../http/client.js';
-import { getPonderGraphqlUrl } from './shared/env.js';
 import { getCurrentJobContext } from './shared/context.js';
 import { BASE_UNIVERSAL_TOOLS, computeToolPolicy } from '../../toolPolicy.js';
+import { config } from '../../../config/index.js';
 
 // Define the structure for tool information, including optional examples
 interface ToolInfo {
@@ -345,7 +345,7 @@ export async function listToolsForTemplate(params: any) {
     }
 
     const { templateId, jobDefinitionId } = parseResult.data;
-    const gqlUrl = getPonderGraphqlUrl();
+    const gqlUrl = config.services.ponderUrl;
     let template: { id: string; name: string; enabledTools?: any } | null = null;
 
     if (templateId) {

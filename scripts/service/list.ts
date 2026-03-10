@@ -106,8 +106,8 @@ async function main() {
           const label = status.error
             ? `ERROR: ${status.error}`
             : status.isEligibleForRewards
-              ? `ELIGIBLE (${status.eligibleRequests}/${status.requiredRequests} requests)`
-              : `NEEDS WORK (${status.requestsNeeded} more requests needed, ${status.eligibleRequests}/${status.requiredRequests})`;
+              ? `ELIGIBLE (${status.eligibleActivities}/${status.requiredActivities} deliveries)`
+              : `NEEDS WORK (${status.activitiesNeeded} more deliveries needed, ${status.eligibleActivities}/${status.requiredActivities})`;
 
           console.log(`  [${icon}] Service #${status.serviceId} (${status.serviceConfigId})`);
           console.log(`      ${label}`);

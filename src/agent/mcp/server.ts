@@ -71,6 +71,9 @@ export const REGISTERED_MCP_TOOLS = [
   // Dispatch schedule tools
   'read_dispatch_schedule',
   'update_dispatch_schedule',
+  // Content stream tools
+  'search_content_streams',
+  'read_content_stream',
 ] as const;
 
 async function main() {
@@ -91,9 +94,7 @@ async function main() {
       mcpLogger.info({ diagnostic: true }, 'MCP stdout cleanliness test probe');
     }
 
-    // Ensure .env variables are available to all tools before they are imported/registered
-    const envModule = await import('./tools/shared/env.js');
-    envModule.loadEnvOnce();
+    // Config system auto-loads .env on import — no manual loadEnvOnce needed
 
     // Suppress noisy stdout loggers to protect MCP stdio JSON stream
     // Only allow warnings/errors to reach stderr (Cursor will show those as errors)
@@ -179,6 +180,9 @@ async function main() {
       // Dispatch schedule tools
       { name: 'read_dispatch_schedule', schema: tools.readDispatchScheduleSchema, handler: tools.readDispatchSchedule },
       { name: 'update_dispatch_schedule', schema: tools.updateDispatchScheduleSchema, handler: tools.updateDispatchSchedule },
+      // Content stream tools
+      { name: 'search_content_streams', schema: tools.searchContentStreamsSchema, handler: tools.searchContentStreams },
+      { name: 'read_content_stream', schema: tools.readContentStreamSchema, handler: tools.readContentStream },
     ];
 
     // Initialize the dynamic tool registry (internal) for dynamic enums

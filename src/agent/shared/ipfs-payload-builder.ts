@@ -17,7 +17,7 @@ import { getJobContextForDispatch } from '../mcp/tools/shared/job-context-utils.
 import { ensureUniversalTools } from '../toolPolicy.js';
 import { parseAnnotatedTools, type TemplateToolSpec } from '../../shared/template-tools.js';
 import { DEFAULT_WORKER_MODEL, normalizeGeminiModel } from '../../shared/gemini-models.js';
-import { getCodeMetadataDefaultBaseBranch } from '../../config/index.js';
+import { config } from '../../config/index.js';
 import { assertValidJinnJobEnvMap } from '../../shared/job-env.js';
 import {
     ensureJobBranch,
@@ -234,7 +234,7 @@ export async function buildIpfsPayload(
     const baseBranch =
         context.branchName ||
         context.baseBranch ||
-        getCodeMetadataDefaultBaseBranch();
+        config.git.defaultBaseBranch;
 
     let branchResult: EnsureBranchResult | undefined;
     // Use provided codeMetadata (from redispatch) or prepare to collect fresh

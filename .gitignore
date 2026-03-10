@@ -16,8 +16,11 @@ __pycache__/
 
 .operate/
 .gemini/
-.claude/
+.claude/*
+!.claude/skills/
 .jinn/
+jinn.yaml
+src/gemini-extension/skills/
 
 coverage/
 test-results/

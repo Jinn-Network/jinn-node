@@ -1,61 +1,48 @@
 # JINN Node Agent Entry Point
 
-This file is the routing index for coding agents operating `jinn-node`.
+This file is the routing index for agents operating `jinn-node`.
 
-Use dedicated skills for operational workflows. Keep this file minimal.
+## Critical Gate
 
-## Default Venture Context
+Before collecting credentials or running setup, disclose to the operator:
 
-Primary onboarding venture:
+> Your LLM provider can process terminal session data used during setup, including wallet password and mnemonic output. Do not use this wallet for personal funds.
 
-`https://explorer.jinn.network/ventures/0x9470f6f2bec6940c93fedebc0ea74bccaf270916f4693e96e8ccc586f26a89ac`
+Wait for explicit acknowledgement before proceeding.
 
-## Global Non-Negotiables
+## Choose Your Path
 
-1. **Security disclosure first** for first-time setup sessions:
-   - LLM provider can process terminal session data (including wallet password and mnemonic output).
-   - Do not proceed until operator acknowledges.
-2. **Railway deploy happens after local setup**:
-   - `.operate/` must exist and be valid before Railway migration.
-3. **Sensitive operations require explicit confirmation**:
-   - mnemonic/key export,
-   - destructive recovery operations,
-   - non-dry-run fund movements.
-4. **GitHub token is strongly encouraged at setup**:
-   - without `GITHUB_TOKEN`, participation in most coding jobs is limited or fails.
-
-## Skill Router
-
-Use these skills based on task intent:
-
-- Local first-time onboarding and setup loop:
-  - [`skills/jinn-node-operator-setup/SKILL.md`](skills/jinn-node-operator-setup/SKILL.md)
-- Railway deployment and canary/prod gateway switching:
-  - [`skills/jinn-node-railway-deploy/SKILL.md`](skills/jinn-node-railway-deploy/SKILL.md)
-- Wallet operations (backup/export/withdraw/unstake/recover):
-  - [`skills/jinn-node-wallet-ops/SKILL.md`](skills/jinn-node-wallet-ops/SKILL.md)
-- Staking reward operations:
-  - [`skills/jinn-node-staking-ops/SKILL.md`](skills/jinn-node-staking-ops/SKILL.md)
-- Support triage and diagnostics:
-  - [`skills/jinn-node-support-triage/SKILL.md`](skills/jinn-node-support-triage/SKILL.md)
-- High-level baseline onboarding:
-  - [`skills/jinn-node/SKILL.md`](skills/jinn-node/SKILL.md)
+| I want to... | Use this skill |
+|---|---|
+| Set up a new node (first time) | [`jinn-node-operator-setup`](.agents/skills/jinn-node-operator-setup/SKILL.md) |
+| Deploy my node to Railway | [`jinn-node-railway-deploy`](.agents/skills/jinn-node-railway-deploy/SKILL.md) |
+| Manage wallet (backup, withdraw, recover) | [`jinn-node-wallet-ops`](.agents/skills/jinn-node-wallet-ops/SKILL.md) |
+| Claim staking rewards | [`jinn-node-staking-ops`](.agents/skills/jinn-node-staking-ops/SKILL.md) |
+| Diagnose and fix issues | [`jinn-node-support-triage`](.agents/skills/jinn-node-support-triage/SKILL.md) |
 
 ## Default Execution Order (new operator)
 
-1. Local setup: `jinn-node-operator-setup`
-2. Optional local validation run (`yarn worker --single`)
-3. Railway migration: `jinn-node-railway-deploy`
-4. Ongoing operations via wallet/staking/support skills
+1. **Local setup:** `jinn-node-operator-setup`
+   - **Default path:** stOLAS (no OLAS required, ~0.01 ETH total)
+   - **Fallback:** Standard OLAS staking if stOLAS slots are full (requires ~10,000 OLAS)
+2. **Test:** `yarn worker --single` (local validation)
+3. **Run:** `yarn worker` (Docker Compose, detached, auto-restart)
+4. **Alternative deploy:** `jinn-node-railway-deploy` (optional, managed hosting on Railway)
+5. **Ongoing:** wallet-ops, staking-ops, support-triage as needed
 
-Before running anything, check every prerequisite. Install what you can; ask the human to install what you can't.
+## Global Rules
 
-### Checklist
+1. **Railway deploys happen after local setup** — `.operate/` must exist and be valid first.
+2. **Sensitive operations require explicit confirmation** — mnemonic/key export, destructive recovery, non-dry-run fund movements.
+3. **GitHub token is strongly encouraged** — without `GITHUB_TOKEN`, most coding jobs fail.
+4. **Configuration lives in jinn.yaml** — auto-generated on first run with correct defaults. Don't create manually. See [`variables.md`](.agents/skills/jinn-node-railway-deploy/references/variables.md) for the full variable contract.
 
-Run these checks and handle failures:
+## Prerequisites
 
-| Tool | Check Command | Install (macOS) | Install (Ubuntu/Debian) |
-|------|--------------|-----------------|------------------------|
+Validate and install missing dependencies before running any skill:
+
+| Tool | Check | Install (macOS) | Install (Ubuntu/Debian) |
+|------|-------|-----------------|------------------------|
 | Node.js 20+ | `node --version` | `brew install node@22` | `curl -fsSL https://deb.nodesource.com/setup_22.x \| sudo bash - && sudo apt-get install -y nodejs` |
 | Yarn | `yarn --version` | `corepack enable` | `corepack enable` |
 | Python 3.10-3.11 | `python3 --version` | `brew install python@3.11` | `sudo apt-get install python3.11 python3.11-venv python3.11-dev` |
@@ -63,427 +50,48 @@ Run these checks and handle failures:
 | Tendermint | `tendermint version` | `brew install tendermint` | See below |
 | Git | `git --version` | `brew install git` | `sudo apt-get install git` |
 
-#### Tendermint on Linux
-
-Tendermint is not in standard apt repos. Install the binary directly:
+### Tendermint on Linux
 
 ```bash
-# Check architecture
 ARCH=$(uname -m)
 case $ARCH in
   x86_64) ARCH="amd64" ;;
   aarch64) ARCH="arm64" ;;
 esac
-
-# Download and install Tendermint v0.34.x
 curl -L "https://github.com/tendermint/tendermint/releases/download/v0.34.24/tendermint_0.34.24_linux_${ARCH}.tar.gz" | tar xz -C /usr/local/bin tendermint
-tendermint version
 ```
 
-If the human's system uses a different package manager (Fedora, Arch, etc.), adapt accordingly.
+### Python version matters
 
-#### Python Version Matters
-
-The `pyproject.toml` requires Python 3.10 or 3.11 specifically. If the human has 3.9 or 3.12+, Poetry will fail with a resolver error. Check this BEFORE running `yarn setup`:
-
-```bash
-python3 --version
-# If wrong version, install 3.11 alongside (don't remove their existing Python)
-```
-
-On Ubuntu, if `python3` points to 3.12, use `python3.11` explicitly and configure Poetry:
+Python must be 3.10 or 3.11. If 3.12+, install 3.11 alongside (don't remove existing Python):
 ```bash
 poetry env use python3.11
 ```
 
----
+## Default Venture Context
 
-## Phase 1: Environment Configuration
-
-### What to tell the human
-
-Only **3 things** require human input. Everything else in `.env` is pre-filled correctly.
-
-#### 1. RPC URL (required)
-
-**Recommended:** Use the Jinn RPC proxy at `https://rpc.jinn.network`. This requires an `RPC_PROXY_TOKEN` — ask the Jinn team for one if the operator doesn't have it.
-
-```bash
-RPC_URL=https://rpc.jinn.network
-RPC_PROXY_TOKEN=<token from Jinn team>
-```
-
-**How auth works:** The proxy expects a `Authorization: Bearer <token>` header. The frontend (viem) handles this natively. jinn-node (ethers.js) uses `ethers.FetchRequest` to attach the header when `RPC_PROXY_TOKEN` is set — see `src/config/index.ts`.
-
-**Fallback:** If the operator has their own RPC, they can set `RPC_URL` directly (e.g. Alchemy, Tenderly) and leave `RPC_PROXY_TOKEN` unset.
-
-#### 2. OPERATE_PASSWORD (required)
-
-This password encrypts the wallet that will be created for the node. Explain:
-
-> "Choose a strong password (minimum 8 characters). This encrypts your node's wallet — you'll need it to access your private keys later. Store it somewhere safe alongside your seed phrase."
-
-Generate a suggestion if they want one, or let them choose their own. Write it to `.env`.
-
-#### 3. LLM Authentication (required)
-
-The worker uses Gemini to execute jobs. The human needs ONE of these:
-
-- **Option A: `GEMINI_API_KEY`** (simplest) — Get an API key from [Google AI Studio](https://aistudio.google.com/apikey). Set it in `.env`.
-- **Option B: Gemini CLI login** — Run `npx @google/gemini-cli auth login` (requires a browser on the machine). No env var needed after login.
-- **Option C: `GEMINI_OAUTH_CREDENTIALS`** — JSON array of OAuth creds (advanced, for credential rotation).
-
-Recommend Option A for simplicity. If the human's machine has no browser (headless server), Option A is the only practical choice.
-
-### Setting up .env
-
-```bash
-cd jinn-node
-cp .env.example .env
-```
-
-Then write ONLY the values that need changing:
-
-```bash
-# These values need human input — replace them:
-RPC_URL=https://rpc.jinn.network
-RPC_PROXY_TOKEN=<token from Jinn team>
-OPERATE_PASSWORD=<the human's chosen password>
-GEMINI_API_KEY=<the human's API key>  # if using Option A
-```
-
-**DO NOT modify these pre-filled values** — they are correct:
-- `PONDER_GRAPHQL_URL` — Jinn's indexer endpoint
-- `CONTROL_API_URL` — Jinn's control API endpoint
-- `X402_GATEWAY_URL` — Payment gateway
-- `STAKING_CONTRACT` — Jinn staking contract on Base
-- `WORKSTREAM_FILTER` — Growth Agency venture workstream ID
-- `WORKER_MECH_FILTER_MODE=staking` — Multi-operator mode: picks up requests for all staked mechs
-- `WORKER_STAKING_CONTRACT` — Staking contract used to discover peer mechs
-- `CHAIN_ID=8453` — Base chain ID
-
-**Optional values** (ask, but the human can skip):
-- `GITHUB_TOKEN` — Strongly recommended if the node will work on code tasks. Personal access token from github.com/settings/tokens.
-- `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` — Commit identity for code tasks.
-
----
-
-## Phase 2: Install Dependencies
-
-```bash
-cd jinn-node
-yarn install
-```
-
-This also installs Python dependencies via Poetry automatically. If `poetry install` fails separately, check the Python version (must be 3.10 or 3.11).
-
----
-
-## Phase 3: Run Setup
-
-### CRITICAL — Mnemonic Capture Protocol
-
-When `yarn setup` creates a new wallet, it prints the seed phrase **exactly once** as a single line to stdout:
-
-```
-Please save the mnemonic phrase for the Master EOA: word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12
-```
-
-**You MUST:**
-1. Run `yarn setup` and capture ALL stdout output.
-2. Search the output for the line starting with `Please save the mnemonic phrase`.
-3. Extract the 12 (or 24) words.
-4. Present them to the human prominently — make it unmissable:
-
-> **YOUR WALLET SEED PHRASE — SAVE THIS NOW**
->
-> These 12 words are the master key to your node's wallet. Anyone with these words can access your funds. Write them down on paper and store them securely. They will NOT be shown again.
->
-> ```
-> word1 word2 word3 word4
-> word5 word6 word7 word8
-> word9 word10 word11 word12
-> ```
->
-> Your wallet address: 0x...
->
-> Have you saved your seed phrase securely?
-
-5. Wait for the human to confirm before proceeding.
-
-**On subsequent runs**, the wallet already exists and the mnemonic is NOT printed. If the human missed it and needs their keys, use `yarn wallet:export-keys` (see [Wallet Management](#wallet-management)).
-
-### Running Setup
-
-```bash
-cd jinn-node
-yarn setup 2>&1
-```
-
-Setup runs through these steps automatically:
-1. Preflight checks (Poetry, Tendermint, dependencies)
-2. Configuration validation (env vars)
-3. Wallet creation (Master EOA) — **capture mnemonic here**
-4. Funding check — **setup will exit here if unfunded (this is normal)**
-5. Safe creation
-6. Second funding check — **may exit again for Safe + OLAS funding**
-7. Service deployment
-8. Mech deployment
-9. Staking registration
-
-### Expected "Failures" That Are Actually Normal
-
-**"Funding required before safe creation. Please fund and rerun."** — This is the standard flow, not an error. Setup detected the wallet needs ETH to proceed. Extract the address and amount from the output (look for the `FUNDING REQUIRED` box) and tell the human:
-
-> Your node needs a small amount of ETH on Base to create its Safe wallet.
->
-> Send **[amount] ETH** to: `[address]`
->
-> This is your node's Master EOA address on the Base network. You can send ETH from any exchange (Coinbase, Binance, etc.) or wallet that supports Base. After sending, wait for the transaction to confirm (usually ~2 seconds on Base), then I'll rerun the setup.
-
-After the human confirms funding, rerun `yarn setup`. It will detect the existing wallet (no new mnemonic) and continue.
-
-**"Funding required before deployment."** — Same pattern, but now it needs both ETH and OLAS tokens in the Safe. The output will show multiple funding requirements — relay them all to the human.
-
-**`.operate directory not found` warnings** — Ignore these. They are first-run noise from the config resolver checking multiple possible locations. They do not indicate a problem.
-
-### Post-Setup: Set Max Delivery Rate
-
-After setup completes (mech is deployed and staked), you **MUST** set `maxDeliveryRate` to 99 on the mech contract. Without this, a baseMech (service 112) will deliver garbage responses to your requests after the priority window expires.
-
-```bash
-# From the monorepo root (not jinn-node/)
-OPERATE_PROFILE_DIR=$(pwd)/.operate \
-OPERATE_PASSWORD=<password> \
-RPC_URL=<your-rpc-url> \
-yarn tsx scripts/mech/set-max-delivery-rate.ts 99
-```
-
-Verify with:
-```bash
-yarn mech:check-rate
-```
-
-**Why 99?** The baseMech's threshold is 100. Requests with `deliveryRate < 100` are ignored by it. The mech factory defaults to `5000000000000` which is well above the threshold, causing the baseMech to scoop expired requests and deliver empty responses.
-
-### Funding Requirements (Typical)
-
-The full setup on Base mainnet typically requires:
-- **~0.005 ETH** on the Master EOA (for gas to create the Safe)
-- **~0.01 ETH** in the Master Safe (for operational gas)
-- **~100 OLAS** in the Master Safe (50 OLAS bond + 50 OLAS stake for the Jinn staking contract)
-
-OLAS can be purchased on Uniswap (Base) or bridged from Ethereum mainnet.
-
----
-
-## Phase 4: Run the Worker
-
-After setup completes successfully:
-
-```bash
-cd jinn-node
-yarn worker
-```
-
-The worker will:
-1. Connect to the Ponder indexer
-2. Poll for unclaimed requests from any mech staked in the Jinn staking contract
-3. Claim and execute jobs using Gemini
-4. Deliver results on-chain
-
-**Multi-operator note:** The worker uses `staking` filter mode by default, so it sees requests dispatched to ANY mech in the Jinn staking contract — not just its own. Each request has a 61-second priority window for the original mech, after which any staked mech can deliver. In practice, the agent execution takes minutes, so the priority window is always expired by delivery time.
-
----
-
-## Phase 5: Deploy to Railway (Optional)
-
-If the operator wants to run their worker 24/7 without keeping a local machine on, [Railway](https://railway.com?referralCode=vEDcil) is the easiest cloud option. New accounts get **$5 free credit**, and using [this link](https://railway.com?referralCode=vEDcil) gives an **additional $5 credit**.
-
-### Prerequisites
-
-- Phases 1-3 completed locally (`.operate/` directory exists with encrypted keystore)
-- A GitHub account with a fork of [jinn-node](https://github.com/Jinn-Network/jinn-node)
-
-### Steps
-
-1. **Create a Railway account** at [railway.com](https://railway.com?referralCode=vEDcil)
-2. **Create a new project** → "Deploy from GitHub Repo" → select the jinn-node fork
-3. Railway auto-detects `railway.toml` and the Dockerfile — no build config needed
-4. **Add a persistent volume** in the service settings:
-   - Mount path: `/home/jinn`
-   - This stores the encrypted keystore (`.operate/`) and Gemini credentials (`.gemini/`)
-   - **Loss of this volume means loss of signing keys** — enable Railway backups
-5. **Set environment variables** in the Railway dashboard (Variables tab):
-
-   Copy the values from your local `.env` file. The required variables are:
-
-   | Variable | Description |
-   |----------|-------------|
-   | `RPC_URL` | Base chain RPC endpoint (`https://rpc.jinn.network`) |
-   | `RPC_PROXY_TOKEN` | Bearer token for rpc.jinn.network (omit if using direct RPC) |
-   | `CHAIN_ID` | `8453` |
-   | `OPERATE_PASSWORD` | Decrypts `.operate/` keystore |
-   | `GEMINI_API_KEY` | Gemini API key |
-   | `GITHUB_TOKEN` | For code task repo cloning |
-   | `GIT_AUTHOR_NAME` | Git commit identity |
-   | `GIT_AUTHOR_EMAIL` | Git commit identity |
-
-   Service endpoints (`PONDER_GRAPHQL_URL`, `CONTROL_API_URL`, `X402_GATEWAY_URL`) are pre-filled in `.env.example` and can be copied as-is.
-
-6. **Import `.operate/` into the volume.** Use `railway shell` to access the running container, then copy your local `.operate/` directory contents into `/home/jinn/.operate/`. Alternatively, use `railway volume` commands or the Railway CLI.
-
-7. **Deploy.** Railway builds and deploys automatically on push. The healthcheck at `/health` confirms the worker is running.
-
-### CLI Deploy (Alternative)
-
-If the operator prefers the Railway CLI over the dashboard:
-
-```bash
-cd jinn-node
-railway login
-railway link    # Link to your Railway project
-railway up      # Deploy
-railway logs -f # Watch logs
-```
-
-### Monitoring
-
-- **Logs**: Railway dashboard → Deployments → Logs, or `railway logs -f`
-- **Health**: The worker exposes `GET /health` — Railway monitors this automatically
-- **Restarts**: `railway.toml` configures automatic restart on failure (up to 10 retries)
-
----
-
-## Staking Reward Claims
-
-OLAS staking rewards require two separate claim steps. Both require `OPERATE_PASSWORD` in `.env`.
-
-### 1. Claim L1 Dispenser Incentives (every ~14 days)
-
-Bridges OLAS from the Ethereum mainnet Dispenser to the Jinn staking contract on Base. This must be done after each tokenomics epoch ends (~14 days). Permissionless — any EOA with mainnet ETH can call it.
-
-```bash
-cd jinn-node
-yarn staking:claim-incentives              # Claim all pending epochs
-yarn staking:claim-incentives --dry-run    # Preview without sending txs
-```
-
-**Requirements:** Master EOA needs ~0.005 ETH on Ethereum mainnet for gas. The Dispenser enforces `maxNumClaimingEpochs=1`, so the script automatically loops to claim one epoch at a time. After claiming, OLAS arrives on Base via the Optimism bridge (~20 min delay).
-
-### 2. Claim Service Rewards (after each L2 checkpoint)
-
-Claims rewards allocated to a specific service by the staking contract on Base. The L2 `checkpoint()` (called automatically by the worker every ~24h) allocates rewards to eligible services. This script then claims those rewards via the Master Safe.
-
-```bash
-cd jinn-node
-yarn staking:claim-rewards              # Claim pending rewards for service 165
-yarn staking:claim-rewards --dry-run    # Preview without sending tx
-```
-
-**Requirements:** Master EOA needs Base ETH for gas. Safe threshold must be 1. Rewards are sent to the service multisig.
-
-### Reward Flow Summary
-
-```
-L1 Tokenomics Epoch ends (~14 days)
-  → yarn staking:claim-incentives     (L1 tx, bridges OLAS to Base)
-  → ~20 min bridge delay
-  → Worker calls checkpoint()         (automatic, allocates to services)
-  → yarn staking:claim-rewards        (L2 Safe tx, sends OLAS to multisig)
-```
-
----
-
-## Wallet Management
-
-All wallet commands require `OPERATE_PASSWORD` and `RPC_URL` in `.env` (unless noted).
-
-| Command | Purpose |
-|---------|---------|
-| `yarn wallet:info` | Show addresses, ETH/OLAS balances, staking status |
-| `yarn wallet:backup` | Timestamped `.tar.gz` of `.operate` directory (no password needed) |
-| `yarn wallet:export-keys` | Display BIP-39 mnemonic — **confirm with human first** |
-| `yarn wallet:withdraw --to <addr>` | Transfer funds from Safe to external address |
-| `yarn wallet:unstake` | Unstake service (72-hour cooldown applies) |
-| `yarn wallet:recover --to <addr>` | Terminate service + withdraw all — **confirm with human first** |
-
-**Destructive operations** (`recover`, `export-keys`): Always pause and get human confirmation before executing. Use `--dry-run` where available to preview first.
-
-**Key flags:**
-- `withdraw`: `--to <addr>` (required), `--asset ETH|OLAS|all` (default: all), `--dry-run`
-- `recover`: `--to <addr>` (required), `--dry-run`, `--skip-terminate` (if already unstaked)
-- `unstake`: `--service-id <id>` (optional, reads from config), `--dry-run`
-
-**72-hour staking cooldown**: OLAS requires minimum 72 hours staked before unstake. Recovery will fail if cooldown has not elapsed.
-
----
-
-## Getting Help — Support Bundle
-
-If you're having issues and need help from the Jinn team, run the support bundle to collect diagnostic information:
-
-```bash
-cd jinn-node
-yarn support:bundle
-```
-
-This outputs a JSON bundle containing:
-- System info (OS, Node/Python versions, git commit)
-- Which environment variables are set (never the actual values of secrets)
-- Wallet addresses and on-chain balances
-- Staking status
-- Connectivity checks (RPC, Ponder indexer, Control API)
-- `.operate` directory state
-
-**No passwords, API keys, or private keys are ever included.** The output is safe to share.
-
-### How to share
-
-1. Run `yarn support:bundle` and copy the JSON output
-2. Share it with the Jinn team (Discord, GitHub issue, or direct message)
-3. If the worker is running on Railway, also include recent logs: `railway logs --tail 50`
-
-### What to include with the bundle
-
-When reporting an issue, also describe:
-- **What you expected** to happen
-- **What actually happened** (error messages, unexpected behavior)
-- **When it started** (after an update? after restaking? randomly?)
-- **Steps to reproduce** if you can
-
----
+Primary onboarding venture:
+`https://explorer.jinn.network/ventures/0x9470f6f2bec6940c93fedebc0ea74bccaf270916f4693e96e8ccc586f26a89ac`
 
 ## Troubleshooting
 
-### Prerequisites
+See [`troubleshooting.md`](.agents/skills/jinn-node-support-triage/references/troubleshooting.md) for the canonical symptom-fix matrix covering prerequisites, setup, runtime, stOLAS, and Railway failures.
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `poetry: command not found` | Poetry not installed | `curl -sSL https://install.python-poetry.org \| python3 -` then restart shell |
-| `tendermint: command not found` | Tendermint not installed | See [Tendermint on Linux](#tendermint-on-linux) above |
-| `poetry install` fails with resolver error | Wrong Python version | `python3 --version` — must be 3.10 or 3.11. Use `poetry env use python3.11` |
-| `Cannot import operate module` | Poetry deps not installed | `cd jinn-node && poetry install --sync` |
-| Warnings about `@opentelemetry` peer deps | Harmless npm warnings | Ignore — these don't affect functionality |
+For diagnostics collection: use the `jinn-node-support-triage` skill.
 
-### Setup Failures
+## Quick Command Reference
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `OPERATE_PASSWORD not set` | Missing from .env | Add it to `.env` |
-| `RPC_URL not set` | Missing from .env | Add it to `.env` |
-| `Missing required LLM authentication` | No Gemini creds found | Set `GEMINI_API_KEY` in `.env` or run `npx @google/gemini-cli auth login` |
-| `Funding required before safe creation` | Normal — needs ETH | Tell human to fund the Master EOA address, then rerun |
-| `Funding required before deployment` | Normal — needs ETH + OLAS | Tell human to fund the Safe address, then rerun |
-| Wall of `.operate directory not found` warnings | First-run config resolution noise | Ignore — harmless |
-| `Wallet creation failed` | Middleware daemon issue | Check that Python deps are installed, Tendermint is available, and `OPERATE_PASSWORD` is >= 8 chars |
-
-### Runtime
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| Worker can't connect to Ponder | Network issue or wrong URL | Verify `PONDER_GRAPHQL_URL` matches the pre-filled value in `.env.example` |
-| Agent execution fails | LLM auth expired or invalid | Re-authenticate Gemini or check `GEMINI_API_KEY` |
-| Git clone fails during job | Missing `GITHUB_TOKEN` or SSH keys | Set `GITHUB_TOKEN` in `.env` for HTTPS clone access |
-
-If this file and a skill diverge, follow the skill.
+| Command | Purpose |
+|---------|---------|
+| `yarn stolas:preflight` | Check stOLAS slot availability |
+| `yarn setup` | Initial service setup (standard OLAS) |
+| `yarn setup --stolas` | Initial service setup (stOLAS, no OLAS needed) |
+| `yarn worker` | Run worker (Docker by default, detached) |
+| `yarn worker --single` | Test with one job |
+| `yarn worker:dev` | Run worker bare (development, no Docker) |
+| `docker compose logs -f` | Follow worker logs |
+| `docker compose ps` | Check worker health |
+| `docker compose down` | Stop the worker |
+| `yarn wallet:info` | Show addresses + balances |
+| `yarn wallet:backup` | Backup .operate directory |
+| `yarn support:bundle` | Collect safe diagnostics bundle |

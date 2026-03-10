@@ -12,6 +12,7 @@ import { resolve, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createServer } from 'net';
 import { logger } from '../logging/index.js';
+import { config, secrets } from '../config/index.js';
 
 const operateLogger = logger.child({ component: "OLAS-OPERATE-WRAPPER" });
 const RPC_ALIAS_CHAIN_NAMES = [
@@ -122,10 +123,10 @@ export class OlasOperateWrapper {
     this.timeout = timeout;
     this.rpcUrl = rpcUrl;
     this.config = config;
-    
+
     // Allocate a unique port for this instance to prevent conflicts
     this.serverPort = OlasOperateWrapper.serverPortCounter++;
-    
+
     operateLogger.info({
       middlewarePath: this.middlewarePath,
       timeout: this.timeout,
@@ -211,29 +212,14 @@ export class OlasOperateWrapper {
       operateLogger.debug("Poetry middleware not available, trying fallback paths");
     }
 
-    // 4. Fallback: sibling directory (monorepo compatibility or local development)
-    const currentFile = fileURLToPath(import.meta.url);
-    const workerDir = dirname(currentFile);
-    const projectRoot = resolve(workerDir, '..');
+    // 4. Fallback: use jinn-node root (middleware should be installed via Poetry)
+    operateLogger.warn(
+      { jinnNodeRoot },
+      "Poetry middleware check failed — falling back to jinn-node root. " +
+      "Ensure olas-operate-middleware is installed: cd jinn-node && poetry install"
+    );
 
-    // First try jinn-node sibling (standalone mode)
-    let middlewarePath = join(projectRoot, 'olas-operate-middleware');
-
-    // If not found, try monorepo root sibling
-    const fs = await import('fs');
-    if (!fs.existsSync(middlewarePath)) {
-      const monorepoRoot = resolve(projectRoot, '..');
-      middlewarePath = join(monorepoRoot, 'olas-operate-middleware');
-    }
-
-    operateLogger.debug({
-      currentFile,
-      workerDir,
-      projectRoot,
-      middlewarePath
-    }, "Resolved middleware path via fallback");
-
-    return middlewarePath;
+    return jinnNodeRoot;
   }
 
   /**
@@ -383,7 +369,7 @@ export class OlasOperateWrapper {
    */
   private _buildDefaultEnv(): Record<string, string> {
     const env: Record<string, string> = this._buildRpcAliasEnv();
-    
+
     // JINN-202: Support both attended (interactive) and unattended (programmatic) modes
     // - attended=true: Middleware shows funding prompts (for interactive setup)
     // - attended=false: No prompts, requires all env vars set (for worker automation)
@@ -393,7 +379,7 @@ export class OlasOperateWrapper {
       // Default to unattended mode for backward compatibility
       env.ATTENDED = 'false';
     }
-    
+
     // Add OPERATE_PASSWORD if configured
     if (this.config.defaultEnv?.operatePassword) {
       env.OPERATE_PASSWORD = this.config.defaultEnv.operatePassword;
@@ -404,7 +390,7 @@ export class OlasOperateWrapper {
     } else {
       operateLogger.warn("OPERATE_PASSWORD not set in config.defaultEnv");
     }
-    
+
     // Add STAKING_PROGRAM if configured
     if (this.config.defaultEnv?.stakingProgram) {
       env.STAKING_PROGRAM = this.config.defaultEnv.stakingProgram;
@@ -471,9 +457,9 @@ export class OlasOperateWrapper {
       return configuredRpc;
     }
 
-    const envRpc = process.env.RPC_URL?.trim();
-    if (envRpc) {
-      return envRpc;
+    const configRpc = secrets.rpcUrl;
+    if (configRpc) {
+      return configRpc;
     }
 
     return null;
@@ -609,12 +595,12 @@ export class OlasOperateWrapper {
     try {
       const version = await this.getVersion();
       const isHealthy = version !== null;
-      
+
       operateLogger.info({
         isHealthy,
         version
       }, "Health check completed");
-      
+
       return isHealthy;
     } catch (error) {
       operateLogger.error({ error }, "Health check failed");
@@ -627,24 +613,24 @@ export class OlasOperateWrapper {
    */
   async validateEnvironment(): Promise<{ isValid: boolean; issues: string[] }> {
     const issues: string[] = [];
-    
+
     try {
       const pythonIssues = await this._validatePythonEnvironment();
       const pathIssues = await this._validateMiddlewarePath();
-      
+
       issues.push(...pythonIssues, ...pathIssues);
     } catch (error) {
       issues.push(`Environment validation error: ${error instanceof Error ? error.message : String(error)}`);
     }
-    
+
     const isValid = issues.length === 0;
-    
+
     operateLogger.info({
       isValid,
       issueCount: issues.length,
       issues: isValid ? undefined : issues
     }, "Environment validation completed");
-    
+
     return { isValid, issues };
   }
 
@@ -654,11 +640,11 @@ export class OlasOperateWrapper {
   private async _validatePythonEnvironment(): Promise<string[]> {
     const issues: string[] = [];
     const pythonCheck = await this.executeCommand('--version');
-    
+
     if (!pythonCheck.success) {
       if (pythonCheck.stderr.includes('ModuleNotFoundError')) {
         if (pythonCheck.stderr.includes("No module named 'autonomy'")) {
-          issues.push('AEA/Autonomy framework not installed. Run: cd olas-operate-middleware && poetry install');
+          issues.push('AEA/Autonomy framework not installed. Run: poetry install');
         } else if (pythonCheck.stderr.includes("No module named 'psutil'")) {
           issues.push('Basic Python dependencies missing. Install psutil and other requirements.');
         } else {
@@ -670,7 +656,7 @@ export class OlasOperateWrapper {
         issues.push(`CLI execution failed: ${pythonCheck.stderr.substring(0, 200)}`);
       }
     }
-    
+
     return issues;
   }
 
@@ -770,7 +756,7 @@ export class OlasOperateWrapper {
     try {
       // Ensure any previous server on this port is stopped
       await this._ensurePortAvailable();
-      
+
       const cwd = this.workingDirectory || this.middlewarePath;
       const operateHome = this.config.operateHome
         ? resolve(cwd, this.config.operateHome)
@@ -789,7 +775,7 @@ export class OlasOperateWrapper {
         ...this._buildRpcAliasEnv(),
         OPERATE_HOME: operateHome,
       };
-      
+
       operateLogger.info({
         command: actualCommand,
         args: actualArgs,
@@ -837,7 +823,7 @@ export class OlasOperateWrapper {
           // Middleware logs everything to stderr, including INFO messages
           // Parse the log level from the output if possible
           const logLevel = output.match(/\[(ERROR|WARN|WARNING|INFO|DEBUG)\]/i);
-          
+
           if (logLevel) {
             const level = logLevel[1].toUpperCase();
             // Only log ERROR and WARN to our logs, suppress INFO/DEBUG from middleware
@@ -849,9 +835,9 @@ export class OlasOperateWrapper {
             }
           } else {
             // No log level marker - check for error indicators
-            if (output.toLowerCase().includes('error') || 
-                output.toLowerCase().includes('exception') || 
-                output.toLowerCase().includes('traceback')) {
+            if (output.toLowerCase().includes('error') ||
+              output.toLowerCase().includes('exception') ||
+              output.toLowerCase().includes('traceback')) {
               operateLogger.error({ stream: 'stderr' }, output);
             } else {
               // Suppress non-error middleware output from the main console log
@@ -943,18 +929,18 @@ export class OlasOperateWrapper {
           method: 'GET',
           signal: AbortSignal.timeout(5000)
         });
-        
+
         if (response.ok) {
           operateLogger.info({ attempt }, "Server health check passed");
           return { success: true };
         } else {
-            operateLogger.debug({ attempt, status: response.status }, "Server health check failed with non-OK status");
+          operateLogger.debug({ attempt, status: response.status }, "Server health check failed with non-OK status");
         }
       } catch (error) {
         // Server not ready yet, continue polling
         operateLogger.debug({ attempt, error: error instanceof Error ? error.message : String(error) }, "Server health check failed, retrying");
       }
-      
+
       if (attempt < maxAttempts) {
         await new Promise(resolve => setTimeout(resolve, delayMs));
       }
@@ -993,17 +979,17 @@ export class OlasOperateWrapper {
       });
 
       const data = await response.json();
-      
+
       if (response.ok) {
         operateLogger.debug("Session refreshed via pre-request login");
         return { success: true };
       }
-      
+
       return { success: false, error: data.error || `HTTP ${response.status}` };
     } catch (error) {
-      return { 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Login request failed' 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Login request failed'
       };
     }
   }
@@ -1052,24 +1038,24 @@ export class OlasOperateWrapper {
       const response = await fetch(url, options);
       const data = await response.json();
 
-      operateLogger.info({ 
-        url, 
-        method, 
+      operateLogger.info({
+        url,
+        method,
         statusCode: response.status,
         statusText: response.statusText,
         responseData: data,
-        ok: response.ok 
+        ok: response.ok
       }, "Middleware HTTP response received");
 
       if (response.ok) {
         return { success: true, data, statusCode: response.status };
       } else {
-        operateLogger.error({ 
-          url, 
-          method, 
+        operateLogger.error({
+          url,
+          method,
           statusCode: response.status,
           statusText: response.statusText,
-          errorData: data 
+          errorData: data
         }, "Middleware returned error response");
         return {
           success: false,
@@ -1101,7 +1087,7 @@ export class OlasOperateWrapper {
       }
 
       const result = await this.makeRequest('/api/account', 'POST', { password });
-      
+
       if (result.success) {
         operateLogger.info("User account setup completed successfully");
         this.password = password;
@@ -1160,7 +1146,7 @@ export class OlasOperateWrapper {
 
       if (result.success && result.data) {
         const { wallet, mnemonic } = result.data;
-        
+
         operateLogger.info({
           address: wallet.address,
           ledgerType
@@ -1237,9 +1223,9 @@ export class OlasOperateWrapper {
    * @param options Additional options for Safe creation
    */
   async createSafe(
-    chain: string, 
+    chain: string,
     backupOwner?: string,
-    options: { 
+    options: {
       checkExisting?: boolean; // If true, check if Safe already exists and return it
       warnIfNew?: boolean;     // If true, warn before creating a new Safe
     } = {}
@@ -1249,9 +1235,9 @@ export class OlasOperateWrapper {
       if (options.checkExisting) {
         const existingSafe = await this.getExistingSafeForChain(chain);
         if (existingSafe) {
-          operateLogger.info({ 
-            safeAddress: existingSafe, 
-            chain 
+          operateLogger.info({
+            safeAddress: existingSafe,
+            chain
           }, "Safe already exists for this chain, reusing");
           return {
             success: true,
@@ -1276,7 +1262,7 @@ export class OlasOperateWrapper {
       if (result.success && result.data) {
         const safeAddress = result.data.safe;
         const transactionHash = result.data.create_tx;
-        
+
         operateLogger.info({
           safeAddress,
           chain,
@@ -1350,18 +1336,18 @@ export class OlasOperateWrapper {
       if (result.success && result.data) {
         const wallets = Array.isArray(result.data) ? result.data : [result.data];
         const primaryWallet = wallets[0];
-        const safeAddress = primaryWallet?.safes?.base; 
+        const safeAddress = primaryWallet?.safes?.base;
 
         operateLogger.debug({
-            walletCount: wallets.length,
-            ledgerType,
-            safeAddress,
+          walletCount: wallets.length,
+          ledgerType,
+          safeAddress,
         }, "Retrieved wallet information");
 
         return {
-            success: true,
-            wallets,
-            safeAddress,
+          success: true,
+          wallets,
+          safeAddress,
         };
       }
 
@@ -1572,7 +1558,7 @@ export class OlasOperateWrapper {
     error?: string;
   }> {
     const { password, ledgerType = 'ethereum', chain, backupOwner } = config;
-    
+
     // Store password for session persistence
     this.password = password;
 

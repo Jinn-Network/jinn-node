@@ -3,6 +3,7 @@ import { createArtifact as mcpCreateArtifact } from '../agent/mcp/tools/create_a
 import { safeParseToolResponse } from './tool_utils.js';
 import { encodeSituation, enrichSituation } from './situation_encoder.js';
 import { workerLogger } from '../logging/index.js';
+import { secrets } from '../config/index.js';
 import { createArtifact as apiCreateArtifact } from './control_api_client.js';
 import type { RecognitionPhaseResult } from './recognition_helpers.js';
 
@@ -104,7 +105,7 @@ export async function createSituationArtifactForRequest(args: CreateSituationArt
     const embedDim = process.env.SITUATION_EMBED_DIM ? Number(process.env.SITUATION_EMBED_DIM) : 256;
     let embedding: { model: string; dim: number; vector: number[] } | null = null;
     let embeddingStatus = 'unknown';
-    if (!process.env.OPENAI_API_KEY) {
+    if (!secrets.openaiApiKey) {
       embeddingStatus = 'skipped_missing_openai';
       workerLogger.info({ requestId: args.target.id }, 'Skipping embedding: OPENAI_API_KEY not set');
     } else {

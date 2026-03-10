@@ -7,9 +7,9 @@
 
 import { workerLogger } from '../../logging/index.js';
 import { graphQLRequest } from '../../http/client.js';
-import { getPonderGraphqlUrl, getOptionalIpfsGatewayUrl } from '../../agent/mcp/tools/shared/env.js';
 import { serializeError } from '../logging/errors.js';
 import { summarizeWorkstreamProgress } from './summarize.js';
+import { config } from '../../config/index.js';
 
 export interface WorkstreamJob {
   requestId: string;
@@ -117,7 +117,7 @@ async function fetchDeliveryPayload(
   deliveryHash: string,
   requestId: string
 ): Promise<{ structuredSummary?: string; output?: string } | null> {
-  const gatewayBase = (getOptionalIpfsGatewayUrl() || 'https://gateway.autonolas.tech/ipfs/').replace(/\/+$/, '');
+  const gatewayBase = (config.services.ipfsGatewayUrl || 'https://gateway.autonolas.tech/ipfs/').replace(/\/+$/, '');
   
   // Reconstruct directory CID
   const dirCid = reconstructDeliveryCid(deliveryHash);
@@ -168,7 +168,7 @@ export async function buildProgressCheckpoint(
 ): Promise<ProgressCheckpoint | null> {
 
   try {
-    const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
+    const PONDER_GRAPHQL_URL = config.services.ponderUrl;
     
     // First, fetch the current request to get its workstreamId
     let workstreamId = metadata.workstreamId;

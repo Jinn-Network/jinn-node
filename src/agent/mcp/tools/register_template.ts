@@ -7,11 +7,10 @@
 import { z } from 'zod';
 // @ts-ignore - pg package exists but @types/pg not installed
 import { Client } from 'pg';
-import { loadEnvOnce } from './shared/env.js';
 import { mcpLogger } from '../../../logging/index.js';
 import { parseAnnotatedTools } from '../../../shared/template-tools.js';
 
-loadEnvOnce();
+// .env is loaded automatically by the config system
 
 const X402_GATEWAY_URL = (process.env.X402_GATEWAY_URL || 'https://x402-gateway-production-1b84.up.railway.app').replace(/\/+$/, '');
 

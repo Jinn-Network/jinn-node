@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
+  checkGeminiQuotaAvailability,
   markCredentialExhausted,
   selectAvailableCredential,
   waitForGeminiQuota,
@@ -138,6 +139,51 @@ describe('waitForGeminiQuota with API key fallback', () => {
     expect(second.selectedCredential).toBeNull();
     expect(second.selectedIndex).toBe(-1);
     expect(second.allExhausted).toBe(false); // not blocked, using API key
+  });
+});
+
+describe('checkGeminiQuotaAvailability', () => {
+  beforeEach(() => {
+    vi.stubEnv('GEMINI_OAUTH_CREDENTIALS', MOCK_CRED);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it('reports unavailable when all credentials are exhausted and no API key fallback exists', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        buckets: [{ remainingAmount: '100', modelId: 'gemini-3-flash' }],
+      }),
+    }) as any;
+
+    markCredentialExhausted(0, 60_000);
+
+    const result = await checkGeminiQuotaAvailability({ model: 'gemini-3-flash' });
+    expect(result.available).toBe(false);
+    expect(result.allExhausted).toBe(true);
+    expect(result.retryAfterMs).toBeGreaterThan(0);
+  });
+
+  it('reports available when API key fallback is healthy', async () => {
+    vi.stubEnv('GEMINI_API_KEY', 'fake-api-key');
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        buckets: [{ remainingAmount: '100', modelId: 'gemini-3-flash' }],
+      }),
+    }) as any;
+
+    markCredentialExhausted(0, 60_000);
+
+    const result = await checkGeminiQuotaAvailability({ model: 'gemini-3-flash' });
+    expect(result.available).toBe(true);
+    expect(result.selectedCredential).toBeNull();
+    expect(result.selectedIndex).toBe(-1);
   });
 });
 

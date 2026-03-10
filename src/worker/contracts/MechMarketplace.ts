@@ -7,7 +7,7 @@
  * Part of JINN-196: Deploy mech contract for service #149 through middleware
  */
 
-import { Contract, Interface, JsonRpcProvider, Wallet, parseUnits, zeroPadValue, toBeHex } from 'ethers';
+import { AbiCoder, Contract, Interface, JsonRpcProvider, Wallet, parseUnits, zeroPadValue, toBeHex } from 'ethers';
 import { createRpcProvider } from '../../config/index.js';
 import { logger } from '../../logging/index.js';
 
@@ -15,7 +15,7 @@ const mechLogger = logger.child({ component: 'MECH-MARKETPLACE' });
 
 // MechMarketplace ABI (from middleware code)
 export const MECH_MARKETPLACE_ABI = [
-  // create function
+  // create function — third param is dynamic `bytes`, NOT bytes32
   {
     "inputs": [
       {
@@ -29,9 +29,9 @@ export const MECH_MARKETPLACE_ABI = [
         "type": "address"
       },
       {
-        "internalType": "bytes32",
-        "name": "data",
-        "type": "bytes32"
+        "internalType": "bytes",
+        "name": "payload",
+        "type": "bytes"
       }
     ],
     "name": "create",
@@ -60,6 +60,12 @@ export const MECH_MARKETPLACE_ABI = [
         "internalType": "uint256",
         "name": "serviceId",
         "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "mechFactory",
+        "type": "address"
       }
     ],
     "name": "CreateMech",
@@ -156,20 +162,20 @@ export class MechMarketplace {
         marketplaceAddress: this.marketplaceAddress,
         chain: this.chain
       }, 'Marketplace address not found, using default');
-      
+
       // Fallback to default marketplace for this chain
       const defaultMarketplace = DEFAULT_MECH_MARKETPLACE_ADDRESSES[this.chain];
       const defaultFactories = chainFactories[defaultMarketplace];
-      
+
       if (!defaultFactories) {
         throw new Error(`No factory addresses configured for chain ${this.chain}`);
       }
-      
+
       const factory = defaultFactories[mechType];
       if (!factory) {
         throw new Error(`Mech type ${mechType} not supported for chain ${this.chain}`);
       }
-      
+
       return factory;
     }
 
@@ -188,13 +194,13 @@ export class MechMarketplace {
     const mechFactory = this.getMechFactory(params.mechType);
     const iface = new Interface(MECH_MARKETPLACE_ABI);
 
-    // Convert request price to bytes32 (big-endian)
-    const requestPriceBytes32 = zeroPadValue(toBeHex(params.requestPrice), 32);
+    // Encode request price as ABI-encoded uint256 bytes payload
+    const payload = AbiCoder.defaultAbiCoder().encode(['uint256'], [params.requestPrice]);
 
     return iface.encodeFunctionData('create', [
       params.serviceId,
       mechFactory,
-      requestPriceBytes32
+      payload
     ]);
   }
 
@@ -219,7 +225,7 @@ export class MechMarketplace {
       // Create signer from private key
       const signer = new Wallet(agentPrivateKey, this.provider);
       const signerAddress = await signer.getAddress();
-      
+
       mechLogger.info({ signerAddress }, 'Using agent key as signer');
 
       // Create contract instance
@@ -231,7 +237,7 @@ export class MechMarketplace {
 
       // Get mech factory address
       const mechFactory = this.getMechFactory(params.mechType);
-      const requestPriceBytes32 = zeroPadValue(toBeHex(params.requestPrice), 32);
+      const payload = AbiCoder.defaultAbiCoder().encode(['uint256'], [params.requestPrice]);
 
       mechLogger.info({
         serviceId: params.serviceId,
@@ -243,7 +249,7 @@ export class MechMarketplace {
       const tx = await contract.create(
         params.serviceId,
         mechFactory,
-        requestPriceBytes32
+        payload
       );
 
       mechLogger.info({ txHash: tx.hash }, 'Transaction submitted, waiting for confirmation');
@@ -296,18 +302,18 @@ export class MechMarketplace {
    */
   private parseMechAddressFromReceipt(receipt: any, expectedServiceId: number): string | null {
     const iface = new Interface(MECH_MARKETPLACE_ABI);
-    
+
     for (const log of receipt.logs) {
       try {
         const parsed = iface.parseLog({
           topics: log.topics as string[],
           data: log.data
         });
-        
+
         if (parsed && parsed.name === 'CreateMech') {
           const mechAddress = parsed.args.mech;
           const serviceId = Number(parsed.args.serviceId);
-          
+
           if (serviceId === expectedServiceId) {
             mechLogger.info({
               mechAddress,
@@ -320,7 +326,7 @@ export class MechMarketplace {
         // Not our event, continue
       }
     }
-    
+
     return null;
   }
 
@@ -331,13 +337,13 @@ export class MechMarketplace {
     try {
       const code = await this.provider.getCode(mechAddress);
       const hasCode = code !== '0x' && code.length > 2;
-      
+
       mechLogger.info({
         mechAddress,
         hasCode,
         codeLength: code.length
       }, 'Verified mech contract');
-      
+
       return hasCode;
     } catch (error) {
       mechLogger.error({

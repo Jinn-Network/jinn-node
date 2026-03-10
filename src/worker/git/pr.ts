@@ -10,7 +10,7 @@ import { formatSummaryForPr } from './autoCommit.js';
 import { pushJsonToIpfs } from '@jinn-network/mech-client-ts/dist/ipfs.js';
 import { createArtifact } from '../control_api_client.js';
 import { fetchWithRetry } from '../../http/client.js';
-import { getOptionalGithubRepository, getOptionalGithubToken } from '../../config/index.js';
+import { config, secrets } from '../../config/index.js';
 
 // Re-export for use in other modules
 export { formatSummaryForPr };
@@ -69,8 +69,8 @@ function parseGithubRepo(remoteUrl: string | undefined, branchName: string): { o
     }
   };
 
-  const repository = normalizeRepository(getOptionalGithubRepository()) ?? inferRepositoryFromRemote(remoteUrl);
-  if (getOptionalGithubRepository()) {
+  const repository = normalizeRepository(config.git.githubRepository) ?? inferRepositoryFromRemote(remoteUrl);
+  if (config.git.githubRepository) {
     workerLogger.debug({ repository }, 'Using GITHUB_REPOSITORY from environment');
   } else if (repository) {
     workerLogger.debug({ repository, remoteUrl }, 'Inferred repository from remote URL');
@@ -144,7 +144,7 @@ export async function createOrUpdatePullRequest(params: {
   summaryBlock?: string;
 }): Promise<string | null> {
   const { codeMetadata, branchName, baseBranch, requestId, summaryBlock } = params;
-  const token = getOptionalGithubToken();
+  const token = secrets.githubToken;
   if (!token) {
     workerLogger.warn('Missing GITHUB_TOKEN; skipping PR creation');
     return null;

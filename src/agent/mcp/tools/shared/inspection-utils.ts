@@ -44,7 +44,7 @@ import { mcpLogger } from '../../../../logging/index.js';
 
 // --- MCP-adapted IPFS fetch ---
 
-const IPFS_GATEWAY_URL = process.env.IPFS_GATEWAY_URL || 'https://gateway.autonolas.tech/ipfs/';
+const IPFS_GATEWAY_URL = config.services.ipfsGatewayUrl;
 const DEFAULT_TIMEOUT_MS = 7000;
 
 /**
@@ -182,7 +182,7 @@ export function mcpExecutionError(message: string): McpResponse {
 
 // --- GraphQL Helper ---
 
-import { getPonderGraphqlUrl } from './env.js';
+import { config } from '../../../../config/index.js';
 
 /**
  * Execute a GraphQL query against Ponder
@@ -191,7 +191,7 @@ export async function queryPonder<T>(
   query: string,
   variables: Record<string, unknown>
 ): Promise<{ data: T | null; error?: string }> {
-  const url = getPonderGraphqlUrl();
+  const url = config.services.ponderUrl;
 
   try {
     const res = await fetch(url, {

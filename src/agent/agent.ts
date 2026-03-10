@@ -5,7 +5,7 @@ import { tmpdir, homedir } from 'os';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { agentLogger } from '../logging/index.js';
-import { getOptionalCodeMetadataRepoRoot, getSandboxMode } from '../config/index.js';
+import { config, secrets } from '../config/index.js';
 import { getRepoRoot } from '../shared/repo_utils.js';
 import { computeToolPolicy, UNIVERSAL_TOOLS, hasBrowserAutomation, BROWSER_AUTOMATION_TOOLS, hasRailwayDeployment, RAILWAY_TOOLS, hasFirefliesMeetings, FIREFLIES_TOOLS, getEnabledExtensions, EXTENSION_META_TOOLS, getExtensionExcludedTools, type ToolPolicyResult } from './toolPolicy.js';
 // Signing proxy is now managed at the worker level (mech_worker.ts)
@@ -337,13 +337,13 @@ export class Agent {
   private chromeDebugPort: number = 0;
   private chromeUserDataDir: string | null = null;
 
-  // Stdout protection limits (configurable via environment variables)
-  private readonly MAX_STDOUT_SIZE = parseInt(process.env.AGENT_MAX_STDOUT_SIZE || '5242880'); // 5MB default
-  private readonly MAX_CHUNK_SIZE = parseInt(process.env.AGENT_MAX_CHUNK_SIZE || '102400'); // 100KB default
-  private readonly REPETITION_WINDOW = parseInt(process.env.AGENT_REPETITION_WINDOW || '20'); // Track last 20 lines
-  private readonly REPETITION_THRESHOLD = parseInt(process.env.AGENT_REPETITION_THRESHOLD || '10'); // Same line 10+ times = loop
-  private readonly MAX_IDENTICAL_CHUNKS = parseInt(process.env.AGENT_MAX_IDENTICAL_CHUNKS || '10'); // Same chunk repeated
-  private readonly MAX_PROMPT_ARG_BYTES = parseInt(process.env.AGENT_MAX_PROMPT_ARG_BYTES || '100000'); // Avoid E2BIG on spawn
+  // Stdout protection limits (from config)
+  private readonly MAX_STDOUT_SIZE = config.agent.maxStdoutSize; // 5MB default
+  private readonly MAX_CHUNK_SIZE = config.agent.maxChunkSize; // 100KB default
+  private readonly REPETITION_WINDOW = config.agent.repetitionWindow; // Track last 20 lines
+  private readonly REPETITION_THRESHOLD = config.agent.repetitionThreshold; // Same line 10+ times = loop
+  private readonly MAX_IDENTICAL_CHUNKS = config.agent.maxIdenticalChunks; // Same chunk repeated
+  private readonly MAX_PROMPT_ARG_BYTES = config.agent.maxPromptArgBytes; // Avoid E2BIG on spawn
 
   // Universal tools are now defined in toolPolicy.ts
   private readonly universalTools = UNIVERSAL_TOOLS;
@@ -584,22 +584,22 @@ export class Agent {
       if (!existsSync(configPath)) continue;
 
       try {
-        const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+        const extensionConfig = JSON.parse(readFileSync(configPath, 'utf-8'));
 
         if (this.chromeDebugPort > 0) {
           // Connect to pre-launched Chrome via browserUrl
-          config.mcpServers['chrome-devtools'].args = [
+          extensionConfig.mcpServers['chrome-devtools'].args = [
             '-y', 'chrome-devtools-mcp@latest',
             `--browserUrl=http://127.0.0.1:${this.chromeDebugPort}`
           ];
         } else {
           // Fallback: launch own Chrome (only works without sandbox)
-          config.mcpServers['chrome-devtools'].args = [
+          extensionConfig.mcpServers['chrome-devtools'].args = [
             '-y', 'chrome-devtools-mcp@latest', '--headless=true', '--isolated=true'
           ];
         }
 
-        writeFileSync(configPath, JSON.stringify(config, null, 2));
+        writeFileSync(configPath, JSON.stringify(extensionConfig, null, 2));
         agentLogger.info({ configPath, port: this.chromeDebugPort }, 'Patched chrome-devtools extension config');
       } catch (error) {
         agentLogger.warn({ error: error instanceof Error ? error.message : String(error), configPath }, 'Failed to patch browser extension config');
@@ -674,7 +674,7 @@ export class Agent {
     // --disable-dev-shm-usage: Railway doesn't expose shm_size config;
     //   without this Chrome crashes when /dev/shm is the default 64MB.
     //   Docker Compose handles this via shm_size: 2gb, but Railway has no equivalent.
-    if (process.env.GEMINI_SANDBOX === 'false') {
+    if (config.agent.sandbox === 'false') {
       chromeArgs.push('--no-sandbox');
       chromeArgs.push('--disable-dev-shm-usage');
     }
@@ -867,13 +867,13 @@ export class Agent {
 
       // Only add environment variable directories if codeWorkspace is not explicitly empty
       if (this.codeWorkspace && this.codeWorkspace.trim() !== '') {
-        if (process.env.CODE_METADATA_REPO_ROOT) {
-          const resolvedEnv = resolve(process.env.CODE_METADATA_REPO_ROOT);
+        if (config.git.repoRoot) {
+          const resolvedEnv = resolve(config.git.repoRoot);
           agentLogger.debug({ repoRoot: resolvedEnv }, 'Adding CODE_METADATA_REPO_ROOT to include directories');
           includeDirectories.add(resolvedEnv);
         }
-        if (process.env.GEMINI_ADDITIONAL_INCLUDE_DIRS) {
-          for (const rawDir of process.env.GEMINI_ADDITIONAL_INCLUDE_DIRS.split(delimiter)) {
+        if (config.agent.additionalIncludeDirs) {
+          for (const rawDir of config.agent.additionalIncludeDirs.split(delimiter)) {
             if (rawDir?.trim()) {
               includeDirectories.add(resolve(rawDir.trim()));
             }
@@ -906,7 +906,7 @@ export class Agent {
 
       // Telemetry outfile — JINN_TELEMETRY_DIR overrides tmpdir() so Docker can mount
       // a host volume for telemetry without polluting TMPDIR with non-telemetry temp files.
-      const telemetryDir = process.env.JINN_TELEMETRY_DIR || tmpdir();
+      const telemetryDir = config.agent.telemetryDir || tmpdir();
       const telemetryFile = join(telemetryDir, `telemetry-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.json`);
       this.lastTelemetryFile = telemetryFile;
 
@@ -1004,7 +1004,7 @@ export class Agent {
         agentLogger.debug({ error: err.message }, 'Failed to set up gemini directories');
       }
 
-      const sandboxMode = useStdinPrompt ? 'false' : getSandboxMode();
+      const sandboxMode = useStdinPrompt ? 'false' : config.agent.sandbox;
 
       const geminiProcess = spawn('npx', ['@google/gemini-cli', ...args], {
         // Use stable cwd for Gemini CLI to prevent initialization hang in test environments.
@@ -1281,7 +1281,18 @@ export class Agent {
     // Always generate settings if we have universal tools, even if no job-specific tools
     if (this.enabledTools.length === 0 && (this.universalTools as readonly string[]).length === 0) return;
     try {
-      const templateFileName = process.env.USE_TSX_MCP === '1'
+      const useTsxTemplate = config.dev.useTsxMcp;
+      if (!useTsxTemplate) {
+        const compiledMcpEntry = join(this.agentRoot, 'mcp', 'server.js');
+        if (!existsSync(compiledMcpEntry)) {
+          throw new Error(
+            `Compiled MCP entry missing: ${compiledMcpEntry}\n` +
+            'Either run the compiled build with mcp/server.js present, or run in source mode with USE_TSX_MCP=1.',
+          );
+        }
+      }
+
+      const templateFileName = useTsxTemplate
         ? 'settings.template.dev.json'
         : 'settings.template.json';
       const templatePath = join(this.agentRoot, templateFileName);
@@ -1311,7 +1322,7 @@ export class Agent {
       // with the user's ~/.gemini/settings.json (which init.sh configures).
       if (!templateSettings.security) templateSettings.security = {};
       if (!templateSettings.security.auth) templateSettings.security.auth = {};
-      templateSettings.security.auth.selectedType = process.env.GEMINI_API_KEY
+      templateSettings.security.auth.selectedType = secrets.geminiApiKey
         ? 'gemini-api-key'
         : 'oauth-personal';
 

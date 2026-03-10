@@ -1,7 +1,7 @@
 /**
  * Service Configuration Loader
  * 
- * Loads service configuration from olas-operate-middleware at startup
+ * Loads service configuration from the .operate directory at startup
  * and provides mech address, safe address, and agent EOA for use throughout the worker.
  * 
  * This replaces the need for MECH_ADDRESS, MECH_SAFE_ADDRESS, and MECH_PRIVATE_KEY env vars.
@@ -21,7 +21,7 @@ let serviceConfig: ServiceInfo | null = null;
  * Should be called once at worker startup
  */
 export async function initializeServiceConfig(): Promise<void> {
-  const middlewarePath = process.env.MIDDLEWARE_PATH || join(process.cwd(), 'olas-operate-middleware');
+  const middlewarePath = process.env.MIDDLEWARE_PATH || process.cwd();
   
   loaderLogger.info({ middlewarePath }, 'Loading service configuration from middleware');
   

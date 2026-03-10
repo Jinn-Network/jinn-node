@@ -4,9 +4,9 @@
  * This class is DEPRECATED and SHOULD NOT be used under any circumstances.
  * 
  * Use the olas-operate-middleware CLI directly instead:
- * - For staking: `cd olas-operate-middleware && poetry run operate quickstart`
- * - For claiming: `cd olas-operate-middleware && poetry run operate claim`
- * - For termination: `cd olas-operate-middleware && poetry run operate terminate`
+ * - For staking: `poetry run python -m operate.quickstart`
+ * - For claiming: `poetry run python -m operate.cli claim`
+ * - For termination: `poetry run python -m operate.cli terminate`
  * 
  * The operate CLI is the official interface and handles all service lifecycle operations correctly.
  * This wrapper layer adds complexity and potential for errors.
@@ -28,12 +28,12 @@ import { writeFileSync } from "fs";
 import { promises as fs } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { getOptionalMechMarketplaceAddress } from '../config/index.js';
-import { 
-  SERVICE_CONSTANTS, 
-  createDefaultServiceConfig, 
-  validateServiceConfig, 
-  extractServiceName 
+import { config as nodeConfig, secrets } from '../config/index.js';
+import {
+  SERVICE_CONSTANTS,
+  createDefaultServiceConfig,
+  validateServiceConfig,
+  extractServiceName
 } from "./config/ServiceConfig.js";
 import {
   enableMechMarketplaceInConfig,
@@ -128,7 +128,7 @@ export class OlasServiceManager {
   private static generateDefaultConfigPath(): string {
     const defaultConfig = createDefaultServiceConfig();
     const configPath = `${tmpdir()}/olas-default-service-config.json`;
-    
+
     try {
       writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
       serviceLogger.info({ configPath }, "Generated default service configuration");
@@ -153,15 +153,15 @@ export class OlasServiceManager {
     try {
       // Step 1: Start server and authenticate
       const serverResult = await this.operateWrapper.bootstrapWallet({
-        password: process.env.OPERATE_PASSWORD || "12345678",
-        chain: "base", 
+        password: secrets.operatePassword || "12345678",
+        chain: "base",
         ledgerType: "ethereum"
       });
 
       if (!serverResult.success) {
         // If wallet funding failed, try Tenderly funding approach
-        if (serverResult.error?.includes('Client does not have any funds') || 
-            serverResult.error?.includes('Safe creation failed')) {
+        if (serverResult.error?.includes('Client does not have any funds') ||
+          serverResult.error?.includes('Safe creation failed')) {
           serviceLogger.info("Wallet funding failed, attempting Tenderly funding approach");
           return await this.deployWithTenderlyFunding(configPath);
         }
@@ -171,7 +171,7 @@ export class OlasServiceManager {
       // Step 2: Create service via HTTP API
       const serviceConfig = await this.loadServiceConfig(configPath);
       const createResult = await this.createServiceViaAPI(serviceConfig);
-      
+
       if (!createResult.success) {
         throw new Error(`Failed to create service: ${createResult.error}`);
       }
@@ -184,7 +184,7 @@ export class OlasServiceManager {
 
       // Step 3: Deploy and stake service via HTTP API
       const deployResult = await this.deployServiceViaAPI(serviceConfigId);
-      
+
       if (!deployResult.success) {
         throw new Error(`Failed to deploy and stake service: ${deployResult.error}`);
       }
@@ -218,7 +218,7 @@ export class OlasServiceManager {
 
     try {
       const result = await this.operateWrapper.executeCommand('quickstop', [configPath]);
-      
+
       if (!result.success) {
         throw new Error(`Quickstop command failed: ${result.stderr || result.stdout}`);
       }
@@ -296,7 +296,7 @@ export class OlasServiceManager {
 
       // Deploy service with mech marketplace enabled
       const result = await this.operateWrapper.executeCommand('quickstart', [configPath, '--attended=false']);
-      
+
       if (!result.success) {
         throw new Error(`Service deployment with mech failed: ${result.stderr || result.stdout}`);
       }
@@ -304,10 +304,10 @@ export class OlasServiceManager {
       // Parse the output to extract mech_address and agent_id
       const { mechAddress, agentId } = parseMechDeployOutput(result.stdout);
 
-      serviceLogger.info({ 
-        configPath, 
-        mechAddress, 
-        agentId 
+      serviceLogger.info({
+        configPath,
+        mechAddress,
+        agentId
       }, "Mech deployed successfully via service deployment");
 
       // Persist mech information for mech-client-ts monitoring
@@ -336,7 +336,7 @@ export class OlasServiceManager {
    */
   async getServiceStatus(serviceConfigPath?: string): Promise<ServiceInfo> {
     const configPath = serviceConfigPath || this.serviceConfigPath;
-    
+
     try {
       const { isRunning, isStaked } = await this.queryServiceStatus(configPath);
 
@@ -384,7 +384,7 @@ export class OlasServiceManager {
     } catch (statusError) {
       serviceLogger.debug({ statusError, configPath }, "Could not query service status, using defaults");
     }
-    
+
     // Conservative defaults if status query fails
     return { isRunning: false, isStaked: false };
   }
@@ -407,7 +407,7 @@ export class OlasServiceManager {
 
     try {
       const result = await this.executeCommandWithFallback(command, [configPath], optionalFlags);
-      
+
       if (!result.success) {
         throw new Error(`${command} command failed: ${result.stderr || result.stdout}`);
       }
@@ -431,52 +431,52 @@ export class OlasServiceManager {
    * @private
    */
   private async executeCommandWithFallback(
-    command: string, 
-    baseArgs: string[], 
+    command: string,
+    baseArgs: string[],
     optionalFlags: string[] = []
   ): Promise<OperateCommandResult> {
     // First try with all optional flags
     const fullArgs = [...baseArgs, ...optionalFlags];
-    
+
     try {
       const result = await this.operateWrapper.executeCommand(command, fullArgs);
-      
+
       // If successful, return the result
       if (result.success) {
         return result;
       }
-      
+
       // If failed due to unknown flag, try fallback
       const errorOutput = (result.stderr || result.stdout || '').toLowerCase();
-      const hasUnknownFlag = errorOutput.includes('unknown flag') || 
-                            errorOutput.includes('unrecognized option') ||
-                            errorOutput.includes('invalid option');
-      
+      const hasUnknownFlag = errorOutput.includes('unknown flag') ||
+        errorOutput.includes('unrecognized option') ||
+        errorOutput.includes('invalid option');
+
       if (hasUnknownFlag && optionalFlags.length > 0) {
-        serviceLogger.warn({ 
-          command, 
-          optionalFlags, 
-          error: result.stderr 
+        serviceLogger.warn({
+          command,
+          optionalFlags,
+          error: result.stderr
         }, "Optional flags not supported, retrying without them");
-        
+
         // Retry without optional flags
         return await this.operateWrapper.executeCommand(command, baseArgs);
       }
-      
+
       return result;
-      
+
     } catch (error) {
       // If command execution throws, try fallback if we have optional flags
       if (optionalFlags.length > 0) {
-        serviceLogger.warn({ 
-          command, 
-          optionalFlags, 
+        serviceLogger.warn({
+          command,
+          optionalFlags,
           error: error instanceof Error ? error.message : String(error)
         }, "Command failed with optional flags, retrying without them");
-        
+
         return await this.operateWrapper.executeCommand(command, baseArgs);
       }
-      
+
       throw error;
     }
   }
@@ -489,22 +489,22 @@ export class OlasServiceManager {
     try {
       const fs = await import('fs/promises');
       const path = await import('path');
-      
+
       const serviceName = this.extractServiceNameFromConfig(configPath);
       const mechInfoPath = getMechInfoPath(configPath, serviceName);
       const mechInfo = createMechPersistenceInfo(mechAddress, agentId, serviceName, configPath);
-      
+
       // Create directory and write file
       const pathModule = await import('path');
       await fs.mkdir(pathModule.dirname(mechInfoPath), { recursive: true });
       await fs.writeFile(mechInfoPath, JSON.stringify(mechInfo, null, 2));
-      
-      serviceLogger.info({ 
-        mechInfoPath, 
-        mechAddress, 
-        agentId 
+
+      serviceLogger.info({
+        mechInfoPath,
+        mechAddress,
+        agentId
       }, "Persisted mech information for monitoring");
-      
+
     } catch (error) {
       serviceLogger.error({ error, configPath }, "Failed to persist mech information");
       // Don't throw here as this is not critical for operation
@@ -518,13 +518,13 @@ export class OlasServiceManager {
   private async enableMechMarketplaceInConfig(configPath: string): Promise<void> {
     try {
       const fs = await import('fs/promises');
-      
+
       // Read existing config
       const configContent = await fs.readFile(configPath, 'utf8');
       const config = JSON.parse(configContent);
 
       // Get mech marketplace address from config
-      const mechMarketplaceAddress = getOptionalMechMarketplaceAddress();
+      const mechMarketplaceAddress = process.env.MECH_MARKETPLACE_ADDRESS_BASE;
       if (!mechMarketplaceAddress) {
         throw new Error('MECH_MARKETPLACE_ADDRESS_BASE is required for mech deployment');
       }
@@ -533,9 +533,9 @@ export class OlasServiceManager {
 
       // Write updated config back
       await fs.writeFile(configPath, JSON.stringify(config, null, 2));
-      
+
       serviceLogger.info({ configPath, mechMarketplaceAddress }, "Enabled mech marketplace in service config");
-      
+
     } catch (error) {
       serviceLogger.error({ error, configPath }, "Failed to enable mech marketplace in config");
       throw new Error(`Failed to enable mech marketplace in config: ${error instanceof Error ? error.message : String(error)}`);
@@ -630,9 +630,9 @@ export class OlasServiceManager {
   private async waitForBalance(walletAddress: string, expectedAmount: string, rpcUrl: string): Promise<boolean> {
     const maxRetries = 10;
     const retryDelay = 2000; // 2 seconds
-    
+
     serviceLogger.info({ walletAddress, expectedAmount, rpcUrl }, "Starting balance verification");
-    
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         // Use ethers to check balance directly via RPC
@@ -642,46 +642,46 @@ export class OlasServiceManager {
         const balance = await provider.getBalance(walletAddress);
         const balanceEth = ethers.formatEther(balance);
         const expectedEth = ethers.formatEther(expectedAmount);
-        
-        serviceLogger.info({ 
-          attempt, 
-          walletAddress, 
-          balance: balanceEth, 
-          expected: expectedEth 
+
+        serviceLogger.info({
+          attempt,
+          walletAddress,
+          balance: balanceEth,
+          expected: expectedEth
         }, "Balance check");
-        
+
         // Check if balance is at least the expected amount
         if (balance >= BigInt(expectedAmount)) {
-          serviceLogger.info({ 
-            walletAddress, 
-            balance: balanceEth, 
-            attempts: attempt 
+          serviceLogger.info({
+            walletAddress,
+            balance: balanceEth,
+            attempts: attempt
           }, "Balance verification successful");
           return true;
         }
-        
+
         if (attempt < maxRetries) {
-          serviceLogger.info({ 
-            attempt, 
-            maxRetries, 
-            walletAddress, 
-            balance: balanceEth, 
-            expected: expectedEth 
+          serviceLogger.info({
+            attempt,
+            maxRetries,
+            walletAddress,
+            balance: balanceEth,
+            expected: expectedEth
           }, "Balance not yet available, retrying");
           await new Promise(resolve => setTimeout(resolve, retryDelay));
         }
       } catch (error) {
-        serviceLogger.warn({ 
-          attempt, 
-          error: error instanceof Error ? error.message : String(error) 
+        serviceLogger.warn({
+          attempt,
+          error: error instanceof Error ? error.message : String(error)
         }, "Balance check failed");
-        
+
         if (attempt < maxRetries) {
           await new Promise(resolve => setTimeout(resolve, retryDelay));
         }
       }
     }
-    
+
     serviceLogger.error({ walletAddress, maxRetries }, "Balance verification failed after maximum retries");
     return false;
   }
@@ -692,13 +692,13 @@ export class OlasServiceManager {
    */
   private async deployWithTenderlyFunding(configPath: string): Promise<ServiceInfo> {
     const { createTenderlyClient, ethToWei } = await import('../lib/tenderly.js');
-    
+
     serviceLogger.info("Setting up Tenderly environment for funded deployment");
-    
+
     // Step 0: Stop the original wrapper's server to prevent port conflicts
     serviceLogger.info("Stopping original server to prevent port conflicts");
     await this.operateWrapper.stopServer();
-    
+
     // Create Tenderly client and VNet
     const tenderlyClient = createTenderlyClient();
     if (!tenderlyClient.isConfigured()) {
@@ -719,7 +719,7 @@ export class OlasServiceManager {
 
       // First, set up the server with just account and wallet creation (no Safe yet)
       const serverResult = await tenderlyOperateWrapper.bootstrapWalletWithoutSafe({
-        password: process.env.OPERATE_PASSWORD || "12345678",
+        password: secrets.operatePassword || "12345678",
         chain: "base",
         ledgerType: "ethereum"
       });
@@ -754,15 +754,15 @@ export class OlasServiceManager {
 
       // Now create the service with funded wallet using the Tenderly-configured wrapper
       const serviceConfig = await this.loadServiceConfig(configPath);
-      
+
       // Update service config to use Tenderly RPC
       serviceConfig.configurations.base.rpc = vnetResult.publicRpcUrl || vnetResult.adminRpcUrl;
-      
+
       // Create a temporary service manager with the Tenderly wrapper for API calls
       const tenderlyServiceManager = new OlasServiceManager(tenderlyOperateWrapper, configPath);
-      
+
       const createResult = await tenderlyServiceManager.createServiceViaAPI(serviceConfig);
-      
+
       if (!createResult.success) {
         throw new Error(`Failed to create service: ${createResult.error}`);
       }
@@ -775,7 +775,7 @@ export class OlasServiceManager {
 
       // Deploy and stake service
       const deployResult = await tenderlyServiceManager.deployServiceViaAPI(serviceConfigId);
-      
+
       if (!deployResult.success) {
         throw new Error(`Failed to deploy and stake service: ${deployResult.error}`);
       }
@@ -830,7 +830,7 @@ export class OlasServiceManager {
       if (options.keys) {
         args.push('--keys', options.keys);
       }
-      
+
       // JINN-198 Fix: The middleware CLI expects `operate new service`, not `operate service new`
       const result = await this.operateWrapper.executeCommand('service', ['create', ...args]);
 
@@ -845,7 +845,7 @@ export class OlasServiceManager {
         return { success: false, error: 'Could not parse service config ID from output' };
       }
       const serviceConfigId = match[1];
-      
+
       return { success: true, serviceConfigId };
 
     } catch (error) {

@@ -122,7 +122,10 @@ for var in $(env | grep '^OPERATE_SERVICE_.*_CONFIG=' | sed 's/=.*//'); do
   fi
 
   target_dir="${SERVICES_DIR}/${sc_id}"
-  mkdir -p "$target_dir"
+  if ! mkdir -p "$target_dir" 2>/dev/null; then
+    echo "[init] WARN: Cannot create $target_dir (permission denied?) — skipping hydration for $sc_id"
+    continue
+  fi
 
   echo "$config_b64" | base64 -d > "${target_dir}/config.json"
   echo "[init] Wrote ${target_dir}/config.json"

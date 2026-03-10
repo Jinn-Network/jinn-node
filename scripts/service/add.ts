@@ -23,7 +23,7 @@ import { enableMechMarketplaceInConfig, DEFAULT_MECH_DELIVERY_RATE } from '../..
 import { listServiceConfigs, cleanupUndeployedConfigs } from '../../src/worker/ServiceConfigReader.js';
 import { printHeader, printStep, printFundingRequirements, printSuccess, printError } from '../../src/setup/display.js';
 import { ethers } from 'ethers';
-import { getOptionalMechChainConfig, createRpcProvider } from '../../src/config/index.js';
+import { getMechChainConfig } from '../../src/env/operate-profile.js';
 
 const OLAS_TOKEN_BASE = '0x54330d28ca3357F294334BDC454a032e7f353416';
 const ERC20_ABI = ['function balanceOf(address) view returns (uint256)'];
@@ -117,7 +117,7 @@ async function main() {
     process.exit(1);
   }
 
-  const resolvedChain = chainArg || getOptionalMechChainConfig() || 'base';
+  const resolvedChain = chainArg || getMechChainConfig() || 'base';
   if (!isSupportedChain(resolvedChain)) {
     printError(`Invalid chain from configuration: ${resolvedChain}. Supported: base, gnosis, mode, optimism`);
     process.exit(1);

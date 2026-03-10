@@ -16,10 +16,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { getServicePrivateKey, getMechAddress, getServiceSafeAddress } from '../env/operate-profile.js';
-import { getRequiredRpcUrl } from './mcp/tools/shared/env.js';
 import { get_mech_config } from '@jinn-network/mech-client-ts/dist/config.js';
 import { getMechChainConfig } from '../env/operate-profile.js';
 import { dispatchViaSafe } from '../worker/safe-dispatch.js';
+import { config, secrets } from '../config/index.js';
 
 const READ_BODY_TIMEOUT_MS = 5_000;
 
@@ -149,7 +149,7 @@ async function handleDispatch(req: IncomingMessage, res: ServerResponse): Promis
   const privateKey = loadPrivateKey();
   const mechAddress = body.priorityMech || getMechAddress();
   const safeAddress = getServiceSafeAddress();
-  const rpcUrl = getRequiredRpcUrl();
+  const rpcUrl = secrets.rpcUrl;
 
   if (!mechAddress) {
     json(res, 500, { error: 'Service mech address not configured', code: 'CONFIG_ERROR' });
@@ -168,6 +168,11 @@ async function handleDispatch(req: IncomingMessage, res: ServerResponse): Promis
 
   if (!mechMarketplaceAddress || mechMarketplaceAddress === '0x0000000000000000000000000000000000000000') {
     json(res, 500, { error: 'Mech Marketplace contract address not configured for this chain', code: 'CONFIG_ERROR' });
+    return;
+  }
+
+  if (!rpcUrl) {
+    json(res, 500, { error: 'RPC URL not configured. Set RPC_URL in .env.', code: 'CONFIG_ERROR' });
     return;
   }
 

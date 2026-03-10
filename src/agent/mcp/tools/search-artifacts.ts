@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import fetch from 'cross-fetch';
 import { composeSinglePageResponse, decodeCursor } from './shared/context-management.js';
-import { getPonderGraphqlUrl } from './shared/env.js';
+import { config } from '../../../config/index.js';
 
 export const searchArtifactsParams = z.object({
   query: z.string().min(1).describe('Case-insensitive text to match against artifact name, topic, and content preview.'),
@@ -16,7 +16,7 @@ export const searchArtifactsSchema = {
 };
 
 async function fetchRequestForArtifact(requestId: string): Promise<any | null> {
-  const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
+  const PONDER_GRAPHQL_URL = config.services.ponderUrl;
   const gql = `query GetRequest($requestId: String!) {
     requests(where: { id: $requestId }, limit: 1) {
       items { 
@@ -55,7 +55,7 @@ export async function searchArtifacts(params: SearchArtifactsParams) {
     const keyset = decodeCursor<{ offset: number }>(cursor) ?? { offset: 0 };
 
     // Query artifacts table directly
-    const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
+    const PONDER_GRAPHQL_URL = config.services.ponderUrl;
     const artifactsGql = `query SearchArtifacts($q: String!, $limit: Int!) {
       artifacts(where: { OR: [
         { name_contains: $q }, 

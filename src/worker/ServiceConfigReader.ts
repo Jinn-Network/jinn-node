@@ -11,6 +11,7 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { logger } from '../logging/index.js';
 import { decryptKeystoreV3 } from '../env/keystore-decrypt.js';
+import { secrets } from '../config/index.js';
 
 const configLogger = logger.child({ component: 'SERVICE-CONFIG-READER' });
 
@@ -54,19 +55,19 @@ export async function readServiceConfig(
 ): Promise<ServiceInfo | null> {
   try {
     const servicesDir = join(middlewarePath, '.operate', 'services');
-    
+
     // If no serviceConfigId provided, find the latest service by modification time
     let targetServiceId = serviceConfigId;
     if (!targetServiceId) {
       const entries = await fs.readdir(servicesDir, { withFileTypes: true });
       const serviceDirs = entries
         .filter(e => e.isDirectory() && e.name.startsWith('sc-'));
-      
+
       if (serviceDirs.length === 0) {
         configLogger.warn({ servicesDir }, 'No service directories found');
         return null;
       }
-      
+
       // Sort by modification time (newest first)
       const dirsWithStats = await Promise.all(
         serviceDirs.map(async (dir) => {
@@ -75,21 +76,21 @@ export async function readServiceConfig(
           return { name: dir.name, mtime: stats.mtime };
         })
       );
-      
+
       dirsWithStats.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
       targetServiceId = dirsWithStats[0].name;
       configLogger.info({ targetServiceId }, 'Using latest service directory');
     }
-    
+
     // Read service config.json
     const configPath = join(servicesDir, targetServiceId, 'config.json');
     const configContent = await fs.readFile(configPath, 'utf-8');
     const config = JSON.parse(configContent);
-    
+
     // Extract service information
     const serviceName = config.name || targetServiceId;
     const homeChain = config.home_chain || 'base';
-    
+
     // Get chain-specific configuration
     const chainConfig = config.chain_configs?.[homeChain]?.chain_data;
     if (!chainConfig) {
@@ -100,21 +101,21 @@ export async function readServiceConfig(
         chain: homeChain,
       };
     }
-    
+
     const serviceSafeAddress = chainConfig.multisig;
     const serviceId = chainConfig.token;
     const stakingContractAddress = chainConfig.user_params?.staking_program_id;
-    
+
     // Read agent EOA from instances
     let agentEoaAddress: string | undefined;
     const instances = chainConfig.instances || [];
     if (instances.length > 0) {
       agentEoaAddress = instances[0]; // First instance is the agent EOA
     }
-    
+
     // Read mech contract address if deployed
     let mechContractAddress: string | undefined;
-    
+
     // Try to extract from env_variables.MECH_TO_CONFIG (JSON string)
     const mechToConfigEnv = config.env_variables?.MECH_TO_CONFIG?.value;
     if (mechToConfigEnv) {
@@ -128,7 +129,7 @@ export async function readServiceConfig(
         configLogger.debug({ error: error instanceof Error ? error.message : String(error) }, 'Failed to parse MECH_TO_CONFIG');
       }
     }
-    
+
     // Fallback: Check mech_contracts field (older format)
     if (!mechContractAddress) {
       const mechContracts = config.chain_configs?.[homeChain]?.chain_data?.mech_contracts;
@@ -136,7 +137,7 @@ export async function readServiceConfig(
         mechContractAddress = mechContracts[0];
       }
     }
-    
+
     // Read agent private key — try keys.json first (middleware daemon format),
     // fall back to deployment/agent_keys path (Docker/AEA format)
     let agentPrivateKey: string | undefined;
@@ -147,7 +148,7 @@ export async function readServiceConfig(
         const rawKey = keysJson[0].private_key;
         if (typeof rawKey === 'string' && rawKey.startsWith('{')) {
           // Encrypted keystore — decrypt with OPERATE_PASSWORD
-          const password = process.env.OPERATE_PASSWORD;
+          const password = secrets.operatePassword;
           if (password) {
             agentPrivateKey = decryptKeystoreV3(rawKey, password);
           } else {
@@ -168,7 +169,7 @@ export async function readServiceConfig(
         configLogger.debug({ error: error instanceof Error ? error.message : String(error) }, 'Could not read agent private key');
       }
     }
-    
+
     const serviceInfo: ServiceInfo = {
       serviceConfigId: targetServiceId,
       serviceName,
@@ -180,10 +181,10 @@ export async function readServiceConfig(
       stakingContractAddress,
       agentPrivateKey,
     };
-    
+
     configLogger.info({ serviceInfo: redactServiceInfoForLog(serviceInfo) }, 'Successfully read service configuration');
     return serviceInfo;
-    
+
   } catch (error) {
     configLogger.error({ error: error instanceof Error ? error.message : String(error), middlewarePath, serviceConfigId }, 'Failed to read service configuration');
     return null;
@@ -264,7 +265,7 @@ export async function listServiceConfigs(middlewarePath: string): Promise<Servic
     const serviceDirs = entries
       .filter(e => e.isDirectory() && e.name.startsWith('sc-'))
       .sort((a, b) => b.name.localeCompare(a.name)); // Sort descending (latest first)
-    
+
     const services: ServiceInfo[] = [];
     for (const dir of serviceDirs) {
       const serviceInfo = await readServiceConfig(middlewarePath, dir.name);
@@ -272,7 +273,7 @@ export async function listServiceConfigs(middlewarePath: string): Promise<Servic
         services.push(serviceInfo);
       }
     }
-    
+
     return services;
   } catch (error) {
     configLogger.error({ error: error instanceof Error ? error.message : String(error), middlewarePath }, 'Failed to list service configurations');

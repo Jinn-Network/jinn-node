@@ -2,20 +2,20 @@ import { z } from 'zod';
 import { graphQLRequest } from '../../../http/client.js';
 import { randomUUID } from 'node:crypto';
 import { getCurrentJobContext } from './shared/context.js';
-import { getPonderGraphqlUrl } from './shared/env.js';
 import { dispatchToMarketplace } from '../../shared/dispatch-core.js';
 import { validateInvariantsStrict } from '../../../worker/prompt/invariant-validator.js';
 import { buildAnnotatedTools, normalizeToolArray, extractModelPolicyFromBlueprint } from '../../../shared/template-tools.js';
 import { blueprintStructureSchema } from '../../shared/blueprint-schema.js';
 import { BASE_UNIVERSAL_TOOLS } from '../../toolPolicy.js';
-import { validateModelAllowed, normalizeGeminiModel, DEFAULT_WORKER_MODEL } from '../../../shared/gemini-models.js';
+import { validateModelAllowed, normalizeGeminiModel, DEFAULT_WORKER_MODEL, AVAILABLE_MODELS, isKnownValidModel, KNOWN_VALID_MODELS } from '../../../shared/gemini-models.js';
+import { config } from '../../../config/index.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const dispatchNewJobParamsBase = z.object({
   jobName: z.string().min(1).describe('Name for this job definition'),
   blueprint: z.string().optional().describe('JSON string containing structured blueprint with invariants array. Each invariant must have: id, type (FLOOR/CEILING/RANGE/BOOLEAN), assessment, and type-specific fields (metric+min for FLOOR, metric+max for CEILING, metric+min+max for RANGE, condition for BOOLEAN). Optional: examples.'),
-  model: z.string().optional().describe('Gemini model to use for this job (e.g., "gemini-3-flash", "gemini-2.5-pro"). Defaults to "gemini-3-flash" if not specified.'),
+  model: z.enum(AVAILABLE_MODELS).optional().describe('Gemini model to use for this job. Defaults to "gemini-3-flash-preview" if not specified.'),
   enabledTools: z.array(z.string()).optional().describe('Array of tool names to enable for this job'),
   message: z.string().optional().describe('Optional message to include in the job request'),
   dependencies: z.array(z.string()).optional().describe('Array of job definition UUIDs (not job names) that must have at least one delivered request before this job can execute. Use get_details or search_jobs to find job definition IDs. Example: ["4eac1570-7980-4e2b-afc7-3f5159e99ea5"]'),
@@ -100,7 +100,7 @@ Each child sees only its own scope, not requirements for sibling work.
 PARAMETERS:
 - jobName: (required) Name for this job definition
 - blueprint: (required) JSON string containing structured invariants array as defined above
-- model: (optional) Gemini model to use (defaults to "gemini-3-flash")
+- model: (optional) Gemini model to use (defaults to "gemini-3-flash-preview")
 - enabledTools: (optional) Array of tool names to enable
 - message: (optional) Additional message to include in the job request
 - dependencies: (optional) Array of job definition UUIDs (not job names) that must have at least one delivered request before this job executes. Use get_details or search_jobs to find job definition IDs.
@@ -274,7 +274,7 @@ export async function dispatchNewJob(args: unknown) {
     }
 
     if (dependencies && dependencies.length > 0 && process.env.JINN_SKIP_DEPENDENCY_VALIDATION !== '1') {
-      const gqlUrl = getPonderGraphqlUrl();
+      const gqlUrl = config.services.ponderUrl;
       const validation = await validateDependencies({ gqlUrl, dependencies });
       if (!validation.ok) {
         if (validation.invalid.length > 0) {
@@ -486,11 +486,39 @@ export async function dispatchNewJob(args: unknown) {
       }
     }
 
+    // 4. Fallback: reject unknown models when no explicit policy configured
+    const hasExplicitPolicy = modelPolicy.allowedModels.length > 0 ||
+      (Array.isArray(parentAllowedModels) && parentAllowedModels.length > 0);
+    if (!hasExplicitPolicy) {
+      const normalizedToCheck = normalizeGeminiModel(modelToUse, DEFAULT_WORKER_MODEL).normalized;
+      if (!isKnownValidModel(normalizedToCheck)) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              data: null,
+              meta: {
+                ok: false,
+                code: 'UNKNOWN_MODEL',
+                message: `Model '${modelToUse}' is not a recognized Gemini model. Use one of the known-valid models.`,
+                details: {
+                  requestedModel: modelToUse,
+                  normalizedModel: normalizedToCheck,
+                  knownValidModels: Array.from(KNOWN_VALID_MODELS),
+                  suggestion: DEFAULT_WORKER_MODEL,
+                },
+              },
+            }),
+          }],
+        };
+      }
+    }
+
     // Use validated model
     const validatedModel = modelToUse;
 
     const finalBlueprint = blueprint;
-    const gqlUrl = getPonderGraphqlUrl();
+    const gqlUrl = config.services.ponderUrl;
 
     // Generate unique job definition ID
     const jobDefinitionId: string = ensureUuid();

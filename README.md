@@ -24,8 +24,8 @@ yarn worker             # Start processing jobs
 | Poetry | [python-poetry.org](https://python-poetry.org/docs/#installation) |
 | Tendermint | `brew install tendermint` |
 | Gemini API Key | Free at [aistudio.google.com](https://aistudio.google.com/apikey) |
-| ~0.015 ETH on Base | For gas fees |
-| 10,000 OLAS | For staking ([Uniswap on Base](https://app.uniswap.org)) |
+| ~0.01 ETH on Base | For gas fees |
+| OLAS (optional) | stOLAS path needs no OLAS; standard path requires ~10,000 OLAS |
 
 ## Configuration
 
@@ -44,19 +44,24 @@ GIT_AUTHOR_NAME=Your Name
 GIT_AUTHOR_EMAIL=you@example.com
 ```
 
-## Agent-Assisted Setup
+## Setup with an AI Agent (Recommended)
 
-Have a coding agent? Point it at the setup guide:
+This repo is designed as an **agent-first flow**. The setup involves wallet creation, on-chain staking, and funding loops — an LLM code assistant handles these steps for you, captures your seed phrase, and walks you through funding prompts interactively. You can do it manually, but we highly recommend using a coding agent.
+
+> **Agents start here → [`AGENTS.md`](AGENTS.md)**
 
 - **OpenClaw**: `npx clawhub install jinn-node` then `/jinn-node`
-- **Any agent** (Claude Code, Cursor, etc.): Clone this repo, tell your agent to read `AGENTS.md`
+- **Any agent** (Claude Code, Cursor, Gemini CLI, etc.): Clone this repo, tell your agent to read `AGENTS.md`
 
 ## Commands
 
 | Command | Purpose |
 |---------|---------|
-| `yarn setup` | First-time setup (wallet creation, service deployment, staking) |
-| `yarn worker` | Run the node |
+| `yarn stolas:preflight` | Check stOLAS slot availability |
+| `yarn setup` | First-time setup (standard OLAS staking) |
+| `yarn setup --stolas` | First-time setup (stOLAS — no OLAS required) |
+| `yarn worker` | Run the node (Docker by default) |
+| `yarn worker:dev` | Run worker bare (development) |
 | `yarn build` | Compile TypeScript |
 | `yarn typecheck` | Type check only |
 
@@ -72,8 +77,8 @@ Have a coding agent? Point it at the setup guide:
 
 ## Learn More
 
-- [Full Setup Guide](docs/run-a-node.md) — Step-by-step with explanations
-- [AGENTS.md](AGENTS.md) — Detailed setup guide for AI agents
+- [**AGENTS.md**](AGENTS.md) — Entry point for AI agents (auto-loaded by Claude Code, Gemini CLI, Codex)
+- [Full Setup Guide](https://jinn.network/run-a-node) — Step-by-step with explanations
 - [Explorer](https://explorer.jinn.network) — View network activity
 - [Docs](https://docs.jinn.network) — Technical documentation
 - [GitHub Issues](https://github.com/Jinn-Network/jinn-node/issues) — Report bugs

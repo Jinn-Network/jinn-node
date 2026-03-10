@@ -42,10 +42,11 @@ import { extractMemoryArtifacts } from '../reflection/memoryArtifacts.js';
 import { DEFAULT_WORKER_MODEL, normalizeGeminiModel, validateModelAllowed } from '../../shared/gemini-models.js';
 import type { UnclaimedRequest, IpfsMetadata, AgentExecutionResult, FinalStatus, ExecutionSummaryDetails, RecognitionPhaseResult, ReflectionResult, AdditionalContext } from '../types.js';
 import { getDependencyBranchInfo } from '../mech_worker.js';
-import { getBlueprintEnableContextPhases, getBlueprintEnableBeads } from '../../config/index.js';
-import { waitForGeminiQuota, isGeminiQuotaError, markCredentialExhausted } from '../llm/geminiQuota.js';
+import { config } from '../../config/index.js';
+import { checkGeminiQuotaAvailability, isGeminiQuotaError, markCredentialExhausted } from '../llm/geminiQuota.js';
 
-const DEFAULT_BASE_BRANCH = process.env.CODE_METADATA_DEFAULT_BASE_BRANCH || 'main';
+const DEFAULT_BASE_BRANCH = config.git.defaultBaseBranch;
+const MAX_GEMINI_EXECUTION_ATTEMPTS = 3;
 
 /**
  * Process a single job request
@@ -69,7 +70,7 @@ export async function processOnce(
 
   const envSnapshot = snapshotEnvironment();
   const telemetry = new WorkerTelemetryService(target.id);
-  const contextPhasesEnabled = getBlueprintEnableContextPhases();
+  const contextPhasesEnabled = config.blueprint.enableContextPhases;
 
   try {
     // Initialize: fetch metadata and set up repo
@@ -77,7 +78,10 @@ export async function processOnce(
     try {
       metadata = await fetchIpfsMetadata(target.ipfsHash!);
       if (!metadata) {
-        metadata = {};
+        throw new Error(
+          `Cannot execute job: IPFS metadata fetch failed for hash ${target.ipfsHash}. ` +
+          `Without metadata, the worker has no prompt or configuration. Skipping.`
+        );
       }
       // Use model from job metadata if available, otherwise fall back to default
       const normalized = normalizeGeminiModel(metadata.model, DEFAULT_WORKER_MODEL);
@@ -142,7 +146,7 @@ export async function processOnce(
         const { url: repoUrl, branch } = metadata.additionalContext.workspaceRepo;
         const repoName = extractRepoName(repoUrl);
         if (repoName) {
-          const workspaceDir = getJinnWorkspaceDir();
+          const workspaceDir = config.git.workspaceDir;
           const repoRoot = `${workspaceDir}/${repoName}`;
 
           workerLogger.info({ repoUrl, repoRoot, branch }, 'Bootstrapping workspace from additionalContext.workspaceRepo');
@@ -182,7 +186,7 @@ export async function processOnce(
           } else {
             const repoName = extractRepoName(remoteUrl);
             if (repoName) {
-              const workspaceDir = getJinnWorkspaceDir();
+              const workspaceDir = config.git.workspaceDir;
               repoRoot = `${workspaceDir}/${repoName}`;
               process.env.CODE_METADATA_REPO_ROOT = repoRoot;
               workerLogger.info({ repoRoot, remoteUrl }, 'Set CODE_METADATA_REPO_ROOT for job');
@@ -229,7 +233,7 @@ export async function processOnce(
         const setupRepoRoot = getRepoRoot(metadata.codeMetadata);
         if (setupRepoRoot) {
           ensureGitignore(setupRepoRoot);
-          if (getBlueprintEnableBeads()) {
+          if (config.blueprint.enableBeads) {
             await ensureBeadsInit(setupRepoRoot);
           }
           await commitRepoSetup(setupRepoRoot);
@@ -371,14 +375,23 @@ export async function processOnce(
       model: metadata?.model || DEFAULT_WORKER_MODEL,
     });
     try {
-      let executionAttempt = 0;
-      for (;;) {
-        const quotaResult = await waitForGeminiQuota({
+      for (let executionAttempt = 0; executionAttempt < MAX_GEMINI_EXECUTION_ATTEMPTS; executionAttempt += 1) {
+        const quotaResult = await checkGeminiQuotaAvailability({
           reason: executionAttempt === 0 ? 'pre_execution' : 'execution_retry',
           requestId: target.id,
           jobName: metadata?.jobName,
           model: metadata?.model,
         });
+
+        if (!quotaResult.available) {
+          const retryAfterSeconds = quotaResult.retryAfterMs && quotaResult.retryAfterMs > 0
+            ? Math.ceil(quotaResult.retryAfterMs / 1000)
+            : null;
+          const retryAfterMessage = retryAfterSeconds
+            ? ` Retry after about ${retryAfterSeconds}s.`
+            : '';
+          throw new Error(`Gemini quota unavailable before execution.${retryAfterMessage}`);
+        }
 
         try {
           result = await runAgentForRequest(target, metadata);
@@ -390,7 +403,9 @@ export async function processOnce(
             if (quotaResult.selectedIndex >= 0) {
               markCredentialExhausted(quotaResult.selectedIndex);
             }
-            executionAttempt += 1;
+            if (executionAttempt + 1 >= MAX_GEMINI_EXECUTION_ATTEMPTS) {
+              throw new Error(`Gemini quota exhausted after ${MAX_GEMINI_EXECUTION_ATTEMPTS} execution attempts`);
+            }
             continue;
           }
           throw agentError;

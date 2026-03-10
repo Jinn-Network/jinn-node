@@ -8,8 +8,8 @@
 
 import { ethers } from 'ethers';
 import { workerLogger } from '../../logging/index.js';
-import { getRequiredRpcUrl, createRpcProvider } from '../../config/index.js';
 import { getServicePrivateKey } from '../../env/operate-profile.js';
+import { config, secrets, createRpcProvider } from '../../config/index.js';
 
 const log = workerLogger.child({ component: 'CHECKPOINT' });
 
@@ -24,8 +24,7 @@ const STAKING_ABI = [
  * Safe to call frequently — it's a no-op if the epoch hasn't ended.
  */
 export async function maybeCallCheckpoint(stakingContract: string): Promise<void> {
-  const rpcUrl = getRequiredRpcUrl();
-  const provider = createRpcProvider(rpcUrl);
+  const provider = createRpcProvider(secrets.rpcUrl);
 
   const contract = new ethers.Contract(stakingContract, STAKING_ABI, provider);
 
@@ -33,7 +32,8 @@ export async function maybeCallCheckpoint(stakingContract: string): Promise<void
   const now = Math.floor(Date.now() / 1000);
 
   if (now < nextCheckpoint) {
-    log.debug({ nextCheckpoint: new Date(nextCheckpoint * 1000).toISOString() }, 'Epoch not yet ended, skipping checkpoint');
+    const remainingSeconds = nextCheckpoint - now;
+    log.info({ nextCheckpoint: new Date(nextCheckpoint * 1000).toISOString(), remainingSeconds }, 'Epoch not yet ended, skipping checkpoint');
     return;
   }
 

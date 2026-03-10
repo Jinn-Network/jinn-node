@@ -2,7 +2,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mkdirSync, existsSync } from 'node:fs';
 import type { CodeMetadata } from '../agent/shared/code_metadata.js';
-import { getJinnWorkspaceDir as getConfigJinnWorkspaceDir, getOptionalWorkerId } from '../config/index.js';
+import { config } from '../config/index.js';
 
 /**
  * Extract repository name from a remote URL
@@ -96,8 +96,8 @@ export function normalizeSshUrl(remoteUrl: string): string {
  * @returns Absolute path to workspace directory
  */
 export function getJinnWorkspaceDir(): string {
-  const baseDir = getConfigJinnWorkspaceDir() || '~/jinn-repos';
-  const workerId = getOptionalWorkerId() || 'default';
+  const baseDir = config.git.workspaceDir || '~/jinn-repos';
+  const workerId = config.dev.workerId || 'default';
 
   // Expand ~ to home directory
   const expandedBase = baseDir.startsWith('~')

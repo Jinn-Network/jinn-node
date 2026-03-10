@@ -16,6 +16,7 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 import { workerLogger } from '../../logging/index.js';
 import { getMasterSafe, getMasterPrivateKey, getMasterEOA, getMiddlewarePath } from '../../env/operate-profile.js';
+import { verifyAgentKeyAccessible } from '../../env/keystore-verify.js';
 import { createRpcProvider } from '../../config/index.js';
 import type { ServiceInfo } from '../ServiceConfigReader.js';
 
@@ -35,10 +36,10 @@ const TOPUP_THRESHOLD_FRACTION = 0.5;
 const DEFAULT_RESERVE_WEI = ethers.parseEther('0.002');
 
 /** Minimum ETH to keep in Master EOA (needs gas for Safe txns) */
-const EOA_RESERVE_WEI = ethers.parseEther('0.005');
+const EOA_RESERVE_WEI = ethers.parseEther('0.002');
 
 /** Target balance for Master Safe when topping up from Master EOA */
-const MASTER_SAFE_TARGET_WEI = ethers.parseEther('0.02');
+const MASTER_SAFE_TARGET_WEI = ethers.parseEther('0.008');
 
 /** Minimum fund target per address — overrides low config.json values */
 const MIN_FUND_TARGET_WEI = ethers.parseEther('0.002');
@@ -79,8 +80,8 @@ async function readFundRequirements(serviceConfigId: string): Promise<FundRequir
     const config = JSON.parse(raw);
     const homeChain = config.home_chain || 'base';
     const reqs = config.chain_configs?.[homeChain]?.chain_data?.user_params?.fund_requirements?.[ETH_ADDRESS];
-    if (reqs && typeof reqs.agent === 'number' && typeof reqs.safe === 'number') {
-      return reqs;
+    if (reqs && reqs.agent != null && reqs.safe != null) {
+      return { agent: Number(reqs.agent), safe: Number(reqs.safe) };
     }
   } catch (err) {
     log.debug({ serviceConfigId, error: (err as Error).message }, 'Could not read fund_requirements');
@@ -172,6 +173,9 @@ export async function maybeDistributeFunds(
   const agentTransfers: FundTransfer[] = [];
   const safeTransfers: FundTransfer[] = [];
 
+  // OPERATE_PASSWORD needed for key verification
+  const operatePassword = process.env.OPERATE_PASSWORD;
+
   for (const svc of services) {
     if (!svc.serviceSafeAddress || !svc.agentEoaAddress) continue;
 
@@ -179,6 +183,27 @@ export async function maybeDistributeFunds(
     if (!reqs) {
       result.skipped.push(`${svc.serviceConfigId}: no fund_requirements`);
       continue;
+    }
+
+    // SAFETY GATE: verify we can access the agent key before sending ETH.
+    // Never fund a wallet whose private key we can't prove we hold.
+    if (operatePassword) {
+      const keyAccessible = verifyAgentKeyAccessible(
+        svc.serviceConfigId,
+        svc.agentEoaAddress,
+        operatePassword,
+      );
+      if (!keyAccessible) {
+        result.skipped.push(
+          `Service #${svc.serviceId} (${svc.serviceConfigId}): agent key NOT accessible — refusing to fund`,
+        );
+        log.warn({ serviceId: svc.serviceId, agentEoa: svc.agentEoaAddress },
+          'SAFETY: Skipping service funding — agent key verification failed');
+        continue;
+      }
+    } else {
+      log.warn({ serviceId: svc.serviceId },
+        'OPERATE_PASSWORD not set — cannot verify agent key, skipping key verification');
     }
 
     result.checked++;

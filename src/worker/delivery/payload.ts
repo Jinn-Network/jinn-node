@@ -4,11 +4,11 @@
 
 import type { AgentExecutionResult, IpfsMetadata, RecognitionPhaseResult, ReflectionResult } from '../types.js';
 import type { MeasurementCoverage } from '../execution/measurementCoverage.js';
-import type { Provenance } from '../../shared/adw/types.js';
+import type { Provenance } from '../../shared/registry/types.js';
 
 /**
  * Build execution provenance metadata from available params.
- * Returns an ADW Provenance object for embedding in artifacts.
+ * Returns a Provenance object for embedding in artifacts.
  */
 function buildExecutionProvenance(params: {
   requestId: string;

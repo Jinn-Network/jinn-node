@@ -6,15 +6,15 @@
  */
 
 import { graphQLRequest } from '../../http/client.js';
-import { getPonderGraphqlUrl } from '../../agent/mcp/tools/shared/env.js';
 import { workerLogger } from '../../logging/index.js';
+import { config } from '../../config/index.js';
 
 export async function checkDeliveryStatusViaPonder(params: {
   requestId: string;
   maxRetries?: number;
 }): Promise<{ delivered: boolean; txHash?: string; error?: string }> {
   const { requestId, maxRetries = 3 } = params;
-  const PONDER_URL = getPonderGraphqlUrl();
+  const PONDER_URL = config.services.ponderUrl;
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {

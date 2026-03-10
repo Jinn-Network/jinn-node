@@ -1,11 +1,5 @@
 import { workerLogger } from '../../logging/index.js';
-import {
-  getOptionalGeminiApiKey,
-  getOptionalGeminiQuotaBackoffMs,
-  getOptionalGeminiQuotaCheckModel,
-  getOptionalGeminiQuotaCheckTimeoutMs,
-  getOptionalGeminiQuotaMaxBackoffMs,
-} from '../../config/index.js';
+import { config, secrets } from '../../config/index.js';
 import { serializeError } from '../logging/errors.js';
 import { DEFAULT_WORKER_MODEL, normalizeGeminiModel } from '../../shared/gemini-models.js';
 import { OAuth2Client } from 'google-auth-library';
@@ -49,6 +43,13 @@ export interface CredentialSelectionResult {
   selectedCredential: OAuthCredentialSet | null;
   selectedIndex: number;
   allExhausted: boolean;
+}
+
+export interface GeminiQuotaAvailabilityResult extends CredentialSelectionResult {
+  available: boolean;
+  checked?: boolean;
+  detail?: string;
+  retryAfterMs?: number;
 }
 
 const DEFAULT_MODEL = DEFAULT_WORKER_MODEL;
@@ -97,7 +98,7 @@ function normalizeModel(model: string): string {
 }
 
 function resolveModel(preferred?: string): string {
-  const configuredModel = getOptionalGeminiQuotaCheckModel();
+  const configuredModel = config.llm.quotaCheckModel;
   if (configuredModel && configuredModel.trim().length > 0) {
     return normalizeModel(configuredModel);
   }
@@ -118,6 +119,21 @@ function parseRetryAfterMs(value: string | null): number | undefined {
     return Math.max(0, timestamp - Date.now());
   }
   return undefined;
+}
+
+function getNextCredentialCooldownMs(): number | undefined {
+  let nextRetryAfterMs: number | undefined;
+  const now = Date.now();
+
+  for (const expiry of credentialCooldownMap.values()) {
+    const retryAfterMs = expiry - now;
+    if (retryAfterMs <= 0) continue;
+    if (nextRetryAfterMs === undefined || retryAfterMs < nextRetryAfterMs) {
+      nextRetryAfterMs = retryAfterMs;
+    }
+  }
+
+  return nextRetryAfterMs;
 }
 
 function computeBackoffMs(attempt: number, baseMs: number, maxMs: number): number {
@@ -193,7 +209,7 @@ const OAUTH_CLIENT_SECRET = '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';
 
 // Parse multi-credential array from env var
 function parseCredentialsArray(): OAuthCredentialSet[] | null {
-  const credsJson = process.env.GEMINI_OAUTH_CREDENTIALS;
+  const credsJson = secrets.geminiOauthCredentials;
   if (!credsJson) {
     return null;
   }
@@ -411,11 +427,70 @@ export async function selectAvailableCredential(
   return { selectedCredential: null, selectedIndex: -1, allExhausted: true };
 }
 
+export async function checkGeminiQuotaAvailability(
+  options: QuotaWaitOptions = {}
+): Promise<GeminiQuotaAvailabilityResult> {
+  const model = resolveModel(options.model);
+  const selection = await selectAvailableCredential({ model });
+
+  if (selection.selectedCredential) {
+    return {
+      ...selection,
+      available: true,
+      checked: true,
+    };
+  }
+
+  if (!selection.allExhausted) {
+    const result = await checkGeminiQuota({ model });
+    return {
+      ...selection,
+      available: result.ok || !result.checked,
+      checked: result.checked,
+      detail: result.detail,
+      retryAfterMs: result.retryAfterMs,
+    };
+  }
+
+  const apiKey = secrets.geminiApiKey || process.env.GEMINI_API_KEY;
+  if (apiKey) {
+    const apiKeyResult = await checkGeminiQuota({ model });
+    if (apiKeyResult.ok || !apiKeyResult.checked) {
+      clearOAuthCredsFromDisk();
+      return {
+        selectedCredential: null,
+        selectedIndex: -1,
+        allExhausted: false,
+        available: true,
+        checked: apiKeyResult.checked,
+        detail: apiKeyResult.detail,
+        retryAfterMs: apiKeyResult.retryAfterMs,
+      };
+    }
+
+    return {
+      ...selection,
+      available: false,
+      checked: apiKeyResult.checked,
+      detail: apiKeyResult.detail,
+      retryAfterMs: apiKeyResult.retryAfterMs ?? getNextCredentialCooldownMs(),
+    };
+  }
+
+  return {
+    ...selection,
+    available: false,
+    checked: true,
+    detail: 'All OAuth credentials exhausted',
+    retryAfterMs: getNextCredentialCooldownMs(),
+  };
+}
+
 export async function checkGeminiQuota(
   options: QuotaCheckOptions = {}
 ): Promise<QuotaCheckResult> {
   // Existing API key quota check
-  const apiKey = getOptionalGeminiApiKey() || process.env.GEMINI_API_KEY;
+  const apiKey = secrets.geminiApiKey;
   if (!apiKey) {
     return {
       ok: true,
@@ -426,7 +501,7 @@ export async function checkGeminiQuota(
   }
 
   const model = normalizeGeminiModel(resolveModel(options.model), DEFAULT_WORKER_MODEL).normalized;
-  const timeoutMs = options.timeoutMs ?? getOptionalGeminiQuotaCheckTimeoutMs() ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? config.llm.quotaCheckTimeoutMs ?? DEFAULT_TIMEOUT_MS;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -483,105 +558,44 @@ export async function checkGeminiQuota(
 }
 
 export async function waitForGeminiQuota(options: QuotaWaitOptions = {}): Promise<CredentialSelectionResult> {
-  const baseBackoffMs = getOptionalGeminiQuotaBackoffMs() ?? DEFAULT_BACKOFF_MS;
-  const maxBackoffMs = getOptionalGeminiQuotaMaxBackoffMs() ?? DEFAULT_MAX_BACKOFF_MS;
+  const baseBackoffMs = config.llm.quotaBackoffMs ?? DEFAULT_BACKOFF_MS;
+  const maxBackoffMs = config.llm.quotaMaxBackoffMs ?? DEFAULT_MAX_BACKOFF_MS;
   const model = resolveModel(options.model);
 
-  // Try multi-credential rotation first (if GEMINI_OAUTH_CREDENTIALS is set)
-  let selection = await selectAvailableCredential({ model });
+  for (let attempt = 0; ; attempt += 1) {
+    const availability = await checkGeminiQuotaAvailability(options);
 
-  // If multi-credential found an available one, we're done
-  if (selection.selectedCredential) {
-    return selection;
-  }
-
-  // If multi-credential is not configured (selectedIndex === -1 && !allExhausted),
-  // fall back to legacy single-credential behavior
-  if (!selection.allExhausted) {
-    let attempt = 0;
-    for (; ;) {
-      const result = await checkGeminiQuota({ model });
-      if (!result.checked) {
-        if (!loggedMissingKey) {
-          loggedMissingKey = true;
-          workerLogger.info({ model }, 'Skipping Gemini quota check (GEMINI_API_KEY not set)');
-        }
-        return { selectedCredential: null, selectedIndex: -1, allExhausted: false };
+    if (availability.available) {
+      if (availability.selectedCredential) {
+        return availability;
       }
 
-      if (result.ok) {
-        if (result.detail && !loggedNonQuotaFailure) {
-          loggedNonQuotaFailure = true;
-          workerLogger.warn({ model, detail: result.detail }, 'Gemini quota check failed; continuing without wait');
-        }
-        return { selectedCredential: null, selectedIndex: -1, allExhausted: false };
+      if (!loggedMissingKey && availability.checked === false) {
+        loggedMissingKey = true;
+        workerLogger.info({ model }, 'Skipping Gemini quota check (GEMINI_API_KEY not set)');
+      } else if (availability.detail && !loggedNonQuotaFailure) {
+        loggedNonQuotaFailure = true;
+        workerLogger.warn({ model, detail: availability.detail }, 'Gemini quota check failed; continuing without wait');
       }
 
-      const waitMs = result.retryAfterMs && result.retryAfterMs > 0
-        ? Math.min(maxBackoffMs, result.retryAfterMs)
-        : computeBackoffMs(attempt, baseBackoffMs, maxBackoffMs);
-
-      workerLogger.warn({
-        reason: options.reason,
-        requestId: options.requestId,
-        jobName: options.jobName,
-        model,
-        attempt: attempt + 1,
-        waitMs,
-        status: result.status,
-        detail: result.detail,
-      }, 'Gemini quota exhausted; waiting before retry');
-
-      await sleep(waitMs);
-      attempt += 1;
+      return availability;
     }
-  }
 
-  // All OAuth credentials exhausted — try API key as fallback before blocking
-  const apiKey = getOptionalGeminiApiKey() || process.env.GEMINI_API_KEY;
-  if (apiKey) {
-    const apiKeyResult = await checkGeminiQuota({ model });
-    if (apiKeyResult.ok || !apiKeyResult.checked) {
-      workerLogger.info({ model }, 'All OAuth credentials exhausted; falling back to GEMINI_API_KEY');
-      // Remove OAuth creds from ~/.gemini/ so the CLI doesn't pick them up
-      // and instead uses the API key via settings.json selectedType.
-      clearOAuthCredsFromDisk();
-      return { selectedCredential: null, selectedIndex: -1, allExhausted: false };
-    }
-    workerLogger.warn({ model, detail: apiKeyResult.detail }, 'API key also exhausted');
-  }
-
-  // All credentials exhausted - enter backoff loop until one becomes available
-  let backoffAttempt = 0;
-  while (selection.allExhausted) {
-    const waitMs = computeBackoffMs(backoffAttempt, baseBackoffMs, maxBackoffMs);
+    const waitMs = availability.retryAfterMs && availability.retryAfterMs > 0
+      ? Math.min(maxBackoffMs, availability.retryAfterMs)
+      : computeBackoffMs(attempt, baseBackoffMs, maxBackoffMs);
 
     workerLogger.warn({
       reason: options.reason,
       requestId: options.requestId,
       jobName: options.jobName,
       model,
-      attempt: backoffAttempt + 1,
+      attempt: attempt + 1,
       waitMs,
-    }, 'All credentials exhausted; waiting before retry');
+      detail: availability.detail,
+      allExhausted: availability.allExhausted,
+    }, availability.allExhausted ? 'All credentials exhausted; waiting before retry' : 'Gemini quota exhausted; waiting before retry');
 
     await sleep(waitMs);
-    backoffAttempt += 1;
-
-    // Re-check OAuth credentials first
-    selection = await selectAvailableCredential({ model });
-    if (selection.selectedCredential) break;
-
-    // Also check API key on each retry
-    if (apiKey) {
-      const retryResult = await checkGeminiQuota({ model });
-      if (retryResult.ok || !retryResult.checked) {
-        workerLogger.info({ model }, 'OAuth still exhausted; falling back to GEMINI_API_KEY');
-        clearOAuthCredsFromDisk();
-        return { selectedCredential: null, selectedIndex: -1, allExhausted: false };
-      }
-    }
   }
-
-  return selection;
 }

@@ -5,7 +5,8 @@ import {
   type Erc8128Signer,
 } from '../../../../http/erc8128.js';
 import { createProxyHttpSigner } from '../../../shared/signing-proxy-client.js';
-import { getOptionalControlApiUrl, getRequiredChainId, getUseControlApi } from './env.js';
+
+import { config } from '../../../../config/index.js';
 
 type RequestClaim = {
   request_id: string;
@@ -37,7 +38,7 @@ type MessageInput = {
   status?: string;
 };
 
-const CONTROL_API_URL = getOptionalControlApiUrl();
+const CONTROL_API_URL = config.services.controlApiUrl;
 const RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1000; // 1 second
 
@@ -45,7 +46,7 @@ let signerPromise: Promise<Erc8128Signer> | null = null;
 
 async function getControlApiSigner(): Promise<Erc8128Signer> {
   if (!signerPromise) {
-    signerPromise = createProxyHttpSigner(getRequiredChainId());
+    signerPromise = createProxyHttpSigner(config.chain.chainId);
   }
   return signerPromise;
 }
@@ -166,7 +167,7 @@ export async function createMessage(requestId: string, message: MessageInput): P
 }
 
 export function isControlApiEnabled(): boolean {
-  return getUseControlApi();
+  return config.services.useControlApi;
 }
 
 export function shouldUseControlApi(tableName: string): boolean {

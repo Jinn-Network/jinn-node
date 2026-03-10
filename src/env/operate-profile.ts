@@ -17,6 +17,7 @@ import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { configLogger } from '../logging/index.js';
 import { decryptKeystoreV3 } from './keystore-decrypt.js';
+import { secrets } from '../config/index.js';
 import {
   getActiveMechAddress,
   getActiveSafeAddress,
@@ -99,17 +100,11 @@ function resolveOperateHome(): string | null {
     return standaloneCandidate;
   }
 
-  // Fall back to monorepo/submodule mode (<repoRoot>/olas-operate-middleware/.operate)
-  const submoduleCandidate = join(repoRoot, 'olas-operate-middleware', '.operate');
-  if (existsSync(submoduleCandidate)) {
-    return submoduleCandidate;
-  }
-
-  // Neither location exists
+  // .operate directory not found at repo root
   if (!hasAllServiceEnvVars()) {
     configLogger.warn(
-      { standaloneCandidate, submoduleCandidate },
-      '.operate directory not found in standalone or submodule location'
+      { standaloneCandidate },
+      '.operate directory not found at repo root'
     );
   }
   return null;
@@ -470,7 +465,7 @@ export function getServicePrivateKey(): string | null {
 
     if (typeof privateKeyField === 'string' && privateKeyField.startsWith('{')) {
       // New format: encrypted keystore JSON string - decrypt it
-      const password = process.env.OPERATE_PASSWORD;
+      const password = secrets.operatePassword;
       if (!password) {
         throw new Error(
           'Encrypted keystore detected but OPERATE_PASSWORD not set. ' +
@@ -652,7 +647,7 @@ export function getMasterPrivateKey(): string | null {
     return null;
   }
 
-  const password = process.env.OPERATE_PASSWORD;
+  const password = secrets.operatePassword;
   if (password === undefined || password === '') {
     configLogger.warn('OPERATE_PASSWORD env var required to decrypt master wallet');
     return null;

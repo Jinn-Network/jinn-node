@@ -19,20 +19,17 @@ import { existsSync, copyFileSync } from 'fs';
 import { homedir } from 'os';
 import { join, resolve } from 'path';
 import { SimplifiedServiceBootstrap, type SimplifiedBootstrapConfig } from '../worker/SimplifiedServiceBootstrap.js';
+import { stolasBootstrap, stolasPreflightCheck } from '../worker/stolas/StolasServiceBootstrap.js';
 import { logger } from '../logging/index.js';
-import {
-  getRequiredRpcUrl,
-  getOptionalMechChainConfig,
-  getOptionalOperatePassword,
-  getOptionalGeminiApiKey,
-  getOptionalOpenAiApiKey,
-} from '../agent/mcp/tools/shared/env.js';
+import { getMechChainConfig } from '../env/operate-profile.js';
 import { createIsolatedMiddlewareEnvironment, type IsolatedEnvironment } from './test-isolation.js';
 import { runPreflight } from './preflight.js';
-import { printHeader, printStep, printSuccess, printError } from './display.js';
+import { printHeader, printStep, printSuccess, printError, printStolasIntro, printStolasSuccess } from './display.js';
 import { syncCredentials } from '../auth/index.js';
 import { hasAuthManagerCredentials, syncAndWriteGeminiCredentials } from '../worker/llm/authIntegration.js';
 import { DEFAULT_MECH_DELIVERY_RATE } from '../worker/config/MechConfig.js';
+import { SERVICE_CONSTANTS } from '../worker/config/ServiceConfig.js';
+import { config, secrets } from '../config/index.js';
 
 const setupLogger = logger.child({ component: "SETUP-CLI" });
 
@@ -48,8 +45,8 @@ function getLlmAuthStatus(): LlmAuthStatus {
   const hasGeminiOauthEnv = Boolean(process.env.GEMINI_OAUTH_CREDENTIALS);
   const hasGeminiCli = existsSync(join(homedir(), '.gemini', 'oauth_creds.json'));
   const hasAuthStore = hasAuthManagerCredentials();
-  const hasGeminiApiKey = Boolean(getOptionalGeminiApiKey());
-  const hasOpenAiKey = Boolean(getOptionalOpenAiApiKey());
+  const hasGeminiApiKey = Boolean(secrets.geminiApiKey);
+  const hasOpenAiKey = Boolean(secrets.openaiApiKey);
 
   return {
     hasGeminiOauthEnv,
@@ -185,6 +182,7 @@ interface CLIArgs {
   testnet?: boolean;
   noMech?: boolean;
   noStaking?: boolean;
+  stolas?: boolean;
   stakingContract?: string;
   help?: boolean;
   unattended?: boolean;
@@ -205,6 +203,8 @@ function parseArgs(): CLIArgs {
       args.noMech = true;
     } else if (arg === '--no-staking') {
       args.noStaking = true;
+    } else if (arg === '--stolas') {
+      args.stolas = true;
     } else if (arg.startsWith('--staking-contract=')) {
       args.stakingContract = arg.split('=')[1];
     } else if (arg === '--unattended') {
@@ -238,6 +238,8 @@ OPTIONS:
 
   --no-mech           Disable mech deployment (mech enabled by default)
   --no-staking        Disable staking (staking enabled by default)
+  --stolas            Use stOLAS (ExternalStakingDistributor) — no OLAS needed
+                      Funded by LemonTree depositors. Requires only ETH for gas.
   --staking-contract  Custom staking contract address (default: Jinn Staking on Base)
   --unattended        Run middleware in unattended mode (default)
   --isolated          Run in isolated temp directory (fresh .operate, no production state)
@@ -264,6 +266,9 @@ EXAMPLES:
 
   # Deploy in isolated mode (fresh .operate in temp dir)
   npx jinn-setup --testnet --isolated
+
+  # Deploy via stOLAS (no OLAS required, funded by LemonTree)
+  npx jinn-setup --stolas
 
   # Deploy without mech
   npx jinn-setup --chain=base --no-mech
@@ -324,7 +329,7 @@ async function main() {
   await ensureEnvFile(isTestnet);
 
   // Validate environment after potential prompts
-  const operatePassword = getOptionalOperatePassword();
+  const operatePassword = secrets.operatePassword;
   if (!operatePassword) {
     printStep('error', 'OPERATE_PASSWORD is required');
     printError('OPERATE_PASSWORD not set. Add it to .env or export it.');
@@ -332,8 +337,8 @@ async function main() {
   }
 
   // Determine chain and RPC URL
-  const chain = args.chain || getOptionalMechChainConfig() || 'base';
-  const rpcUrl = getRequiredRpcUrl();
+  const chain = args.chain || getMechChainConfig() || 'base';
+  const rpcUrl = secrets.rpcUrl;
 
   if (!rpcUrl) {
     printStep('error', 'RPC_URL is required');
@@ -370,7 +375,7 @@ async function main() {
     console.log(`   Temp dir: ${isolatedEnv.tempDir}\n`);
   }
 
-  const config: SimplifiedBootstrapConfig = {
+  const bootstrapConfig: SimplifiedBootstrapConfig = {
     chain: chain as any,
     operatePassword,
     rpcUrl,
@@ -381,7 +386,7 @@ async function main() {
     mechRequestPrice: mechRequestPrice,
     // Staking enabled by default (use --no-staking to disable)
     stakingProgram: disableStaking ? 'no_staking' : 'custom_staking',
-    customStakingAddress: stakingContract || '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139', // Jinn Staking (Base)
+    customStakingAddress: stakingContract || SERVICE_CONSTANTS.DEFAULT_STAKING_PROGRAM_ID,
     // Isolated environment paths (if --isolated flag used)
     middlewarePath: isolatedEnv?.middlewareDir,
     workingDirectory: isolatedEnv?.tempDir,
@@ -411,13 +416,13 @@ async function main() {
     console.log(`Real funds will be used`);
     console.log(`Staking: ${disableStaking ? 'DISABLED' : 'ENABLED (Jinn Staking)'}`);
     if (!disableStaking) {
-      console.log(`   Contract: ${stakingContract || '0x0dfaFbf570e9E813507aAE18aA08dFbA0aBc5139'}`);
-      console.log(`   Required: ~100 OLAS (50 OLAS bond + 50 OLAS stake)`);
+      console.log(`   Contract: ${stakingContract || SERVICE_CONSTANTS.DEFAULT_STAKING_PROGRAM_ID}`);
+      console.log(`   Required: ~10,000 OLAS (5,000 OLAS bond + 5,000 OLAS stake)`);
     }
-    console.log(`Mech deployment: ${config.deployMech ? 'ENABLED' : 'DISABLED'}`);
-    if (config.deployMech) {
+    console.log(`Mech deployment: ${bootstrapConfig.deployMech ? 'ENABLED' : 'DISABLED'}`);
+    if (bootstrapConfig.deployMech) {
       console.log(`   Request Price: ${mechRequestPrice} wei`);
-      console.log(`   Marketplace: ${config.mechMarketplaceAddress}`);
+      console.log(`   Marketplace: ${bootstrapConfig.mechMarketplaceAddress}`);
     }
     console.log('');
     console.log(`Attended mode: ${attendedMode ? 'ENABLED (interactive prompts)' : 'DISABLED (env-driven)'}`);
@@ -426,16 +431,125 @@ async function main() {
     }
   }
 
+  // ── stOLAS flow ──────────────────────────────────────────────────────────
+  if (args.stolas) {
+    setupLogger.info({
+      chain,
+      mode: args.testnet ? 'testnet' : 'mainnet',
+      isolated: args.isolated || false,
+      rpcUrl: rpcUrl.substring(0, 30) + '...',
+    }, 'Starting stOLAS bootstrap');
+
+    printStolasIntro();
+
+    // Preflight check
+    printStep('active', 'Checking stOLAS prerequisites...');
+    const preflight = await stolasPreflightCheck(rpcUrl);
+    if (!preflight.ok) {
+      printStep('error', 'stOLAS preflight failed');
+      printError(preflight.error || 'Unknown preflight error');
+      process.exit(1);
+    }
+    printStep('done', 'stOLAS preflight passed', `${preflight.slotsRemaining} slots remaining`);
+
+    const basePath = isolatedEnv?.tempDir || process.cwd();
+
+    // ── Ensure wallet + Safe exist (idempotent) ─────────────────────────
+    // Always run the standard bootstrap — it skips wallet/Safe if they
+    // already exist, creates them if missing, and exits at the walletOnly
+    // checkpoint after Safe creation. This fixes the rerun bug where wallet
+    // files existed but the Safe hadn't been created yet.
+    printStep('active', 'Ensuring Master EOA + Safe exist...');
+    const walletBootstrapConfig: SimplifiedBootstrapConfig = {
+      chain: chain as any,
+      operatePassword,
+      rpcUrl,
+      attended: attendedMode,
+      deployMech: false,
+      stakingProgram: 'no_staking',
+      walletOnly: true,
+      middlewarePath: isolatedEnv?.middlewareDir,
+      workingDirectory: isolatedEnv?.tempDir,
+    };
+
+    const walletBootstrap = new SimplifiedServiceBootstrap(walletBootstrapConfig);
+    const walletResult = await walletBootstrap.bootstrap();
+    if (!walletResult.success) {
+      printError(walletResult.error || 'Wallet/Safe creation failed');
+      process.exit(1);
+    }
+    printStep('done', 'Master EOA + Safe ready');
+
+    // Clean up ghost service config created by walletOnly bootstrap.
+    // The middleware persists a service config as a side effect of wallet/Safe creation,
+    // but it has no real on-chain service (ID = -1, staking = "no_staking").
+    // If left in .operate/services/, the worker will try to load it and crash.
+    if (walletResult.serviceConfigId) {
+      const ghostConfigDir = join(basePath, '.operate', 'services', walletResult.serviceConfigId);
+      if (existsSync(ghostConfigDir)) {
+        const { rm } = await import('fs/promises');
+        await rm(ghostConfigDir, { recursive: true });
+        setupLogger.info({ serviceConfigId: walletResult.serviceConfigId }, 'Removed ghost service config from walletOnly bootstrap');
+      }
+    }
+
+    printStep('active', 'Loading Master Safe + generating agent key...');
+    printStep('active', 'Routing stake() through Master Safe...');
+    const result = await stolasBootstrap({
+      rpcUrl,
+      chain,
+      operateBasePath: basePath,
+      operatePassword,
+    });
+
+    if (result.success) {
+      if (result.mechAddress) {
+        printStep('done', 'Mech deployed', result.mechAddress);
+      } else if (result.mechDeployError) {
+        printStep('error', 'Mech deployment deferred — fund Master Safe and run deploy-mech');
+      }
+
+      const resultPath = `/tmp/jinn-stolas-setup-${Date.now()}.json`;
+      const fs = await import('fs/promises');
+      await fs.writeFile(resultPath, JSON.stringify(result, null, 2));
+
+      printStolasSuccess({
+        serviceId: result.serviceId!,
+        serviceConfigId: result.serviceConfigId!,
+        multisig: result.multisig!,
+        operatorAddress: result.agentInstanceAddress!,
+        masterEoaAddress: result.masterEoaAddress,
+        masterSafeAddress: result.masterSafeAddress,
+        mechAddress: result.mechAddress,
+        mechDeployError: result.mechDeployError,
+      });
+      console.log(`  Setup details saved to: ${resultPath}\n`);
+
+      if (isolatedEnv) {
+        console.log(' Cleaning up isolated environment...');
+        await isolatedEnv.cleanup();
+      }
+      process.exit(0);
+    } else {
+      printError(result.error || 'Unknown error');
+      if (isolatedEnv) {
+        await isolatedEnv.cleanup();
+      }
+      process.exit(1);
+    }
+  }
+
+  // ── Standard flow ─────────────────────────────────────────────────────────
   setupLogger.info({
     chain,
-    withMech: config.deployMech,
+    withMech: bootstrapConfig.deployMech,
     mode: args.testnet ? 'testnet' : 'mainnet',
     attended: attendedMode,
     isolated: args.isolated || false,
     rpcUrl: rpcUrl.substring(0, 30) + '...',
   }, 'Starting simplified interactive service setup');
 
-  const bootstrap = new SimplifiedServiceBootstrap(config);
+  const bootstrap = new SimplifiedServiceBootstrap(bootstrapConfig);
 
   let exitCode = 1;
 

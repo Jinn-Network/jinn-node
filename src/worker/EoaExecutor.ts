@@ -31,13 +31,8 @@ import { ExecutionResult } from './types.js';
 import { validateTransaction } from './validation.js';
 import { updateTransactionStatus } from './control_api_client.js';
 import { serializeError } from './logging/errors.js';
-import {
-  getRequiredChainId,
-  getWorkerTxConfirmations,
-  getRequiredRpcUrl,
-  getRequiredWorkerPrivateKey,
-  createRpcProvider,
-} from '../config/index.js';
+import { config, secrets, createRpcProvider } from '../config/index.js';
+import { getServicePrivateKey } from '../env/operate-profile.js';
 
 // Create a child logger for EOA executor operations
 const eoaLogger = logger.child({ component: 'EOA-EXECUTOR' });
@@ -51,12 +46,13 @@ export class EoaExecutor implements ITransactionExecutor {
 
   constructor() {
     // Initialize worker configuration
-    this.chainId = getRequiredChainId();
-    this.confirmations = getWorkerTxConfirmations();
+    this.chainId = config.chain.chainId;
+    this.confirmations = config.worker.txConfirmations;
 
     // Initialize blockchain connection
-    const rpcUrl = getRequiredRpcUrl();
-    const privateKey = getRequiredWorkerPrivateKey();
+    const rpcUrl = secrets.rpcUrl;
+    const privateKey = getServicePrivateKey();
+    if (!privateKey) throw new Error('Worker private key not found in .operate config or environment');
 
     this.provider = createRpcProvider(rpcUrl);
     this.signer = new ethers.Wallet(privateKey, this.provider);
@@ -127,7 +123,7 @@ export class EoaExecutor implements ITransactionExecutor {
    * Update transaction request status in database
    */
   private async updateTransactionStatus(
-    requestId: string, 
+    requestId: string,
     status: 'CONFIRMED' | 'FAILED',
     result: ExecutionResult
   ): Promise<void> {

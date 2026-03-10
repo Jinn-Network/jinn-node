@@ -8,7 +8,7 @@
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { workerLogger } from '../../logging/index.js';
-import { getBlueprintEnableBeads } from '../../config/index.js';
+import { config } from '../../config/index.js';
 
 /**
  * Default .gitignore content for common exclusions
@@ -223,7 +223,7 @@ export async function commitRepoSetup(repoPath: string): Promise<boolean> {
         }
 
         // Stage .beads/issues.jsonl if beads is enabled and files exist
-        if (getBlueprintEnableBeads() && existsSync(beadsJsonlPath)) {
+        if (config.blueprint.enableBeads && existsSync(beadsJsonlPath)) {
             try {
                 execSync('git add .beads/issues.jsonl .beads/metadata.json .beads/.local_version', {
                     cwd: repoPath,

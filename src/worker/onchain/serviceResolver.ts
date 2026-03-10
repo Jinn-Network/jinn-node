@@ -17,7 +17,7 @@
 
 import { ethers } from 'ethers';
 import { workerLogger } from '../../logging/index.js';
-import { createRpcProvider } from '../../config/index.js';
+import { config, secrets, createRpcProvider } from '../../config/index.js';
 
 const log = workerLogger.child({ component: 'SERVICE_RESOLVER' });
 
@@ -161,7 +161,7 @@ const isMain = typeof process !== 'undefined'
 
 if (isMain) {
   const mechAddr = process.env.JINN_SERVICE_MECH_ADDRESS || process.argv[2];
-  const rpcUrl = process.env.RPC_URL || process.argv[3];
+  const rpcUrl = secrets.rpcUrl || process.argv[3];
 
   if (!mechAddr || !rpcUrl) {
     console.error('Usage: tsx serviceResolver.ts <mechAddress> <rpcUrl>');

@@ -197,12 +197,18 @@ export async function createMeasurement(args: unknown) {
   try {
     const parsed = createMeasurementParams.safeParse(args);
     if (!parsed.success) {
+      // Build instructive error from Zod issues
+      const issues = parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
+      const hint = 'Required fields by type — FLOOR: {invariant_type, invariant_id, measured_value, min_threshold, context}, ' +
+        'CEILING: {invariant_type, invariant_id, measured_value, max_threshold, context}, ' +
+        'RANGE: {invariant_type, invariant_id, measured_value, min_threshold, max_threshold, context}, ' +
+        'BOOLEAN: {invariant_type, invariant_id, passed, context}';
       return {
         content: [{
           type: 'text' as const,
           text: JSON.stringify({
             data: null,
-            meta: { ok: false, code: 'VALIDATION_ERROR', message: parsed.error.message }
+            meta: { ok: false, code: 'VALIDATION_ERROR', message: `Validation failed: ${issues}. ${hint}` }
           })
         }]
       };

@@ -21,12 +21,12 @@ import { CronExpressionParser } from 'cron-parser';
 import { workerLogger } from '../../logging/index.js';
 import { listVentures, type Venture } from '../../data/ventures.js';
 import { graphQLRequest } from '../../http/client.js';
-import { getPonderGraphqlUrl } from '../../agent/mcp/tools/shared/env.js';
 import { dispatchFromTemplate } from './ventureDispatch.js';
 import { claimVentureDispatch } from '../control_api_client.js';
 import type { ScheduleEntry } from '../../data/types/scheduleEntry.js';
+import { config } from '../../config/index.js';
 
-const PONDER_GRAPHQL_URL = getPonderGraphqlUrl();
+const PONDER_GRAPHQL_URL = config.services.ponderUrl;
 
 /**
  * Check all active ventures and dispatch any due schedule entries.
@@ -35,10 +35,10 @@ export async function checkAndDispatchScheduledVentures(): Promise<void> {
   try {
     const ventures = await listVentures({ status: 'active' });
 
-    // Respect VENTURE_FILTER env var — only dispatch for filtered ventures
-    const ventureFilter = process.env.VENTURE_FILTER;
-    const allowedIds = ventureFilter
-      ? new Set(ventureFilter.split(',').map(s => s.trim()).filter(Boolean))
+    // Respect venture filter from config (env: VENTURE_FILTER)
+    const ventureFilterList = config.filtering.ventures;
+    const allowedIds = ventureFilterList.length > 0
+      ? new Set(ventureFilterList)
       : null;
 
     const withSchedule = ventures.filter(v => {
@@ -49,7 +49,7 @@ export async function checkAndDispatchScheduledVentures(): Promise<void> {
 
     if (withSchedule.length === 0) return;
 
-    workerLogger.debug({ ventureCount: withSchedule.length, ventureFilter: ventureFilter || 'none' }, 'Venture watcher: checking schedules');
+    workerLogger.debug({ ventureCount: withSchedule.length, ventureFilter: ventureFilterList.length > 0 ? ventureFilterList.join(',') : 'none' }, 'Venture watcher: checking schedules');
 
     for (const venture of withSchedule) {
       const now = new Date();

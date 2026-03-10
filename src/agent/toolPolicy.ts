@@ -201,7 +201,7 @@ export const EXTENSION_META_TOOLS = {
     tools: [...BROWSER_AUTOMATION_TOOLS] as string[],
   },
   // nano_banana: deprecated — Gemini CLI extension unreliable on Railway
-workstream_analysis: {
+  workstream_analysis: {
     installUrl: 'local:gemini-extension',
     extensionName: 'jinn-extensions',
     requiredEnv: [] as readonly string[],
@@ -277,6 +277,22 @@ export const TELEGRAM_TOOLS = [
  */
 export function hasTelegramMessaging(enabledTools: string[]): boolean {
   return enabledTools.includes('telegram_messaging');
+}
+
+/**
+ * Content stream discovery and reading tools (custom MCP tools)
+ * Used to discover and read FEED:* content streams between templates
+ */
+export const CONTENT_STREAM_TOOLS = [
+  'search_content_streams',
+  'read_content_stream',
+] as const;
+
+/**
+ * Check if content streams are enabled in the tools list
+ */
+export function hasContentStreams(enabledTools: string[]): boolean {
+  return enabledTools.includes('content_streams');
 }
 
 /**
@@ -382,6 +398,30 @@ export const REFLECTION_EXCLUDED_TOOLS = [
 /**
  * Complete set of valid tool names that can appear in enabledTools from IPFS metadata.
  * Unknown tools are dropped with a warning to prevent arbitrary tool injection.
+ *
+ * ── Credential bridge (x402) tools ──────────────────────────────────
+ * The following tools require credential bridge access and are NOT
+ * available to external untrusted operators:
+ *
+ *  • Blog (umami/supabase): blog_get_stats, blog_get_top_pages,
+ *    blog_get_referrers, blog_get_metrics, blog_get_pageviews,
+ *    blog_get_performance_summary, blog_create_post, blog_list_posts,
+ *    blog_get_post, blog_delete_post
+ *  • Registry (supabase): venture_mint, venture_query, venture_update,
+ *    venture_delete, template_create, template_query, template_update,
+ *    template_delete, service_registry
+ *  • Telegram: telegram_messaging (meta-tool)
+ *  • Fireflies: fireflies_meetings (meta-tool)
+ *  • Railway: railway_deployment (meta-tool)
+ *  • Twitter: twitter_post_tweet, twitter_get_mentions, twitter_get_timeline
+ *  • OpenAI: embed_text
+ *  • Civitai: civitai_generate_image
+ *  • Schedule: read_dispatch_schedule, update_dispatch_schedule
+ *
+ * When authoring blueprints, do NOT mark credentialled tools as
+ * `required: true` — this blocks the entire workstream for external
+ * operators. Use `required: false` instead so they remain available
+ * when a trusted operator processes the job.
  */
 export const VALID_JOB_TOOLS: ReadonlySet<string> = new Set([
   // Universal tools (always available)
@@ -394,6 +434,7 @@ export const VALID_JOB_TOOLS: ReadonlySet<string> = new Set([
   'telegram_messaging',
   'railway_deployment',
   'fireflies_meetings',
+  'content_streams',
   'nano_banana', // Deprecated but accepted (silently stripped later)
   // Individual tools from meta-tool expansions
   ...BROWSER_AUTOMATION_TOOLS,
@@ -403,6 +444,7 @@ export const VALID_JOB_TOOLS: ReadonlySet<string> = new Set([
   ...TELEGRAM_TOOLS,
   ...FIREFLIES_TOOLS,
   ...RAILWAY_TOOLS,
+  ...CONTENT_STREAM_TOOLS,
   // Dispatch schedule tools (venture orchestration)
   'read_dispatch_schedule',
   'update_dispatch_schedule',
@@ -429,6 +471,9 @@ export const VALID_JOB_TOOLS: ReadonlySet<string> = new Set([
   'twitter_post_tweet',
   'twitter_get_mentions',
   'twitter_get_timeline',
+  // Moltbook (moltbook.ts → getCredential('moltbook'))
+  'moltbook',
+  ...MOLTBOOK_TOOLS,
 ]);
 
 /**
@@ -519,6 +564,14 @@ export function computeToolPolicy(
     expandedTools = [
       ...expandedTools.filter(t => t !== 'fireflies_meetings'),
       ...FIREFLIES_TOOLS
+    ];
+  }
+
+  // Expand content_streams meta-tool to Content Stream MCP tools
+  if (expandedTools.includes('content_streams')) {
+    expandedTools = [
+      ...expandedTools.filter(t => t !== 'content_streams'),
+      ...CONTENT_STREAM_TOOLS
     ];
   }
 

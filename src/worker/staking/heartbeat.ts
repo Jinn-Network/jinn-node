@@ -1,34 +1,39 @@
 /**
- * Staking Heartbeat — Request Count Booster
+ * Staking Heartbeat — Activity Count Booster
  *
- * The WhitelistedRequesterActivityChecker counts marketplace REQUESTS
- * (mapRequestCounts) to determine liveness, but the service is a mech
- * that primarily DELIVERS rather than requests. This module submits
- * periodic lightweight marketplace requests to satisfy the staking
- * liveness requirement for the current epoch window.
+ * v1 staking counts marketplace REQUESTS (mapRequestCounts), so a heartbeat is
+ * just a lightweight request.
  *
- * Each heartbeat request targets our own mech with a trivial payload.
- * The worker auto-delivers these immediately so the ETH round-trips
- * and both request + delivery counts increment.
+ * v2 staking counts marketplace DELIVERIES (mapDeliveryCounts), but heartbeat
+ * requests are self-targeted and never get naturally delivered by the worker.
+ * For those services we submit the request and immediately self-deliver it
+ * through the mech's normal Safe -> mech -> marketplace path.
  *
- * The target is computed dynamically from on-chain livenessRatio and
- * epoch timing, with an optional delay buffer for late checkpoints.
+ * Detection: we compare activityChecker.getMultisigNonces(multisig)[1] against
+ * marketplace.mapRequestCounts(multisig). If they match, the checker is
+ * request-based (v1). If they differ, the checker uses a different metric
+ * (currently deliveries in v2).
+ *
+ * The target is computed dynamically from on-chain livenessRatio and epoch
+ * timing, with an optional delay buffer for late checkpoints.
  */
 
 import { ethers } from 'ethers';
+import { deliverViaSafe } from '@jinn-network/mech-client-ts/dist/post_deliver.js';
 import { workerLogger } from '../../logging/index.js';
-import { getRequiredRpcUrl, createRpcProvider } from '../../config/index.js';
-import { getServicePrivateKey, getServiceSafeAddress, getMechAddress } from '../../env/operate-profile.js';
+import { getServicePrivateKey, getServiceSafeAddress, getMechAddress, getMechChainConfig } from '../../env/operate-profile.js';
 // NOTE: getServiceSafeAddress is only used for the warning log comparing worker vs staking multisig
 import { submitMarketplaceRequest } from '../MechMarketplaceRequester.js';
 import { computeProjectedEpochTarget, readNonNegativeIntEnv, readPositiveIntEnv } from './target.js';
 import type { ServiceInfo } from '../ServiceConfigReader.js';
+import { config, secrets, createRpcProvider } from '../../config/index.js';
+import { acquireSafeLock } from '../safeTxMutex.js';
 
 const log = workerLogger.child({ component: 'HEARTBEAT' });
 
-const DEFAULT_TARGET_REQUESTS = 61;
+const DEFAULT_TARGET_ACTIVITIES = 61;
 const DEFAULT_CHECKPOINT_DELAY_BUFFER_SEC = 0;
-const DEFAULT_SAFETY_MARGIN_REQUESTS = 1;
+const DEFAULT_SAFETY_MARGIN_ACTIVITIES = 1;
 
 const STAKING_ABI = [
   'function livenessPeriod() view returns (uint256)',
@@ -38,37 +43,99 @@ const STAKING_ABI = [
   'function getServiceInfo(uint256 serviceId) view returns (tuple(address multisig, address owner, uint256[] nonces, uint256 tsStart, uint256 reward, uint256 inactivity))',
 ];
 
+const ACTIVITY_CHECKER_ABI = [
+  'function livenessRatio() view returns (uint256)',
+  'function getMultisigNonces(address multisig) view returns (uint256[] memory)',
+];
+
 const MARKETPLACE_ABI = [
   'function mapRequestCounts(address) view returns (uint256)',
 ];
 
+const MECH_ABI = [
+  'function getOperator() view returns (address)',
+];
+
+// ── Checker type detection ──────────────────────────────────────────────────
+
+/**
+ * Detect whether the activity checker counts marketplace requests (v1)
+ * or deliveries (v2).
+ * true = request-based (v1)
+ * false = delivery-based (v2)
+ */
+async function detectRequestBasedChecker(
+  stakingContractAddress: string,
+  marketplaceAddress: string,
+  provider: ethers.JsonRpcProvider,
+  multisig: string,
+): Promise<boolean> {
+  try {
+    const staking = new ethers.Contract(stakingContractAddress, STAKING_ABI, provider);
+    const activityCheckerAddress = await staking.activityChecker();
+    const activityChecker = new ethers.Contract(activityCheckerAddress, ACTIVITY_CHECKER_ABI, provider);
+    const marketplace = new ethers.Contract(marketplaceAddress, MARKETPLACE_ABI, provider);
+
+    const [checkerNonces, requestCount] = await Promise.all([
+      activityChecker.getMultisigNonces(multisig),
+      marketplace.mapRequestCounts(multisig),
+    ]);
+
+    const checkerActivityCount = BigInt(checkerNonces[1]);
+    const marketplaceRequestCount = BigInt(requestCount);
+    const isRequestBased = checkerActivityCount === marketplaceRequestCount;
+
+    log.info({
+      stakingContract: stakingContractAddress,
+      activityChecker: activityCheckerAddress,
+      isRequestBased,
+    }, isRequestBased
+      ? 'Activity checker is request-based (v1)'
+      : 'Activity checker is delivery-based (v2)');
+
+    return isRequestBased;
+  } catch (error: any) {
+    log.warn({ error: error.message }, 'Failed to detect checker type — assuming request-based (v1)');
+    return true; // Fail safe: assume v1
+  }
+}
+
 // Cached staking multisig per service — resolved from on-chain getServiceInfo()
 const resolvedMultisigByService = new Map<number, string>();
 
+async function getStakingMultisig(
+  stakingContract: string,
+  serviceId: number,
+  provider: ethers.JsonRpcProvider,
+): Promise<string> {
+  const cached = resolvedMultisigByService.get(serviceId);
+  if (cached) return cached;
+
+  const staking = new ethers.Contract(stakingContract, STAKING_ABI, provider);
+  const serviceInfo = await staking.getServiceInfo(serviceId);
+  const multisig: string = serviceInfo.multisig;
+  resolvedMultisigByService.set(serviceId, multisig);
+  return multisig;
+}
+
 /**
- * Calculate how many more requests we need to submit this epoch.
+ * Calculate how many more activities we need this epoch.
  *
- * IMPORTANT: The staking multisig (from getServiceInfo on the staking contract)
- * may differ from the worker's configured Safe (JINN_SERVICE_SAFE_ADDRESS).
- * We derive the correct multisig from on-chain and use it for both querying
- * mapRequestCounts and submitting heartbeat requests.
- *
- * The baseline is the on-chain nonces[1] from getServiceInfo — the authoritative
- * request count recorded when the service was staked/checkpointed.
+ * Uses activityChecker.getMultisigNonces() for the current count and
+ * nonces[1] from getServiceInfo for the baseline — both come from the
+ * same activity checker, so the subtraction is always consistent.
  */
-async function getRequestDeficit(
+async function getActivityDeficit(
   stakingContract: string,
   serviceId: number,
   marketplaceAddress: string,
 ): Promise<{ deficit: number; current: number; target: number; epochSecondsRemaining: number; multisig: string }> {
-  const rpcUrl = getRequiredRpcUrl();
-  const provider = createRpcProvider(rpcUrl);
+  const provider = createRpcProvider(secrets.rpcUrl);
 
   const staking = new ethers.Contract(stakingContract, STAKING_ABI, provider);
-  const marketplace = new ethers.Contract(marketplaceAddress, MARKETPLACE_ABI, provider);
   const overrideTarget = readPositiveIntEnv('WORKER_STAKING_TARGET');
   const delayBufferSeconds = readPositiveIntEnv('WORKER_STAKING_CHECKPOINT_DELAY_SEC') ?? DEFAULT_CHECKPOINT_DELAY_BUFFER_SEC;
-  const safetyMarginRequests = readNonNegativeIntEnv('WORKER_STAKING_SAFETY_MARGIN') ?? DEFAULT_SAFETY_MARGIN_REQUESTS;
+  const safetyMarginActivities = readNonNegativeIntEnv('WORKER_STAKING_SAFETY_MARGIN') ?? DEFAULT_SAFETY_MARGIN_ACTIVITIES;
 
   const [tsCheckpoint, nextCheckpoint, serviceInfo, activityCheckerAddress, livenessPeriod] = await Promise.all([
     staking.tsCheckpoint().then(Number),
@@ -89,9 +156,13 @@ async function getRequestDeficit(
     resolvedMultisigByService.set(serviceId, multisig);
   }
 
-  // Baseline from on-chain nonces[1] — authoritative epoch-start request count
-  const baselineRequestCount = Number(serviceInfo.nonces[1]);
-  const currentRequestCount = await marketplace.mapRequestCounts(multisig).then(Number);
+  // Read current activity count from the activity checker (v1/v2 agnostic)
+  const activityChecker = new ethers.Contract(activityCheckerAddress, ACTIVITY_CHECKER_ABI, provider);
+  const currentNonces = await activityChecker.getMultisigNonces(multisig);
+
+  // Baseline from on-chain nonces[1] — authoritative epoch-start activity count
+  const baselineActivityCount = Number(serviceInfo.nonces[1]);
+  const currentActivityCount = Number(currentNonces[1]);
   const targetData = await computeProjectedEpochTarget({
     provider,
     activityCheckerAddress,
@@ -99,21 +170,21 @@ async function getRequestDeficit(
     livenessPeriod,
     delayBufferSeconds,
     overrideTarget,
-    safetyMarginRequests,
+    safetyMarginActivities,
   });
-  const target = targetData.target || DEFAULT_TARGET_REQUESTS;
+  const target = targetData.target || DEFAULT_TARGET_ACTIVITIES;
 
   const now = Math.floor(Date.now() / 1000);
   const epochSecondsRemaining = Math.max(0, nextCheckpoint - now);
 
-  const requestsThisEpoch = currentRequestCount - baselineRequestCount;
-  const deficit = Math.max(0, target - requestsThisEpoch);
+  const activitiesThisEpoch = currentActivityCount - baselineActivityCount;
+  const deficit = Math.max(0, target - activitiesThisEpoch);
 
   log.info({
     multisig,
-    baseline: baselineRequestCount,
-    current: currentRequestCount,
-    requestsThisEpoch,
+    baseline: baselineActivityCount,
+    current: currentActivityCount,
+    activitiesThisEpoch,
     target,
     tsCheckpoint,
     nextCheckpoint,
@@ -123,13 +194,13 @@ async function getRequestDeficit(
     baselineTimestamp: targetData.baselineTimestamp,
     livenessRatio: targetData.livenessRatio.toString(),
     delayBufferSeconds,
-    safetyMarginRequests: targetData.safetyMarginRequests,
+    safetyMarginActivities: targetData.safetyMarginActivities,
     targetFromOverride: targetData.usedOverride,
     deficit,
     epochSecondsRemaining,
   }, 'Epoch deficit check');
 
-  return { deficit, current: currentRequestCount, target, epochSecondsRemaining, multisig };
+  return { deficit, current: currentActivityCount, target, epochSecondsRemaining, multisig };
 }
 
 /**
@@ -141,27 +212,115 @@ async function submitHeartbeat(
   mechAddress: string,
   serviceId: number,
   marketplaceAddress: string,
+  isRequestBased: boolean,
 ): Promise<boolean> {
   const privateKey = getServicePrivateKey();
   if (!privateKey) {
     log.warn('No service private key — cannot submit heartbeat');
     return false;
   }
-  return submitHeartbeatWithCredentials(multisig, mechAddress, privateKey, serviceId, marketplaceAddress);
+  return submitHeartbeatWithCredentials(multisig, mechAddress, privateKey, serviceId, marketplaceAddress, isRequestBased);
+}
+
+/**
+ * Resolve the Safe authorized to call mech.deliverToMarketplace().
+ */
+async function getMechOperatorSafe(
+  mechAddress: string,
+  provider: ethers.JsonRpcProvider,
+): Promise<string> {
+  const mech = new ethers.Contract(mechAddress, MECH_ABI, provider);
+  return mech.getOperator();
+}
+
+/**
+ * Delivery helper for v2 heartbeats.
+ * Routes the dummy delivery through the same Safe/mech path used by normal jobs.
+ */
+async function deliverHeartbeat(
+  requestId: string,
+  mechAddress: string,
+  requesterMultisig: string,
+  agentEoaPrivateKey: string,
+  rpcUrl: string,
+  chainConfig: string,
+): Promise<boolean> {
+  try {
+    const provider = createRpcProvider(rpcUrl);
+    const operatorSafe = await getMechOperatorSafe(mechAddress, provider);
+    const configuredSafe = getServiceSafeAddress();
+
+    if (configuredSafe && configuredSafe.toLowerCase() !== operatorSafe.toLowerCase()) {
+      log.warn({
+        requestId,
+        configuredSafe,
+        operatorSafe,
+      }, 'Configured Safe differs from on-chain mech operator — using on-chain operator for heartbeat delivery');
+    }
+
+    if (requesterMultisig.toLowerCase() !== operatorSafe.toLowerCase()) {
+      log.info({
+        requestId,
+        requesterMultisig,
+        operatorSafe,
+      }, 'Heartbeat requester differs from mech operator — request counts accrue to requester, delivery is sent via mech operator');
+    }
+
+    const releaseLock = await acquireSafeLock(operatorSafe);
+    try {
+      const delivery = await (deliverViaSafe as any)({
+        chainConfig,
+        requestId,
+        resultContent: {
+          heartbeat: true,
+          delivered: true,
+          ts: Date.now(),
+        },
+        targetMechAddress: mechAddress,
+        safeAddress: operatorSafe,
+        privateKey: agentEoaPrivateKey,
+        rpcHttpUrl: rpcUrl,
+        wait: true,
+      });
+
+      if (delivery?.status !== 'confirmed') {
+        log.warn({
+          requestId,
+          txHash: delivery?.tx_hash,
+          status: delivery?.status,
+        }, 'Heartbeat self-delivery did not confirm');
+        return false;
+      }
+
+      log.info({
+        requestId,
+        txHash: delivery?.tx_hash,
+        operatorSafe,
+      }, 'Heartbeat successfully self-delivered via Safe/mech');
+      return true;
+    } finally {
+      releaseLock();
+    }
+  } catch (err: any) {
+    log.warn({ requestId, error: err.message }, 'Failed to self-deliver heartbeat via Safe/mech');
+    return false;
+  }
 }
 
 /**
  * Submit a single heartbeat request with explicit credentials.
  * Used by multi-service mode to submit for any service without swapping context.
  */
-async function submitHeartbeatWithCredentials(
+export async function submitHeartbeatWithCredentials(
   multisig: string,
   mechAddress: string,
   privateKey: string,
   serviceId: number,
   marketplaceAddress: string,
+  isRequestBased: boolean,
+  chainConfig: string = getMechChainConfig(),
 ): Promise<boolean> {
-  const rpcUrl = getRequiredRpcUrl();
+  const rpcUrl = secrets.rpcUrl;
 
   const prompt = JSON.stringify({
     heartbeat: true,
@@ -182,17 +341,29 @@ async function submitHeartbeatWithCredentials(
     },
   });
 
-  if (result.success) {
-    log.info({ txHash: result.transactionHash, gasUsed: result.gasUsed, serviceId }, 'Heartbeat request submitted');
-  } else {
+  if (result.success && result.requestIds && result.requestIds[0]) {
+    log.info({ txHash: result.transactionHash, gasUsed: result.gasUsed, serviceId, requestId: result.requestIds[0] }, 'Heartbeat request submitted');
+
+    if (!isRequestBased) {
+      log.info({
+        serviceId,
+        requestId: result.requestIds[0],
+        chainConfig,
+      }, 'Checker is v2 (delivery-based) — executing self-delivery via Safe/mech to increment mapDeliveryCounts');
+      await deliverHeartbeat(result.requestIds[0], mechAddress, multisig, privateKey, rpcUrl, chainConfig);
+    }
+
+  } else if (!result.success) {
     log.warn({ error: result.error, serviceId }, 'Heartbeat request failed');
+  } else {
+    log.warn({ txHash: result.transactionHash, serviceId }, 'Heartbeat submitted, but no requestId extracted. Cannot self-deliver.');
   }
 
   return result.success;
 }
 
 // Minimum seconds between heartbeat submissions to avoid gas waste
-const HEARTBEAT_MIN_INTERVAL_SEC = parseInt(process.env.HEARTBEAT_MIN_INTERVAL_SEC || '60');
+const HEARTBEAT_MIN_INTERVAL_SEC = config.heartbeat.minIntervalSec;
 
 const lastHeartbeatTimestampByService = new Map<number, number>();
 const lastHeartbeatTimestampBySigner = new Map<string, number>();
@@ -211,8 +382,13 @@ function getSignerKeyForService(service: ServiceInfo): string | null {
  * Maybe submit heartbeat requests to meet the staking liveness requirement.
  * Called periodically from the worker loop.
  *
- * Only submits if there's a deficit of requests for the current epoch.
- * Submits a batch of requests per call to compensate for slow worker cycles.
+ * Only submits if:
+ * 1. The service is below the current epoch target.
+ * 2. For request-based checkers (v1), the heartbeat request itself counts.
+ * 3. For delivery-based checkers (v2), the heartbeat request is immediately
+ *    self-delivered through the mech so the delivery counter increments too.
+ *
+ * Submits one request per call to compensate for slow worker cycles.
  */
 export async function maybeSubmitHeartbeat(
   stakingContract: string,
@@ -227,6 +403,13 @@ export async function maybeSubmitHeartbeat(
     return;
   }
 
+  // Detect checker type — v1 counts requests, v2 counts deliveries
+  // We no longer skip heartbeat for v2, instead we use this flag to explicitly self-deliver the heartbeat.
+  const provider = createRpcProvider(secrets.rpcUrl);
+  const multisig = await getStakingMultisig(stakingContract, serviceId, provider);
+
+  const isRequestBased = await detectRequestBasedChecker(stakingContract, marketplaceAddress, provider, multisig);
+
   // Throttle: don't submit more often than HEARTBEAT_MIN_INTERVAL_SEC
   const now = Math.floor(Date.now() / 1000);
   const lastHeartbeatTimestamp = lastHeartbeatTimestampByService.get(serviceId) ?? 0;
@@ -236,30 +419,30 @@ export async function maybeSubmitHeartbeat(
   }
 
   try {
-    const { deficit, current, target, epochSecondsRemaining, multisig } = await getRequestDeficit(stakingContract, serviceId, marketplaceAddress);
+    const { deficit, current, target, epochSecondsRemaining, multisig: resolvedMultisig } = await getActivityDeficit(stakingContract, serviceId, marketplaceAddress);
 
     if (deficit <= 0) {
-      log.info({ current, target, deficit: 0 }, 'Request target met for this epoch — no heartbeat needed');
+      log.info({ current, target, deficit: 0 }, 'Activity target met for this epoch — no heartbeat needed');
       return;
     }
 
-    // Don't submit if epoch is almost over (< 5 min) — let checkpoint handle it
-    if (epochSecondsRemaining < 300) {
-      log.info({ epochSecondsRemaining, deficit }, 'Epoch ending soon — skipping heartbeat');
-      return;
-    }
+    // NOTE: Do NOT skip heartbeats when the epoch is "ending" or overdue.
+    // checkpoint() hasn't been called yet, so nonces[1] (the baseline) hasn't
+    // updated — requests submitted now still count toward the CURRENT epoch.
+    // Skipping here causes a race condition: heartbeats stop but checkpoint
+    // fires later, freezing the count below the liveness target.
 
     // Submit only 1 request per call — the worker cycles frequently enough
     // and the on-chain baseline is authoritative, preventing overshoot.
     log.info({
       deficit,
-      currentRequestCount: current,
+      currentActivityCount: current,
       target,
       epochSecondsRemaining,
-      multisig,
-    }, `Request deficit: ${deficit} — submitting 1 heartbeat`);
+      multisig: resolvedMultisig,
+    }, `Activity deficit: ${deficit} — submitting 1 heartbeat`);
 
-    await submitHeartbeat(multisig, mechAddress, serviceId, marketplaceAddress);
+    await submitHeartbeat(resolvedMultisig, mechAddress, serviceId, marketplaceAddress, isRequestBased);
 
     lastHeartbeatTimestampByService.set(serviceId, Math.floor(Date.now() / 1000));
   } catch (error: any) {
@@ -308,17 +491,20 @@ export async function maybeSubmitHeartbeatForService(
   }
 
   try {
-    const { deficit, current, target, epochSecondsRemaining, multisig } = await getRequestDeficit(stakingContract, serviceId, marketplaceAddress);
+    // Detect checker type
+    const provider = createRpcProvider(secrets.rpcUrl);
+    const detectionMultisig = await getStakingMultisig(stakingContract, serviceId, provider);
+    const isRequestBased = await detectRequestBasedChecker(stakingContract, marketplaceAddress, provider, detectionMultisig);
+
+    const { deficit, current, target, epochSecondsRemaining, multisig } = await getActivityDeficit(stakingContract, serviceId, marketplaceAddress);
 
     if (deficit <= 0) {
       log.info({ serviceId, current, target, deficit: 0 }, 'Request target met for this epoch — no heartbeat needed');
       return;
     }
 
-    if (epochSecondsRemaining < 300) {
-      log.info({ serviceId, epochSecondsRemaining, deficit }, 'Epoch ending soon — skipping heartbeat');
-      return;
-    }
+    // NOTE: Do NOT skip heartbeats when the epoch is ending/overdue.
+    // checkpoint() hasn't fired yet — requests still count toward current epoch.
 
     log.info({
       deficit,
@@ -329,7 +515,15 @@ export async function maybeSubmitHeartbeatForService(
       serviceId,
     }, `Request deficit: ${deficit} — submitting 1 heartbeat`);
 
-    await submitHeartbeatWithCredentials(multisig, service.mechContractAddress, service.agentPrivateKey, serviceId, marketplaceAddress);
+    await submitHeartbeatWithCredentials(
+      multisig,
+      service.mechContractAddress,
+      service.agentPrivateKey,
+      serviceId,
+      marketplaceAddress,
+      isRequestBased,
+      service.chain,
+    );
 
     lastHeartbeatTimestampByService.set(serviceId, Math.floor(Date.now() / 1000));
     if (signerKey) {
