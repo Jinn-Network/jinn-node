@@ -1,13 +1,12 @@
 export {
-  ADW_DOCUMENT_TYPES,
-  ADW_CONTEXT,
-  ADW_REGISTRATION_TYPE,
+  DOCUMENT_TYPES,
+  REGISTRATION_TYPE,
 } from './types.js';
 
 export type {
-  ADWDocumentType,
-  ADWRegistrationFile,
-  ADWIdentifier,
+  DocumentType,
+  RegistrationFile,
+  Identifier,
   StorageLocation,
   Provenance,
   ProvenanceSource,
@@ -19,7 +18,7 @@ export type {
   TemplateProfile,
   ArtifactProfile,
   ConfigurationProfile,
-  ADWProfile,
+  Profile,
 } from './types.js';
 
 export {
@@ -30,4 +29,4 @@ export {
 
 export type { BuildRegistrationFileParams as RegistrationParams } from './registration.js';
 
-export { signRegistrationFile, ADW_EIP712_DOMAIN, ADW_EIP712_TYPES } from './signing.js';
+export { signRegistrationFile, EIP712_DOMAIN, EIP712_TYPES } from './signing.js';

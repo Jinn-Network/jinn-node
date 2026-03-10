@@ -43,10 +43,10 @@ import { DEFAULT_WORKER_MODEL, normalizeGeminiModel, validateModelAllowed } from
 import type { UnclaimedRequest, IpfsMetadata, AgentExecutionResult, FinalStatus, ExecutionSummaryDetails, RecognitionPhaseResult, ReflectionResult, AdditionalContext } from '../types.js';
 import { getDependencyBranchInfo } from '../mech_worker.js';
 import { config } from '../../config/index.js';
-import { waitForGeminiQuota, isGeminiQuotaError, markCredentialExhausted } from '../llm/geminiQuota.js';
-
+import { checkGeminiQuotaAvailability, isGeminiQuotaError, markCredentialExhausted } from '../llm/geminiQuota.js';
 
 const DEFAULT_BASE_BRANCH = config.git.defaultBaseBranch;
+const MAX_GEMINI_EXECUTION_ATTEMPTS = 3;
 
 /**
  * Process a single job request
@@ -375,14 +375,23 @@ export async function processOnce(
       model: metadata?.model || DEFAULT_WORKER_MODEL,
     });
     try {
-      let executionAttempt = 0;
-      for (; ;) {
-        const quotaResult = await waitForGeminiQuota({
+      for (let executionAttempt = 0; executionAttempt < MAX_GEMINI_EXECUTION_ATTEMPTS; executionAttempt += 1) {
+        const quotaResult = await checkGeminiQuotaAvailability({
           reason: executionAttempt === 0 ? 'pre_execution' : 'execution_retry',
           requestId: target.id,
           jobName: metadata?.jobName,
           model: metadata?.model,
         });
+
+        if (!quotaResult.available) {
+          const retryAfterSeconds = quotaResult.retryAfterMs && quotaResult.retryAfterMs > 0
+            ? Math.ceil(quotaResult.retryAfterMs / 1000)
+            : null;
+          const retryAfterMessage = retryAfterSeconds
+            ? ` Retry after about ${retryAfterSeconds}s.`
+            : '';
+          throw new Error(`Gemini quota unavailable before execution.${retryAfterMessage}`);
+        }
 
         try {
           result = await runAgentForRequest(target, metadata);
@@ -394,7 +403,9 @@ export async function processOnce(
             if (quotaResult.selectedIndex >= 0) {
               markCredentialExhausted(quotaResult.selectedIndex);
             }
-            executionAttempt += 1;
+            if (executionAttempt + 1 >= MAX_GEMINI_EXECUTION_ATTEMPTS) {
+              throw new Error(`Gemini quota exhausted after ${MAX_GEMINI_EXECUTION_ATTEMPTS} execution attempts`);
+            }
             continue;
           }
           throw agentError;

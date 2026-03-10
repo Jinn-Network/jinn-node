@@ -1,15 +1,14 @@
 /**
- * ADW (Agentic Document Web) Type Definitions
+ * Document Registry Type Definitions
  *
- * Implements the core metadata schema from ADW Specification v0.1.
- * See: docs/spec/adw-v0.1.md
+ * Metadata schema for ERC-8004 Identity Registry document registration.
  */
 
 // ---------------------------------------------------------------------------
 // Document Types
 // ---------------------------------------------------------------------------
 
-export const ADW_DOCUMENT_TYPES = [
+export const DOCUMENT_TYPES = [
   'adw:Blueprint',
   'adw:Skill',
   'adw:Template',
@@ -19,19 +18,19 @@ export const ADW_DOCUMENT_TYPES = [
   'adw:AgentCard',
 ] as const;
 
-export type ADWDocumentType = (typeof ADW_DOCUMENT_TYPES)[number];
+export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 
 // ---------------------------------------------------------------------------
-// Cross-System Identifiers (Section 3.5)
+// Cross-System Identifiers
 // ---------------------------------------------------------------------------
 
-export interface ADWIdentifier {
-  system: 'adw' | 'erc8004' | 'ens' | 'olas' | 'did' | string;
+export interface Identifier {
+  system: 'erc8004' | 'ens' | 'olas' | 'did' | string;
   id: string;
 }
 
 // ---------------------------------------------------------------------------
-// Storage Locations (Section 8)
+// Storage Locations
 // ---------------------------------------------------------------------------
 
 export interface StorageLocation {
@@ -42,7 +41,7 @@ export interface StorageLocation {
 }
 
 // ---------------------------------------------------------------------------
-// Provenance (Section 7)
+// Provenance
 // ---------------------------------------------------------------------------
 
 export interface ProvenanceSource {
@@ -76,7 +75,7 @@ export interface Provenance {
 }
 
 // ---------------------------------------------------------------------------
-// Trust & Verification (Section 6)
+// Trust & Verification
 // ---------------------------------------------------------------------------
 
 export interface CreatorProof {
@@ -97,7 +96,7 @@ export interface Trust {
 }
 
 // ---------------------------------------------------------------------------
-// Type-Specific Profiles (Section 4.3)
+// Type-Specific Profiles
 // ---------------------------------------------------------------------------
 
 export interface BlueprintProfile {
@@ -156,7 +155,7 @@ export interface ConfigurationProfile {
   parameters?: Record<string, unknown>;
 }
 
-export type ADWProfile =
+export type Profile =
   | BlueprintProfile
   | SkillProfile
   | TemplateProfile
@@ -165,17 +164,15 @@ export type ADWProfile =
   | Record<string, unknown>;
 
 // ---------------------------------------------------------------------------
-// Registration File (Section 4.1 + 4.2)
+// Registration File
 // ---------------------------------------------------------------------------
 
-export const ADW_CONTEXT = 'https://adw.dev/v0.1';
-export const ADW_REGISTRATION_TYPE = 'https://adw.dev/v0.1#registration';
+export const REGISTRATION_TYPE = 'https://eips.ethereum.org/EIPS/eip-8004#registration-v1';
 
-export interface ADWRegistrationFile {
+export interface RegistrationFile {
   // Core metadata (REQUIRED)
-  type: typeof ADW_REGISTRATION_TYPE;
-  '@context': typeof ADW_CONTEXT;
-  documentType: ADWDocumentType;
+  type: typeof REGISTRATION_TYPE;
+  documentType: DocumentType;
   version: string;
   name: string;
   description: string;
@@ -190,9 +187,9 @@ export interface ADWRegistrationFile {
   supersedes?: string;
   supersededBy?: string | null;
   deprecated?: boolean;
-  identifiers?: ADWIdentifier[];
+  identifiers?: Identifier[];
   storage?: StorageLocation[];
   provenance?: Provenance;
   trust?: Trust;
-  profile?: ADWProfile;
+  profile?: Profile;
 }

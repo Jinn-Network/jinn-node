@@ -1,26 +1,26 @@
 /**
- * ADW Registration File Builder
+ * Registration File Builder
  *
- * Pure function that constructs an ADW Registration File from existing
+ * Pure function that constructs a Registration File from existing
  * artifact/document data. No IO — just data mapping.
  */
 
 import type {
-  ADWRegistrationFile,
-  ADWDocumentType,
-  ADWProfile,
+  RegistrationFile,
+  DocumentType,
+  Profile,
   Provenance,
   Trust,
   StorageLocation,
-  ADWIdentifier,
+  Identifier,
 } from './types.js';
-import { ADW_CONTEXT, ADW_REGISTRATION_TYPE } from './types.js';
+import { REGISTRATION_TYPE } from './types.js';
 
 export interface BuildRegistrationFileParams {
   // Required fields
   contentHash: string;
   name: string;
-  documentType: ADWDocumentType;
+  documentType: DocumentType;
   creator: string;
 
   // Optional core
@@ -33,17 +33,17 @@ export interface BuildRegistrationFileParams {
   license?: string;
   language?: string;
   supersedes?: string;
-  identifiers?: ADWIdentifier[];
+  identifiers?: Identifier[];
   storage?: StorageLocation[];
   provenance?: Provenance;
   trust?: Trust;
-  profile?: ADWProfile;
+  profile?: Profile;
 }
 
 /**
- * Build an ADW Registration File from artifact/document data.
+ * Build a Registration File from artifact/document data.
  *
- * Maps existing Jinn fields to ADW spec:
+ * Maps existing Jinn fields to ERC-8004 registration metadata:
  *   cid          → contentHash
  *   name         → name
  *   topic        → profile.topic (for artifacts)
@@ -51,7 +51,7 @@ export interface BuildRegistrationFileParams {
  *   tags         → tags
  *   worker addr  → creator (formatted as eip155:8453:0x...)
  */
-export function buildRegistrationFile(params: BuildRegistrationFileParams): ADWRegistrationFile {
+export function buildRegistrationFile(params: BuildRegistrationFileParams): RegistrationFile {
   const {
     contentHash,
     name,
@@ -71,9 +71,8 @@ export function buildRegistrationFile(params: BuildRegistrationFileParams): ADWR
     profile,
   } = params;
 
-  const registration: ADWRegistrationFile = {
-    type: ADW_REGISTRATION_TYPE,
-    '@context': ADW_CONTEXT,
+  const registration: RegistrationFile = {
+    type: REGISTRATION_TYPE,
     documentType,
     version,
     name,
@@ -98,7 +97,7 @@ export function buildRegistrationFile(params: BuildRegistrationFileParams): ADWR
 }
 
 /**
- * Format a wallet address as an ADW creator identifier.
+ * Format a wallet address as a creator identifier.
  * Uses CAIP-10 format: eip155:{chainId}:{address}
  */
 export function formatCreatorId(address: string, chainId: number = 8453): string {

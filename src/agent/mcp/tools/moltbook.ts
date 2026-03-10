@@ -218,6 +218,247 @@ Returns your agent name, karma score, post count, comment count, and subscriptio
 };
 
 // ============================================
+// Verification Challenge Solver
+// ============================================
+
+// Moltbook uses garbled "lobster math" captchas to verify posts/comments.
+// The challenge text has random punctuation, case alternation, and letter
+// repetitions. We degarble it, extract numbers, detect the operation, and
+// return the answer as "X.XX".
+
+const WORD_CORRECTIONS: Record<string, string> = {
+    thre: 'three', fourten: 'fourteen', fiften: 'fifteen',
+    sixten: 'sixteen', seventen: 'seventeen', eighten: 'eighteen',
+    nineten: 'nineteen', twety: 'twenty', thrty: 'thirty',
+    fty: 'fifty', sxty: 'sixty', sevnty: 'seventy',
+    eghty: 'eighty', nnety: 'ninety',
+    hundrd: 'hundred', thousnd: 'thousand',
+    lobstr: 'lobster', twnty: 'twenty', thrte: 'thirty',
+    fife: 'five', fve: 'five', hre: 'three',
+    hirty: 'thirty', irty: 'thirty', hirteen: 'thirteen',
+    ourteen: 'fourteen', ifteen: 'fifteen', ixteen: 'sixteen',
+    ighteen: 'eighteen', ineteen: 'nineteen',
+    wenty: 'twenty', enty: 'twenty',
+    orty: 'forty', ighty: 'eighty', inety: 'ninety',
+    sped: 'speed', gans: 'gains', gan: 'gain',
+};
+
+const NUMBER_WORDS: Record<string, number> = {
+    zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5,
+    six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
+    sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
+    thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70,
+    eighty: 80, ninety: 90, hundred: 100, thousand: 1000,
+};
+
+const NUMBER_TARGETS = new Set([
+    ...Object.keys(NUMBER_WORDS),
+    'total', 'force', 'distance', 'lobster', 'newtons', 'meters', 'seconds',
+    'minutes', 'centimeters', 'kilometers', 'increases', 'decreases',
+    'accelerates', 'decelerates', 'molting', 'antenna', 'exerts',
+]);
+
+function degarble(challenge: string): { cleaned: string; explicitOp: string | null } {
+    // Detect explicit math operators in raw text
+    let explicitOp: string | null = null;
+    if (/\d\s*\+\s*\d/.test(challenge)) explicitOp = 'add';
+    else if (/\d\s*[*\u00d7]\s*\d/.test(challenge) || /[*\u00d7]/.test(challenge)) explicitOp = 'multiply';
+    else if (/\d\s*\/\s*\d/.test(challenge)) explicitOp = 'divide';
+    else if (/\d\s+-\s+\d/.test(challenge)) explicitOp = 'subtract';
+
+    // Strip non-alphanumeric, lowercase, collapse repeated chars
+    let clean = challenge.replace(/[^a-zA-Z0-9\s]/g, '').toLowerCase();
+    clean = clean.replace(/(.)\1{2,}/g, '$1');
+    clean = clean.replace(/(.)\1+/g, '$1');
+
+    // Apply word corrections
+    let words = clean.split(/\s+/).map(w => WORD_CORRECTIONS[w] ?? w);
+
+    // Rejoin space-split number fragments
+    const rejoined: string[] = [];
+    let i = 0;
+    while (i < words.length) {
+        let matched = false;
+        for (const span of [5, 4, 3, 2]) {
+            if (i + span <= words.length) {
+                const combined = words.slice(i, i + span).join('');
+                const corrected = WORD_CORRECTIONS[combined] ?? combined;
+                if (NUMBER_TARGETS.has(combined) || NUMBER_TARGETS.has(corrected)) {
+                    rejoined.push(NUMBER_TARGETS.has(combined) ? combined : corrected);
+                    i += span;
+                    matched = true;
+                    break;
+                }
+            }
+        }
+        if (!matched) { rejoined.push(words[i]); i++; }
+    }
+
+    return { cleaned: rejoined.join(' '), explicitOp };
+}
+
+function extractNumbers(raw: string, cleaned: string): number[] {
+    const digitNums: number[] = [];
+    let digitMatch: RegExpExecArray | null;
+    const digitRe = /\b(\d+(?:\.\d+)?)\b/g;
+    while ((digitMatch = digitRe.exec(raw)) !== null) {
+        digitNums.push(parseFloat(digitMatch[1]));
+    }
+
+    const words = cleaned.split(/\s+/);
+    const found: number[] = [];
+    let i = 0;
+    while (i < words.length) {
+        const w = words[i].toLowerCase();
+        if (w in NUMBER_WORDS) {
+            let val = NUMBER_WORDS[w];
+            if (i + 1 < words.length && words[i + 1].toLowerCase() in NUMBER_WORDS) {
+                const nextVal = NUMBER_WORDS[words[i + 1].toLowerCase()];
+                if (val >= 20 && nextVal < 10) { val += nextVal; i++; }
+                else if (val >= 100 && nextVal < 100) { val += nextVal; i++; }
+            }
+            found.push(val);
+        }
+        i++;
+    }
+
+    return [...found, ...digitNums];
+}
+
+function solveChallenge(challenge: string): string | null {
+    const { cleaned, explicitOp } = degarble(challenge);
+    const foundNums = extractNumbers(challenge, cleaned);
+
+    // Deduplicate preserving order
+    const sameNumPattern = /(\d+)\s*[+\-*/\u00d7]\s*\1/.test(challenge);
+    let uniqueNums: number[];
+    if (sameNumPattern) {
+        uniqueNums = foundNums.slice(0, 2);
+    } else {
+        const seen = new Set<number>();
+        uniqueNums = [];
+        for (const n of foundNums) {
+            if (!seen.has(n)) { seen.add(n); uniqueNums.push(n); }
+        }
+    }
+
+    if (uniqueNums.length < 2) return null;
+
+    const [a, b] = uniqueNums;
+
+    // Priority 1: Explicit operator
+    if (explicitOp) {
+        let result: number;
+        if (explicitOp === 'add') result = a + b;
+        else if (explicitOp === 'subtract') result = a - b;
+        else if (explicitOp === 'multiply') result = a * b;
+        else result = b !== 0 ? a / b : 0;
+        return result.toFixed(2);
+    }
+
+    const text = cleaned;
+
+    // Priority 2: Rate * time pattern
+    const rateWords = ['per second', 'per sec', 'per minute', 'per min', 'per hour', 'cm per', 'meters per'];
+    const subtractWords = ['slow', 'slows', 'reduce', 'reduces', 'resistance', 'decelerate', 'loses',
+        'drops', 'decreases', 'minus', 'subtract', 'less', 'gave away', 'spent', 'remaining', 'left over'];
+    const hasRate = rateWords.some(w => text.includes(w));
+    const hasSubtract = subtractWords.some(w => text.includes(w));
+
+    const numWordsPattern = Object.keys(NUMBER_WORDS).filter(w => NUMBER_WORDS[w] <= 100).join('|');
+    const durationRe = new RegExp(`\\bfor\\s+(\\d+|${numWordsPattern})\\s+(seconds?|minutes?|hours?|secs?|mins?)\\b`);
+    const durationMatch = text.match(durationRe);
+
+    if (hasRate && durationMatch && !hasSubtract) {
+        const durStr = durationMatch[1];
+        const timeVal = /^\d+$/.test(durStr) ? parseFloat(durStr) : (NUMBER_WORDS[durStr] ?? 0);
+        if (timeVal) return (a * timeVal).toFixed(2);
+    }
+
+    // Priority 3: Keyword-based operation detection
+    if (text.includes('each')) return (a * b).toFixed(2);
+
+    const addWords = ['plus', 'added', 'adds', 'more than', 'additional', 'gained', 'gains', 'gain',
+        'accelerates', 'faster', 'increases', 'speeds', 'more', 'earns', 'collects', 'gathers', 'receives', 'gets'];
+    if (addWords.some(w => text.includes(w))) return (a + b).toFixed(2);
+    if (hasSubtract) return (a - b).toFixed(2);
+
+    const mulWords = ['times', 'multiply', 'multiplied', 'multiplies', 'multi'];
+    if (mulWords.some(w => text.includes(w))) return (a * b).toFixed(2);
+
+    const divWords = ['divided', 'divide', 'split', 'shared equally'];
+    if (divWords.some(w => text.includes(w))) return (b !== 0 ? a / b : 0).toFixed(2);
+
+    // Default: sum
+    return uniqueNums.reduce((s, n) => s + n, 0).toFixed(2);
+}
+
+interface VerificationChallenge {
+    challenge_text?: string;
+    verification_code?: string;
+}
+
+/**
+ * Auto-verify content after creation if a verification challenge is returned.
+ * One-shot only — never retries to avoid account suspension.
+ */
+async function autoVerify(
+    apiKey: string,
+    verification: VerificationChallenge | undefined,
+): Promise<{ verified: boolean; answer?: string; error?: string }> {
+    if (!verification?.challenge_text || !verification?.verification_code) {
+        return { verified: false, error: 'No verification challenge in response' };
+    }
+
+    const answer = solveChallenge(verification.challenge_text);
+    if (answer === null) {
+        return { verified: false, error: 'Could not solve challenge — left content pending to avoid suspension' };
+    }
+
+    try {
+        const resp = await fetch(`${MOLTBOOK_BASE_URL}/verify`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                verification_code: verification.verification_code,
+                answer,
+            }),
+            signal: AbortSignal.timeout(15000),
+        });
+
+        const data = await resp.json() as { success?: boolean };
+        return { verified: !!data.success, answer };
+    } catch (err) {
+        return { verified: false, answer, error: err instanceof Error ? err.message : String(err) };
+    }
+}
+
+/**
+ * Extract verification challenge from a nested API response.
+ * The challenge can be at result.verification, result.post.verification,
+ * or result.comment.verification.
+ */
+function extractVerification(result: unknown): VerificationChallenge | undefined {
+    if (!result || typeof result !== 'object') return undefined;
+    const r = result as Record<string, unknown>;
+    for (const key of ['verification', 'post', 'comment', 'data']) {
+        const obj = r[key];
+        if (obj && typeof obj === 'object') {
+            const o = obj as Record<string, unknown>;
+            if ('challenge_text' in o) return o as VerificationChallenge;
+            if ('verification' in o && typeof o.verification === 'object') {
+                return o.verification as VerificationChallenge;
+            }
+        }
+    }
+    return undefined;
+}
+
+// ============================================
 // Tool Implementations
 // ============================================
 
@@ -314,6 +555,17 @@ export async function moltbookCreatePost(args: unknown) {
             ...(content && { content }),
             ...(url && { url }),
         });
+
+        // Auto-verify if challenge is present
+        const verification = extractVerification(result);
+        if (verification) {
+            const verifyResult = await autoVerify(config.apiKey, verification);
+            return formatMcpResponse({
+                ...(typeof result === 'object' ? result : { raw: result }),
+                _verification: verifyResult,
+            });
+        }
+
         return formatMcpResponse(result);
     } catch (error: unknown) {
         return formatMcpError('EXECUTION_ERROR', error instanceof Error ? error.message : String(error));
@@ -345,6 +597,17 @@ export async function moltbookCreateComment(args: unknown) {
             content,
             ...(parent_id && { parent_id }),
         });
+
+        // Auto-verify if challenge is present
+        const verification = extractVerification(result);
+        if (verification) {
+            const verifyResult = await autoVerify(config.apiKey, verification);
+            return formatMcpResponse({
+                ...(typeof result === 'object' ? result : { raw: result }),
+                _verification: verifyResult,
+            });
+        }
+
         return formatMcpResponse(result);
     } catch (error: unknown) {
         return formatMcpError('EXECUTION_ERROR', error instanceof Error ? error.message : String(error));

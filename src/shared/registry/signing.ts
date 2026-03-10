@@ -1,5 +1,5 @@
 /**
- * ADW EIP-712 Creator Signing
+ * EIP-712 Creator Signing
  *
  * Uses the worker's existing private key to produce an EIP-712 signature
  * binding creator to content hash. The signature is stored in the Registration
@@ -7,18 +7,18 @@
  * to Level 1 (Signed).
  */
 
-import type { ADWRegistrationFile, CreatorProof, Trust } from './types.js';
+import type { RegistrationFile, CreatorProof, Trust } from './types.js';
 
-// EIP-712 domain separator for ADW
-export const ADW_EIP712_DOMAIN = {
-  name: 'Agentic Document Web',
-  version: '0.1',
+// EIP-712 domain separator for Jinn Document Registry
+export const EIP712_DOMAIN = {
+  name: 'Jinn Document Registry',
+  version: '1.0',
   chainId: 8453, // Base
 } as const;
 
-// EIP-712 type definitions for ADW document signing
-export const ADW_EIP712_TYPES = {
-  ADWDocument: [
+// EIP-712 type definitions for document signing
+export const EIP712_TYPES = {
+  Document: [
     { name: 'contentHash', type: 'string' },
     { name: 'documentType', type: 'string' },
     { name: 'version', type: 'string' },
@@ -27,7 +27,7 @@ export const ADW_EIP712_TYPES = {
 } as const;
 
 /**
- * Sign an ADW Registration File with EIP-712, returning the trust block.
+ * Sign a Registration File with EIP-712, returning the trust block.
  *
  * Requires viem at runtime — kept as a dynamic import so the pure types/builder
  * module stays zero-dependency.
@@ -37,7 +37,7 @@ export const ADW_EIP712_TYPES = {
  * @returns Trust object with creatorProof containing the EIP-712 signature
  */
 export async function signRegistrationFile(
-  registration: Pick<ADWRegistrationFile, 'contentHash' | 'documentType' | 'version' | 'created'>,
+  registration: Pick<RegistrationFile, 'contentHash' | 'documentType' | 'version' | 'created'>,
   privateKey: `0x${string}`,
 ): Promise<Trust> {
   const { createWalletClient, http } = await import('viem');
@@ -61,9 +61,9 @@ export async function signRegistrationFile(
 
   const signature = await client.signTypedData({
     account,
-    domain: ADW_EIP712_DOMAIN,
-    types: ADW_EIP712_TYPES,
-    primaryType: 'ADWDocument',
+    domain: EIP712_DOMAIN,
+    types: EIP712_TYPES,
+    primaryType: 'Document',
     message,
   });
 

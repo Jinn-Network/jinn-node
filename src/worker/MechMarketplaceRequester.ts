@@ -18,6 +18,7 @@ import { logger } from '../logging/index.js';
 import { createRpcProvider } from '../config/index.js';
 import { pushMetadataToIpfs } from '@jinn-network/mech-client-ts/dist/ipfs.js';
 import { acquireSafeLock } from './safeTxMutex.js';
+import { DEFAULT_MECH_DELIVERY_RATE } from './config/MechConfig.js';
 
 const requestLogger = logger.child({ component: 'MECH-MARKETPLACE-REQUESTER' });
 
@@ -193,8 +194,18 @@ export async function submitMarketplaceRequest(
 
     requestLogger.debug({
       mechPaymentType,
-      mechMaxDeliveryRate: ethers.formatEther(mechMaxDeliveryRate),
+      mechMaxDeliveryRate: mechMaxDeliveryRate.toString(),
     }, 'Mech parameters');
+
+    // JINN-449: Warn if priority mech's on-chain rate differs from our hardcoded rate.
+    // External mechs in the staking pool may have rate != 99.
+    if (mechMaxDeliveryRate !== BigInt(DEFAULT_MECH_DELIVERY_RATE)) {
+      requestLogger.warn({
+        mechRate: mechMaxDeliveryRate.toString(),
+        requestRate: DEFAULT_MECH_DELIVERY_RATE,
+        mechContractAddress,
+      }, 'Priority mech on-chain rate differs from request rate — using hardcoded rate');
+    }
 
     // Use provided price or mech's max delivery rate
     const finalPrice = requestPriceWei ? BigInt(requestPriceWei) : mechMaxDeliveryRate;
@@ -226,13 +237,17 @@ export async function submitMarketplaceRequest(
     }
 
     // 6. Encode marketplace request call
+    // JINN-449: Use our hardcoded rate (99), NOT the priority mech's on-chain rate.
+    // External mechs in the staking pool may have rate 100, which would allow
+    // any mech with rate ≤ 100 to deliver — bypassing our rate constraint.
+    const requestMaxDeliveryRate = BigInt(DEFAULT_MECH_DELIVERY_RATE);
     const marketplaceCallData = marketplace.interface.encodeFunctionData('request', [
-      requestData,           // bytes (single request data)
-      mechMaxDeliveryRate,   // uint256 (use mech's rate)
-      mechPaymentType,       // bytes32
-      mechContractAddress,   // address (priority mech)
-      clampedTimeout,        // uint256
-      '0x',                  // bytes (payment data)
+      requestData,              // bytes (single request data)
+      requestMaxDeliveryRate,   // uint256 — hardcoded to 99 (JINN-449)
+      mechPaymentType,          // bytes32
+      mechContractAddress,      // address (priority mech)
+      clampedTimeout,           // uint256
+      '0x',                     // bytes (payment data)
     ]);
 
     // 7. Build and sign Safe transaction (under mutex to prevent nonce collisions)

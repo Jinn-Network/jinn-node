@@ -17,7 +17,7 @@ import { marketplaceInteract } from '@jinn-network/mech-client-ts/dist/marketpla
 import { shouldStop } from './cycleControl.js';
 import { checkAndDispatchScheduledVentures } from './ventures/ventureWatcher.js';
 import { acquireSafeLock } from './safeTxMutex.js';
-import { waitForGeminiQuota } from './llm/geminiQuota.js';
+import { checkGeminiQuotaAvailability } from './llm/geminiQuota.js';
 import { recordIdleCycle, recordExecutionTime, updateFleetState } from './healthcheck.js';
 import { maybeDistributeFunds } from './funding/FundDistributor.js';
 import { getMechAddressesForMultipleContracts, parseStakingContracts } from './filters/stakingFilter.js';
@@ -1765,6 +1765,7 @@ async function processOnce(): Promise<boolean> {
   // Try to claim a request — verify venture credentials BEFORE claiming.
   // There's no unclaim API, so we must confirm eligibility before taking ownership.
   let target: UnclaimedRequest | null = null;
+  let quotaAvailableNow: boolean | null = null;
   for (const c of candidates) {
     if (executedJobsThisSession.has(c.id)) continue;
 
@@ -1788,6 +1789,32 @@ async function processOnce(): Promise<boolean> {
           { requestId: c.id, error: err instanceof Error ? err.message : String(err) },
           'Cannot verify venture credentials — skipping credential-requiring job',
         );
+        continue;
+      }
+    }
+
+    if (c.jobName !== '__heartbeat__') {
+      if (quotaAvailableNow === null) {
+        const quotaResult = await checkGeminiQuotaAvailability({
+          reason: 'pre_claim',
+          requestId: c.id,
+          jobName: c.jobName,
+        });
+        quotaAvailableNow = quotaResult.available;
+
+        if (!quotaAvailableNow) {
+          const retryAfterSeconds = quotaResult.retryAfterMs && quotaResult.retryAfterMs > 0
+            ? Math.ceil(quotaResult.retryAfterMs / 1000)
+            : null;
+          workerLogger.warn({
+            requestId: c.id,
+            retryAfterSeconds,
+            detail: quotaResult.detail,
+          }, 'Gemini quota unavailable before claim — skipping agent jobs this cycle');
+        }
+      }
+
+      if (!quotaAvailableNow) {
         continue;
       }
     }
@@ -1867,10 +1894,6 @@ async function processOnce(): Promise<boolean> {
       responseTimeout: target.responseTimeout,
     }, 'Non-own-mech request past priority window — will execute and deliver via own mech');
   }
-
-  // Wait for quota only after successful claim (lazy quota check)
-  // This eliminates quota API calls during idle periods
-  await waitForGeminiQuota({ reason: 'pre_execution' });
 
   // Delegate job execution to orchestrator
   try {
