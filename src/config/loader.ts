@@ -130,8 +130,12 @@ export function loadNodeConfig(
         const raw = readFileSync(configPath, 'utf-8');
         yamlContent = YAML.parse(raw) || {};
     } else {
-        // Auto-generate
-        configPath = writeDefaultConfigIfMissing(effectiveBaseDir);
+        // No jinn.yaml found — try to auto-generate, but tolerate read-only filesystems
+        try {
+            configPath = writeDefaultConfigIfMissing(effectiveBaseDir);
+        } catch {
+            // Read-only filesystem (e.g. Railway container) — proceed with defaults
+        }
     }
 
     // 2. Build env var overrides
