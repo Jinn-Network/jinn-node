@@ -294,7 +294,7 @@ const dependencyCancelAttempts = new Map<string, number>();
 const WORKER_CHECKPOINT_CYCLES = parseInt(process.env.WORKER_CHECKPOINT_CYCLES || '1');
 
 // Staking heartbeat: submit marketplace requests to meet liveness requirement.
-// At 30s base poll, 16 cycles = ~8 min. Submits 1 request per check if deficit exists.
+// At 30s base poll, 5 cycles = ~2.5 min. Submits 1 request per check if deficit exists.
 const WORKER_HEARTBEAT_CYCLES = config.worker.heartbeatCycles;
 
 // Venture watcher: check dispatch schedules every N cycles (~ every 2-3 min at default polling)

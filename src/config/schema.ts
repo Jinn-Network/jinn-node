@@ -40,7 +40,7 @@ export const workerSchema = z.object({
     poll_max_ms: z.coerce.number().int().positive().default(300000),
     poll_backoff_factor: z.coerce.number().positive().default(1.5),
     checkpoint_cycles: z.coerce.number().int().positive().default(60),
-    heartbeat_cycles: z.coerce.number().int().positive().default(16),
+    heartbeat_cycles: z.coerce.number().int().positive().default(5),
     venture_watcher_cycles: z.coerce.number().int().positive().default(3),
     fund_check_cycles: z.coerce.number().int().positive().default(120),
     repost_check_cycles: z.coerce.number().int().positive().default(10),
@@ -56,7 +56,7 @@ export const workerSchema = z.object({
     /** 0 = run forever; >0 = exit after N poll cycles */
     max_cycles: z.coerce.number().int().nonnegative().default(0),
     /** 0 = disabled; >0 = exit if no new work claimed for N cycles */
-    stuck_exit_cycles: z.coerce.number().int().nonnegative().default(0),
+    stuck_exit_cycles: z.coerce.number().int().nonnegative().default(5),
     enable_venture_watcher: boolCoerce.default(false),
     enable_auto_repost: boolCoerce.default(false),
     /** If true, only process heartbeat/buzz jobs — skip real workstreams */
@@ -137,8 +137,8 @@ export const gitSchema = z.object({
     ssh_host_alias: z.string().default(''),
     workspace_dir: z.string().default(''),
     repo_root: z.string().default(''),
-    author_name: z.string().default(''),
-    author_email: z.string().default(''),
+    author_name: z.string().default('Jinn Worker'),
+    author_email: z.string().default('worker@jinn.network'),
 });
 
 /** Logging output configuration. */
