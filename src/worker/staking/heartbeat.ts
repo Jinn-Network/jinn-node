@@ -41,7 +41,11 @@ const STAKING_ABI = [
   'function getNextRewardCheckpointTimestamp() view returns (uint256)',
   'function activityChecker() view returns (address)',
   'function getServiceInfo(uint256 serviceId) view returns (tuple(address multisig, address owner, uint256[] nonces, uint256 tsStart, uint256 reward, uint256 inactivity))',
+  'function getStakingState(uint256 serviceId) view returns (uint8)',
 ];
+
+// OLAS staking states
+const STAKING_STATE_STAKED = 1;
 
 const ACTIVITY_CHECKER_ABI = [
   'function livenessRatio() view returns (uint256)',
@@ -403,9 +407,22 @@ export async function maybeSubmitHeartbeat(
     return;
   }
 
+  const provider = createRpcProvider(secrets.rpcUrl);
+
+  // Check staking state — skip heartbeats for evicted/unstaked services to avoid wasting gas
+  try {
+    const staking = new ethers.Contract(stakingContract, STAKING_ABI, provider);
+    const stakingState = Number(await staking.getStakingState(serviceId));
+    if (stakingState !== STAKING_STATE_STAKED) {
+      log.warn({ serviceId, stakingState }, 'Service is not staked (evicted or unstaked) — skipping heartbeat');
+      return;
+    }
+  } catch (err: any) {
+    log.warn({ serviceId, error: err.message }, 'Failed to check staking state — proceeding with heartbeat');
+  }
+
   // Detect checker type — v1 counts requests, v2 counts deliveries
   // We no longer skip heartbeat for v2, instead we use this flag to explicitly self-deliver the heartbeat.
-  const provider = createRpcProvider(secrets.rpcUrl);
   const multisig = await getStakingMultisig(stakingContract, serviceId, provider);
 
   const isRequestBased = await detectRequestBasedChecker(stakingContract, marketplaceAddress, provider, multisig);
@@ -468,6 +485,20 @@ export async function maybeSubmitHeartbeatForService(
 
   log.info({ stakingContract, serviceId, serviceConfigId: service.serviceConfigId }, 'Heartbeat check starting');
 
+  const provider = createRpcProvider(secrets.rpcUrl);
+
+  // Check staking state — skip heartbeats for evicted/unstaked services to avoid wasting gas
+  try {
+    const staking = new ethers.Contract(stakingContract, STAKING_ABI, provider);
+    const stakingState = Number(await staking.getStakingState(serviceId));
+    if (stakingState !== STAKING_STATE_STAKED) {
+      log.warn({ serviceId, stakingState, serviceConfigId: service.serviceConfigId }, 'Service is not staked (evicted or unstaked) — skipping heartbeat');
+      return;
+    }
+  } catch (err: any) {
+    log.warn({ serviceId, error: err.message }, 'Failed to check staking state — proceeding with heartbeat');
+  }
+
   // Throttle per service
   const now = Math.floor(Date.now() / 1000);
   const lastHeartbeatTimestamp = lastHeartbeatTimestampByService.get(serviceId) ?? 0;
@@ -492,7 +523,6 @@ export async function maybeSubmitHeartbeatForService(
 
   try {
     // Detect checker type
-    const provider = createRpcProvider(secrets.rpcUrl);
     const detectionMultisig = await getStakingMultisig(stakingContract, serviceId, provider);
     const isRequestBased = await detectRequestBasedChecker(stakingContract, marketplaceAddress, provider, detectionMultisig);
 
