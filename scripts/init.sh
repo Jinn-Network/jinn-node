@@ -5,6 +5,17 @@
 set -e
 
 # =============================================================================
+# HOME Directory Alignment
+# =============================================================================
+# Railpack/Nixpacks containers run as root (HOME=/root) but the Railway volume
+# mounts at /home/jinn. Align HOME so that homedir(), ~/.gemini, ~/.operate etc.
+# resolve to the volume mount where credentials and state live.
+if [ -n "$RAILWAY_VOLUME_MOUNT_PATH" ] && [ "$HOME" != "$RAILWAY_VOLUME_MOUNT_PATH" ]; then
+  export HOME="$RAILWAY_VOLUME_MOUNT_PATH"
+  echo "[init] Set HOME=$HOME (aligned with volume mount)"
+fi
+
+# =============================================================================
 # Git Identity Configuration
 # =============================================================================
 # Git requires user.name and user.email for commits. Configure from env vars.
