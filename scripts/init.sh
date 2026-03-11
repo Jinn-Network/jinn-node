@@ -101,6 +101,19 @@ SETTINGS
   echo "[init] Configured Gemini CLI for API key auth (forced)"
 fi
 
+# Hydrate OAuth credentials from env vars (base64-encoded) if not already on disk.
+# These are set once via Railway env vars and persisted to the volume.
+if [ -n "$GEMINI_OAUTH_CREDS_B64" ] && [ ! -f ~/.gemini/oauth_creds.json ]; then
+  echo "$GEMINI_OAUTH_CREDS_B64" | base64 -d > ~/.gemini/oauth_creds.json
+  chmod 600 ~/.gemini/oauth_creds.json
+  echo "[init] Wrote OAuth creds to ~/.gemini/oauth_creds.json"
+fi
+
+if [ -n "$GEMINI_GOOGLE_ACCOUNTS_B64" ] && [ ! -f ~/.gemini/google_accounts.json ]; then
+  echo "$GEMINI_GOOGLE_ACCOUNTS_B64" | base64 -d > ~/.gemini/google_accounts.json
+  echo "[init] Wrote Google accounts to ~/.gemini/google_accounts.json"
+fi
+
 echo "[init] Ensured ~/.gemini exists"
 
 # =============================================================================
