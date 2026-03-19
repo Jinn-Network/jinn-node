@@ -176,6 +176,30 @@ export const blogSchema = z.object({
     umami_website_id: z.string().default(''),
 });
 
+/** Restoration marketplace — EIP-8183 invariant restoration loop. */
+export const restorationSchema = z.object({
+    /** Master switch — when true, worker runs CREATE/DELIVER/EVALUATE sessions instead of processOnce */
+    enabled: boolCoerce.default(true),
+    /** Deployed ACPCore address on Base */
+    acp_core_address: z.string().default('0x16213AB6a660A24f36d4F8DdACA7a3d0856A8AF5'),
+    /** MarketplaceProxy address (wraps ACPCore for open claiming) */
+    proxy_address: z.string().default(''),
+    /** RestorationActivityChecker address */
+    activity_checker_address: z.string().default(''),
+    /** Default evaluator address for CREATE sessions */
+    default_evaluator_address: z.string().default(''),
+    /** Minimum CREATE sessions per staking epoch */
+    min_creates_per_epoch: z.coerce.number().int().nonnegative().default(1),
+    /** Minimum DELIVER sessions per staking epoch */
+    min_delivers_per_epoch: z.coerce.number().int().nonnegative().default(1),
+    /** Minimum EVALUATE sessions per staking epoch */
+    min_evaluates_per_epoch: z.coerce.number().int().nonnegative().default(1),
+    /** LLM model for restoration sessions */
+    model: z.string().default('gemini-2.5-flash'),
+    /** Path to poller checkpoint file */
+    poller_checkpoint_path: z.string().default('.poller-checkpoint.json'),
+});
+
 /** Development and testing flags — not for production operators. */
 export const devSchema = z.object({
     node_env: z.enum(['development', 'production', 'test']).default('development'),
@@ -218,6 +242,7 @@ export const configSchema = z.object({
     blog: blogSchema.default({}),
     dev: devSchema.default({}),
     playwright: playwrightSchema.default({}),
+    restoration: restorationSchema.default({}),
 });
 
 /**

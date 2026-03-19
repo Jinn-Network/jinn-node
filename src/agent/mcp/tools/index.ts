@@ -97,3 +97,30 @@ export { updateDispatchSchedule, updateDispatchScheduleParams, updateDispatchSch
 export { searchContentStreams, searchContentStreamsParams, searchContentStreamsSchema, type SearchContentStreamsParams } from './search-content-streams.js';
 export { readContentStream, readContentStreamParams, readContentStreamSchema, type ReadContentStreamParams } from './read-content-stream.js';
 
+// Restoration marketplace tools (EIP-8183 + ERC-8004)
+export {
+  createRestorationJobSchema,
+  listAvailableJobsSchema,
+  claimJobSchema,
+  submitDeliverableSchema,
+  listSubmittedJobsSchema,
+  getDeliverableSchema,
+  completeJobSchema,
+  rejectJobSchema,
+  create8004DocumentSchema,
+  search8004DocumentsSchema,
+} from './restoration/index.js';
+
+export {
+  handleCreateRestorationJob,
+  handleListAvailableJobs,
+  handleClaimJob,
+  handleSubmitDeliverable,
+  handleListSubmittedJobs,
+  handleGetDeliverable,
+  handleCompleteJob,
+  handleRejectJob,
+  handleCreate8004Document,
+  handleSearch8004Documents,
+} from './restoration/handlers.js';
+

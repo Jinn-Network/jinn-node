@@ -41,6 +41,12 @@ import { maybeSubmitHeartbeat, maybeSubmitHeartbeatForService } from './staking/
 import { resolveServiceConfig, clearServiceConfigCache, type ResolvedServiceConfig } from './onchain/serviceResolver.js';
 import { checkAndRestakeServices } from './staking/restake.js';
 import { ensureOperatorRegistered } from './register-operator.js';
+import { SessionRouter } from './sessions/SessionRouter.js';
+import { SessionType, type SessionResult } from './sessions/types.js';
+import { RestorationMarketplace, ActivityType } from './contracts/RestorationMarketplace.js';
+import { EventPoller } from './polling/EventPoller.js';
+import { runAgentForRequest } from './execution/runAgent.js';
+import { initHandlers } from '../agent/mcp/tools/restoration/handlers.js';
 
 export { formatSummaryForPr, autoCommitIfNeeded } from './git/autoCommit.js';
 
@@ -2046,8 +2052,125 @@ async function main() {
     workerLogger.info({ everyCycles: WORKER_VENTURE_WATCHER_CYCLES }, 'Venture watcher enabled');
   }
 
+  // ============ SessionRouter for Restoration Mode (JINN-457) ============
+  let sessionRouter: SessionRouter | null = null;
+  const restorationConfig = config.restoration;
+
+  if (restorationConfig.enabled) {
+    const proxyAddress = restorationConfig.proxyAddress;
+    const activityCheckerAddress = restorationConfig.activityCheckerAddress;
+    const acpCoreAddress = restorationConfig.acpCoreAddress;
+
+    if (!proxyAddress || !activityCheckerAddress) {
+      workerLogger.error('Restoration mode enabled but proxy_address or activity_checker_address not configured');
+    } else {
+      try {
+        const marketplace = new RestorationMarketplace({
+          acpCoreAddress,
+          proxyAddress,
+          activityCheckerAddress,
+        });
+
+        const poller = new EventPoller({
+          acpAddress: acpCoreAddress,
+          checkpointPath: restorationConfig.pollerCheckpointPath,
+        });
+
+        // Initialize MCP tool handlers with marketplace/poller context
+        initHandlers({
+          marketplace,
+          poller,
+          defaultEvaluator: restorationConfig.defaultEvaluatorAddress || undefined,
+        });
+
+        const multisigAddress = resolvedConfig?.safe ?? getServiceSafeAddress() ?? '';
+
+        sessionRouter = new SessionRouter({
+          marketplace,
+          poller,
+          multisigAddress,
+          sessionConfig: {
+            minCreatesPerEpoch: restorationConfig.minCreatesPerEpoch,
+            minDeliversPerEpoch: restorationConfig.minDeliversPerEpoch,
+            minEvaluatesPerEpoch: restorationConfig.minEvaluatesPerEpoch,
+          },
+          executeSession: async (prompt: string, sessionType: SessionType, tools: string[]) => {
+            const startTime = Date.now();
+            try {
+              const requestId = `restoration-${sessionType.toLowerCase()}-${Date.now()}`;
+              const fakeRequest: UnclaimedRequest = {
+                id: requestId,
+                mech: getMechAddress() ?? '',
+                requester: multisigAddress,
+                workstreamId: `restoration-${sessionType.toLowerCase()}`,
+                enabledTools: tools,
+                jobName: `__restoration_${sessionType.toLowerCase()}__`,
+              };
+
+              const fakeMetadata = {
+                prompt,
+                blueprint: '{}',
+                enabledTools: tools,
+                model: restorationConfig.model,
+                jobName: fakeRequest.jobName,
+                jobDefinitionId: `restoration-${sessionType.toLowerCase()}`,
+                workstreamId: fakeRequest.workstreamId,
+              };
+
+              const result = await runAgentForRequest(fakeRequest, fakeMetadata as any);
+
+              // Record activity on-chain for OLAS staking
+              const pk = getServicePrivateKey();
+              if (pk && multisigAddress) {
+                const { Wallet: EthWallet, JsonRpcProvider: EthProvider } = await import('ethers');
+                const activityWallet = new EthWallet(pk, new EthProvider(secrets.rpcUrl));
+                const sessionToActivity: Record<SessionType, ActivityType> = {
+                  [SessionType.CREATE]: ActivityType.CREATE,
+                  [SessionType.DELIVER]: ActivityType.DELIVER,
+                  [SessionType.EVALUATE]: ActivityType.EVALUATE,
+                };
+                try {
+                  await marketplace.recordActivity(activityWallet, multisigAddress, sessionToActivity[sessionType]);
+                } catch (e: any) {
+                  workerLogger.warn({ error: e?.message }, 'Failed to record activity on-chain (non-fatal)');
+                }
+              }
+
+              return {
+                type: sessionType,
+                success: !!result.output && !result.telemetry?.error,
+                durationMs: Date.now() - startTime,
+                error: result.telemetry?.error ? String(result.telemetry.error) : undefined,
+              } satisfies SessionResult;
+            } catch (err: any) {
+              return {
+                type: sessionType,
+                success: false,
+                error: err?.message ?? String(err),
+                durationMs: Date.now() - startTime,
+              } satisfies SessionResult;
+            }
+          },
+        });
+
+        workerLogger.info({
+          proxyAddress,
+          activityCheckerAddress,
+          acpCoreAddress,
+          multisigAddress,
+        }, 'Restoration mode enabled — SessionRouter initialized');
+      } catch (e: any) {
+        workerLogger.error({ error: serializeError(e) }, 'SessionRouter initialization failed');
+      }
+    }
+  }
+
   if (SINGLE_SHOT) {
-    await processOnce();
+    if (sessionRouter) {
+      await sessionRouter.processOnce();
+    } else {
+      await processOnce();
+    }
     await signingProxy.close().catch(() => { });
     await flushLogger();
     process.exit(0);
@@ -2245,7 +2368,21 @@ async function main() {
         }
       }
 
-      const jobProcessed = await processOnce();
+      let jobProcessed: boolean;
+      if (sessionRouter) {
+        const sessionResult = await sessionRouter.processOnce();
+        jobProcessed = sessionResult !== null && sessionResult.success;
+        if (sessionResult) {
+          workerLogger.info({
+            sessionType: sessionResult.type,
+            success: sessionResult.success,
+            jobId: sessionResult.jobId,
+            durationMs: sessionResult.durationMs,
+          }, 'Restoration session completed');
+        }
+      } else {
+        jobProcessed = await processOnce();
+      }
       const cycleEnd = Date.now();
       const cycleDurationMs = cycleEnd - cycleStart;
 

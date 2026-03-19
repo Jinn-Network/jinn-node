@@ -74,6 +74,17 @@ export const REGISTERED_MCP_TOOLS = [
   // Content stream tools
   'search_content_streams',
   'read_content_stream',
+  // Restoration marketplace tools (EIP-8183 + ERC-8004)
+  'create_restoration_job',
+  'list_available_jobs',
+  'claim_job',
+  'submit_deliverable',
+  'list_submitted_jobs',
+  'get_deliverable',
+  'complete_job',
+  'reject_job',
+  'create_8004_document',
+  'search_8004_documents',
 ] as const;
 
 async function main() {
@@ -183,6 +194,17 @@ async function main() {
       // Content stream tools
       { name: 'search_content_streams', schema: tools.searchContentStreamsSchema, handler: tools.searchContentStreams },
       { name: 'read_content_stream', schema: tools.readContentStreamSchema, handler: tools.readContentStream },
+      // Restoration marketplace tools (EIP-8183 + ERC-8004)
+      { name: 'create_restoration_job', schema: tools.createRestorationJobSchema, handler: tools.handleCreateRestorationJob },
+      { name: 'list_available_jobs', schema: tools.listAvailableJobsSchema, handler: tools.handleListAvailableJobs },
+      { name: 'claim_job', schema: tools.claimJobSchema, handler: tools.handleClaimJob },
+      { name: 'submit_deliverable', schema: tools.submitDeliverableSchema, handler: tools.handleSubmitDeliverable },
+      { name: 'list_submitted_jobs', schema: tools.listSubmittedJobsSchema, handler: tools.handleListSubmittedJobs },
+      { name: 'get_deliverable', schema: tools.getDeliverableSchema, handler: tools.handleGetDeliverable },
+      { name: 'complete_job', schema: tools.completeJobSchema, handler: tools.handleCompleteJob },
+      { name: 'reject_job', schema: tools.rejectJobSchema, handler: tools.handleRejectJob },
+      { name: 'create_8004_document', schema: tools.create8004DocumentSchema, handler: tools.handleCreate8004Document },
+      { name: 'search_8004_documents', schema: tools.search8004DocumentsSchema, handler: tools.handleSearch8004Documents },
     ];
 
     // Initialize the dynamic tool registry (internal) for dynamic enums

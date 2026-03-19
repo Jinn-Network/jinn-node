@@ -158,6 +158,18 @@ const ALIAS_TABLE: AliasEntry[] = [
     { env: 'ENABLE_TRANSACTION_EXECUTOR', path: 'dev.enable_transaction_executor', priority: 0 },
     { env: 'WORKER_ID', path: 'dev.worker_id', priority: 0 },
 
+    // restoration marketplace
+    { env: 'ENABLE_RESTORATION_MODE', path: 'restoration.enabled', priority: 0 },
+    { env: 'ACP_CORE_ADDRESS', path: 'restoration.acp_core_address', priority: 0 },
+    { env: 'MARKETPLACE_PROXY_ADDRESS', path: 'restoration.proxy_address', priority: 0 },
+    { env: 'ACTIVITY_CHECKER_ADDRESS', path: 'restoration.activity_checker_address', priority: 0 },
+    { env: 'DEFAULT_EVALUATOR_ADDRESS', path: 'restoration.default_evaluator_address', priority: 0 },
+    { env: 'MIN_CREATES_PER_EPOCH', path: 'restoration.min_creates_per_epoch', priority: 0 },
+    { env: 'MIN_DELIVERS_PER_EPOCH', path: 'restoration.min_delivers_per_epoch', priority: 0 },
+    { env: 'MIN_EVALUATES_PER_EPOCH', path: 'restoration.min_evaluates_per_epoch', priority: 0 },
+    { env: 'RESTORATION_MODEL', path: 'restoration.model', priority: 0 },
+    { env: 'POLLER_CHECKPOINT_PATH', path: 'restoration.poller_checkpoint_path', priority: 0 },
+
     // playwright
     { env: 'PLAYWRIGHT_CHANNEL', path: 'playwright.channel', priority: 0 },
     { env: 'PLAYWRIGHT_FAST', path: 'playwright.fast', priority: 0 },
